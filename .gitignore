@@ -12,3 +12,38 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# facelab: eigenstaendiges espidf-Experiment. Quellen sind klein, aber der
+# Build zieht die halbe IDF plus managed_components nach - das gehoert nicht
+# ins Repo.
+esp32-s3-sense/facelab/.pio/
+esp32-s3-sense/facelab/managed_components/
+esp32-s3-sense/facelab/sdkconfig
+esp32-s3-sense/facelab/sdkconfig.*
+!esp32-s3-sense/facelab/sdkconfig.defaults
+esp32-s3-sense/facelab/dependencies.lock
+
+# --- ESP-IDF build artefacts (firmware env runs framework = arduino, espidf) ---
+# Fetched component sources. This is the node_modules of the IDF world.
+esp32-s3-sense/managed_components/
+# GENERATED sdkconfig. Tracking this actively caused a bug on 2026-08-26: a
+# stale committed copy (with picolibc selected) silently overrode
+# sdkconfig.defaults, and the build died in espressif__cbor on a missing
+# fopencookie(). sdkconfig.defaults is only read when no sdkconfig exists, so a
+# checked-in generated one is a trap. Keep the defaults, never the output.
+esp32-s3-sense/sdkconfig.*
+!esp32-s3-sense/sdkconfig.defaults
+
+# --- Agent tooling ---------------------------------------------------------
+# The repo carries exactly ONE agent instruction file: AGENTS.md (the
+# vendor-neutral convention). Tool-specific filenames are symlinks to it and
+# tool-specific config is local, so nothing here is tied to one vendor.
+# See the top of AGENTS.md for the symlink commands.
+GEMINI.md
+CONVENTIONS.md
+.cursor/
+.cursorrules
+.codex/
+.gemini/
+.aider*
+.github/copilot-instructions.md

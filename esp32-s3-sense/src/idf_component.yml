@@ -1,0 +1,12 @@
+## Verwaltete ESP-IDF-Komponenten fuer [env:xiao_esp32s3].
+##
+## esp-dl ist in den vorkompilierten Arduino-Bibliotheken von Core 3.x nicht
+## enthalten, wohl aber als Komponente in der Plattform - deshalb laeuft das
+## Firmware-Env als "arduino, espidf". Die Kamera muss hier ebenfalls als
+## Komponente kommen, im Arduino-Modus war sie in den Libs dabei.
+dependencies:
+  idf:
+    version: ">=5.3"
+  ## Zieht esp-dl selbst als Abhaengigkeit mit. Unterstuetzt esp32s3.
+  espressif/human_face_detect: "*"
+  espressif/esp32-camera: "*"

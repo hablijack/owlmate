@@ -1,7 +1,17 @@
 # Name,   Type, SubType, Offset,   Size,     Flags
+# 2026-08-26 neu aufgeteilt. Grund: mit esp-dl fuer die Gesichtserkennung
+# braucht die Firmware ~3,23 MB, die alten 3,00-MB-Slots reichten nicht.
+#
+# Die 1,875-MB-SPIFFS-Partition war ungenutzt (kein SPIFFS/LittleFS/FFat
+# irgendwo im Code) und wurde auf die beiden OTA-Slots verteilt: jetzt
+# 0x3F0000 = 4,03 MB pro Slot, also ~78 % Belegung statt 103 %.
+#
+# nvs bleibt bewusst bei 0x9000/0x6000 - dort liegen die BNO055-
+# Kalibrierungsoffsets, die sonst verloren waeren.
+# App-Partitionen muessen auf 0x10000 ausgerichtet sein; 0x20000 und 0x410000
+# sind es. Summe: 0x410000 + 0x3F0000 = 0x800000 = genau 8 MB.
 nvs,      data, nvs,     0x9000,   0x6000,
 otadata,  data, ota,     0xf000,   0x2000,
 phy_init, data, phy,     0x11000,  0x1000,
-ota_0,    app,  ota_0,   0x20000,  0x300000,
-ota_1,    app,  ota_1,   0x320000, 0x300000,
-spiffs,   data, spiffs,  0x620000, 0x1E0000,
+ota_0,    app,  ota_0,   0x20000,  0x3F0000,
+ota_1,    app,  ota_1,   0x410000, 0x3F0000,

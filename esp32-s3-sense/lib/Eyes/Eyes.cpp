@@ -1,6 +1,12 @@
 #include "Eyes.h"
 #include <math.h>
 
+// Auto-blink cadence: a random gap in [BLINK_GAP_MIN_MS, MIN + JITTER). Kept
+// deliberately short and jittery -- a regular or sparse blink reads as a
+// machine idling, a frequent irregular one reads as alive.
+#define BLINK_GAP_MIN_MS 700
+#define BLINK_GAP_JITTER_MS 1800
+
 // Eye geometry and colors come from common.h (included via Eyes.h).
 
 Eyes::Eyes(GC9D01& left, GC9D01& right)
@@ -13,7 +19,7 @@ Eyes::Eyes(GC9D01& left, GC9D01& right)
       _blinkSpeed(3),
       _blinking(false),
       _lastBlink(0),
-      _nextBlinkTime(millis() + 3000),
+      _nextBlinkTime(millis() + BLINK_GAP_MIN_MS),
       _dirty(true),
       _lastExpr(EyeExpression::NEUTRAL),
       _lastSleeping(false),
@@ -31,11 +37,18 @@ void Eyes::setExpression(EyeExpression expr) {
     } else {
         _sleeping = false;
     }
+    // An expression change is a visible change: mark the frame dirty so the
+    // next render() actually flushes to the LCDs. Without this, render()
+    // skips the SPI push (dirty-flag optimization) and the panel never
+    // updates - it just shows the backlight with a stale/black frame.
+    _dirty = true;
 }
 
 void Eyes::setGaze(float x, float y) {
     _gazeX = constrain(x, -1.0f, 1.0f);
     _gazeY = constrain(y, -1.0f, 1.0f);
+    // Gaze moves the iris, which is a visible change too.
+    _dirty = true;
 }
 
 void Eyes::blink(uint8_t speed) {
@@ -52,7 +65,7 @@ void Eyes::render() {
     if (!_blinking && !_sleeping && _expr != EyeExpression::UPDATE && now > _nextBlinkTime) {
         blink();
         _lastBlink = now;
-        _nextBlinkTime = now + 2000 + random(3000);
+        _nextBlinkTime = now + BLINK_GAP_MIN_MS + random(BLINK_GAP_JITTER_MS);
     }
 
     // Update blink animation. Total duration = 2 * _blinkSpeed ticks
@@ -89,8 +102,8 @@ void Eyes::render() {
         return;
     }
 
-    renderEye(_left, irisCX, irisCY);
-    renderEye(_right, irisCX, irisCY);
+    renderEye(_left, irisCX, irisCY, false);
+    renderEye(_right, irisCX, irisCY, true);
 
     _dirty = false;
     _lastExpr = _expr;
@@ -101,194 +114,221 @@ void Eyes::render() {
     _lastAnimFrame = now;
 }
 
-void Eyes::renderEye(GC9D01& lcd, int irisCX, int irisCY) {
-    // Clear framebuffer
-    lcd.fillScreen(COLOR_SCLERA);
+// ===========================================================================
+// Shape table -- one row per mood, in EyeExpression order.
+//
+// Tuned against the reference sheet. Numbers, not code: retune a mood by
+// editing its row. tools/preview_eyes.py renders this same table to an HTML
+// sheet using identical maths, so shapes can be judged without flashing.
+//
+//                     halfW halfH round tSag bRise yOff slIn slOut asym
+// ===========================================================================
+static const EyeShape SHAPES[] = {
+    /* NEUTRAL     */ { 33, 40, 26,  0,  0,   0,  0,  0, 0 },
+    /* BLINK_HIGH  */ { 32,  8, 22,  0,  0, -14,  0,  0, 0 },
+    /* BLINK_LOW   */ { 32,  8, 22,  0,  0,  14,  0,  0, 0 },
+    /* HAPPY       */ { 36, 42, 24,  0, 62,   6,  0,  0, 0 },
+    /* GLEE        */ { 30, 30, 24,  0, 28,   4,  0,  0, 0 },
+    /* SAD_DOWN    */ { 32, 34, 26,  0,  0,   8,  0, 30, 0 },
+    /* SAD_UP      */ { 31, 34, 29,  0,  0,  -2,  0,  0, 0 },
+    /* WORRIED     */ { 33, 38, 26,  0,  0,   2,  0, 34, 0 },
+    /* FOCUSED     */ { 34, 30, 26,  0, 12,   2,  0, 10, 0 },
+    /* ANNOYED     */ { 34, 32, 26, 26,  0,  -2,  0,  0, 0 },
+    /* SURPRISED   */ { 40, 47, 26,  0,  0,   0,  0,  0, 0 },
+    /* SKEPTIC     */ { 32, 27, 26, 20,  0,   0,  0,  0, 7 },
+    /* BORED       */ { 34, 21, 24, 15,  0,   0,  0,  0, 0 },
+    /* UNIMPRESSED */ { 34, 18, 22, 12,  0,   0,  0,  0, 0 },
+    /* SLEEPY      */ { 33, 30, 29,  6,  0,   6,  0,  0, 0 },
+    /* SUSPICIOUS  */ { 33, 32, 26,  0, 14,   0,  0,  0, 0 },
+    /* SQUINT      */ { 33, 34, 22,  0, 52,   4,  0,  0, 0 },
+    /* ANGRY       */ { 36, 40, 24,  0,  0,   2, 36,  0, 0 },
+    /* FURIOUS     */ { 36, 42, 22,  0,  0,   2, 52,  0, 0 },
+    /* SCARED      */ { 31, 45, 26,  0,  0,   0,  0,  0, 0 },
+    /* AWE         */ { 35, 41, 30,  0,  0,   0,  0,  0, 0 },
+    /* SLEEPING    */ { 32,  8, 22,  0,  0,  14,  0,  0, 0 },  // drawn as a bar
+    /* SEARCHING   */ { 33, 32, 26,  0, 14,   0,  0,  0, 0 },  // = SUSPICIOUS
+    /* DETECTING   */ { 34, 30, 26,  0, 12,   2,  0, 10, 0 },  // = FOCUSED
+    /* UPDATE      */ { 33, 40, 26,  0,  0,   0,  0,  0, 0 },  // spinner instead
+    /* ERROR       */ { 33, 40, 26,  0,  0,   0,  0,  0, 0 },  // cross instead
+};
+
+// Protocol names, same order. These are the strings the RPi sends in
+// {"type":"expression","value":"..."} and that telemetry reports back as "eye".
+static const char* const NAMES[] = {
+    "neutral", "blink_high", "blink_low", "happy", "glee",
+    "sad_down", "sad_up", "worried", "focused", "annoyed",
+    "surprised", "skeptic", "bored", "unimpressed", "sleepy",
+    "suspicious", "squint", "angry", "furious", "scared",
+    "awe", "sleeping", "searching", "detecting", "update", "error",
+};
+
+static_assert(sizeof(SHAPES) / sizeof(SHAPES[0]) == (size_t)EyeExpression::_COUNT,
+              "SHAPES is out of sync with EyeExpression");
+static_assert(sizeof(NAMES) / sizeof(NAMES[0]) == (size_t)EyeExpression::_COUNT,
+              "NAMES is out of sync with EyeExpression");
+
+const EyeShape& Eyes::shapeOf(EyeExpression e) {
+    const size_t i = (size_t)e;
+    return SHAPES[i < (size_t)EyeExpression::_COUNT ? i : 0];
+}
+
+const char* Eyes::nameOf(EyeExpression e) {
+    const size_t i = (size_t)e;
+    return NAMES[i < (size_t)EyeExpression::_COUNT ? i : 0];
+}
+
+bool Eyes::parseName(const char* name, EyeExpression& out) {
+    if (!name) return false;
+    for (size_t i = 0; i < (size_t)EyeExpression::_COUNT; i++) {
+        if (strcmp(name, NAMES[i]) == 0) {
+            out = (EyeExpression)i;
+            return true;
+        }
+    }
+    return false;
+}
+
+float Eyes::currentOpenness() const {
+    float o = 1.0f;
+    if (_blinking) {
+        const float half = (float)_blinkSpeed;
+        o = (_blinkProgress <= _blinkSpeed)
+                ? 1.0f - (float)_blinkProgress / half
+                : (float)(_blinkProgress - _blinkSpeed) / half;
+    }
+    return constrain(o, 0.0f, 1.0f);
+}
+
+void Eyes::renderEye(GC9D01& lcd, int cx, int cy, bool mirrored) {
+    lcd.fillScreen(COLOR_BG);
 
     if (_sleeping) {
-        // Closed eyes - just eyelids.
-        drawEyelids(lcd, 0.0f);
+        drawClosed(lcd);
+        lcd.flush();
         return;
     }
 
-    // Draw sclera (white circle)
-    drawSclera(lcd);
+    drawShape(lcd, cx, cy, mirrored);
 
-    // Draw iris
-    drawIris(lcd, irisCX, irisCY);
-
-    // Draw pupil
-    drawPupil(lcd, irisCX, irisCY);
-
-    // Draw highlight (specular reflection)
-    drawHighlight(lcd, irisCX - 6, irisCY - 8);
-
-    // The UPDATE spinner is a ring *around* the eye (radius SCLERA_R+5). It
-    // must be drawn BEFORE the eyelids, otherwise the full-width eyelid fill
-    // would overdraw the top/bottom of the ring and the spinner would look
-    // clipped. Other overlays (eyebrows) sit above the eye and are drawn
-    // after the eyelids.
-    if (_expr == EyeExpression::UPDATE) {
-        drawExpressionOverlay(lcd);
+    // The spinner and the error cross are status indicators, not eyes -- they
+    // must not be clipped by a blink.
+    if (_expr != EyeExpression::UPDATE && _expr != EyeExpression::ERROR) {
+        drawLids(lcd, currentOpenness());
     }
 
-    // Draw eyelids based on expression and blink state
-    float openness = 1.0f;
-    if (_blinking) {
-        // Close then open, paced by _blinkSpeed (see render()).
-        float half = (float)_blinkSpeed;
-        if (_blinkProgress <= _blinkSpeed) {
-            openness = 1.0f - (float)_blinkProgress / half;
-        } else {
-            openness = (float)(_blinkProgress - _blinkSpeed) / half;
+    // Everything above only wrote to the in-memory framebuffer. Without this
+    // the panel never receives a single pixel -- which is exactly what used to
+    // happen: renderEye() drew a complete frame and then dropped it.
+    lcd.flush();
+}
+
+void Eyes::drawShape(GC9D01& lcd, int cx, int cy, bool mirrored) {
+    switch (_expr) {
+        case EyeExpression::UPDATE:   drawSpinner(lcd); return;   // not an eye
+        case EyeExpression::ERROR:    drawErrorX(lcd);  return;   // not an eye
+        case EyeExpression::SLEEPING: drawClosed(lcd);  return;   // fully shut
+        default: break;
+    }
+    drawBlob(lcd, shapeOf(_expr), cx, cy, mirrored);
+}
+
+// Draw one mood from its table row, column by column: for each x, work out
+// where the top and the bottom edge sit and fill the span between them. Doing
+// it per column (rather than per row) is what makes independent top/bottom edge
+// profiles -- and therefore crescents and dome-down shapes -- fall out for free.
+void Eyes::drawBlob(GC9D01& lcd, const EyeShape& s, int cx, int cy, bool mirrored) {
+    const float n = s.roundness / 10.0f;
+    const int halfH = (int)s.halfH - (mirrored ? (int)s.asymH : 0);
+    if (halfH <= 0 || s.halfW == 0) return;
+    const float yc = (float)cy + s.yOff;
+
+    for (int dx = -(int)s.halfW; dx <= (int)s.halfW; dx++) {
+        const float t = fabsf((float)dx) / (float)s.halfW;
+        const float inner = 1.0f - powf(t, n);
+        if (inner <= 0.0f) continue;
+        const float ext = halfH * powf(inner, 1.0f / n);   // superellipse envelope
+        const float bell = 1.0f - t * t;                   // 1 in the middle, 0 at the edges
+
+        float yTop = yc - ext + s.topSag * bell;
+        float yBot = yc + ext - s.botRise * bell;
+
+        // Slants cut the top edge down along a straight line. uIn runs 0 at the
+        // OUTER edge of this eye to 1 at the INNER edge (toward the beak), which
+        // is why it depends on which eye we are drawing -- otherwise both eyes
+        // would lean the same way instead of mirroring.
+        const float uIn = mirrored ? (0.5f - (float)dx / (2.0f * s.halfW))
+                                   : (0.5f + (float)dx / (2.0f * s.halfW));
+        if (s.slantIn)  yTop = fmaxf(yTop, yc - halfH + s.slantIn * uIn);
+        if (s.slantOut) yTop = fmaxf(yTop, yc - halfH + s.slantOut * (1.0f - uIn));
+
+        const int y0 = (int)lroundf(yTop);
+        const int y1 = (int)lroundf(yBot);
+        if (y1 >= y0) lcd.drawFastVLine(cx + dx, y0, y1 - y0 + 1, COLOR_INK);
+    }
+}
+
+// A single bold bar: a closed eye, and what a blink bottoms out on. Reads far
+// better at this size than a blank white disc.
+void Eyes::drawClosed(GC9D01& lcd) {
+    lcd.fillRect(EYE_CX - LASH_HALF_W, EYE_CY - LASH_HALF_H,
+                 LASH_HALF_W * 2, LASH_HALF_H * 2, COLOR_INK);
+}
+
+// Lids are background-coloured bars closing in from the top and bottom, so a
+// blink simply eats into whatever shape is underneath.
+void Eyes::drawLids(GC9D01& lcd, float openness) {
+    if (openness >= 0.999f) return;
+
+    const int half = (int)(EYE_R * openness);
+    const int top = EYE_CY - half;
+    const int bot = EYE_CY + half;
+
+    if (top > 0) lcd.fillRect(0, 0, LCD_WIDTH, top, COLOR_BG);
+    if (bot < LCD_HEIGHT) lcd.fillRect(0, bot, LCD_WIDTH, LCD_HEIGHT - bot, COLOR_BG);
+
+    if (openness < 0.06f) drawClosed(lcd);
+}
+
+void Eyes::drawSpinner(GC9D01& lcd) {
+    const int R = 50;
+    for (int a = 0; a < 90; a += 3) {
+        const float rad = (float)(_animPhase + a) * (float)DEG_TO_RAD;
+        lcd.fillCircle(EYE_CX + (int)(cosf(rad) * R),
+                       EYE_CY + (int)(sinf(rad) * R), 6, COLOR_INK);
+    }
+}
+
+void Eyes::drawErrorX(GC9D01& lcd) {
+    const int a = 34;
+    for (int t = -4; t <= 4; t++) {
+        lcd.drawLine(EYE_CX - a + t, EYE_CY - a, EYE_CX + a + t, EYE_CY + a, COLOR_INK);
+        lcd.drawLine(EYE_CX + a + t, EYE_CY - a, EYE_CX - a + t, EYE_CY + a, COLOR_INK);
+    }
+}
+
+// Scanline triangle fill: for each row, intersect it with all three edges and
+// span between the outermost hits.
+void Eyes::fillTriangle(GC9D01& lcd, int x0, int y0, int x1, int y1,
+                        int x2, int y2, uint16_t color) {
+    const int xs[3] = {x0, x1, x2};
+    const int ys[3] = {y0, y1, y2};
+
+    int minY = min(y0, min(y1, y2));
+    int maxY = max(y0, max(y1, y2));
+    minY = max(minY, 0);
+    maxY = min(maxY, LCD_HEIGHT - 1);
+
+    for (int y = minY; y <= maxY; y++) {
+        int lo = INT16_MAX, hi = INT16_MIN;
+        for (int e = 0; e < 3; e++) {
+            const int ax = xs[e], ay = ys[e];
+            const int bx = xs[(e + 1) % 3], by = ys[(e + 1) % 3];
+            if (ay == by) continue;
+            if (y < min(ay, by) || y > max(ay, by)) continue;
+            const int x = ax + (int)((long)(bx - ax) * (y - ay) / (by - ay));
+            lo = min(lo, x);
+            hi = max(hi, x);
         }
-    }
-
-    switch (_expr) {
-        case EyeExpression::SLEEPY:
-            openness = 0.5f;
-            break;
-        case EyeExpression::SURPRISED:
-            openness = 1.2f; // Slightly wider
-            break;
-        case EyeExpression::ANGRY:
-            openness = 0.7f;
-            break;
-        default:
-            break;
-    }
-
-    drawEyelids(lcd, openness);
-
-    if (_expr != EyeExpression::UPDATE) {
-        drawExpressionOverlay(lcd);
-    }
-}
-
-void Eyes::drawSclera(GC9D01& lcd) {
-    lcd.fillCircle(EYE_CX, EYE_CY, SCLERA_R, COLOR_SCLERA);
-    // Subtle outline
-    lcd.drawCircle(EYE_CX, EYE_CY, SCLERA_R, 0xA51F); // Dark gray
-}
-
-void Eyes::drawIris(GC9D01& lcd, int cx, int cy) {
-    // Flat iris fill. (A concentric-ring "gradient" was attempted here but the
-    // fillCircle below covers it, so the rings never showed — removed.)
-    lcd.fillCircle(cx, cy, IRIS_R, COLOR_IRIS);
-}
-
-void Eyes::drawPupil(GC9D01& lcd, int cx, int cy) {
-    lcd.fillCircle(cx, cy, PUPIL_R, COLOR_PUPIL);
-}
-
-void Eyes::drawHighlight(GC9D01& lcd, int cx, int cy) {
-    lcd.fillCircle(cx, cy, HIGHLIGHT_R, COLOR_HIGHLIGHT);
-    // Smaller bright highlight
-    lcd.fillCircle(cx + 1, cy + 1, 2, 0xD620); // Slightly dimmer white
-}
-
-void Eyes::drawEyelids(GC9D01& lcd, float openness) {
-    openness = constrain(openness, 0.0f, 1.2f);
-
-    // Calculate eyelid positions
-    int eyeTop = EYE_CY - SCLERA_R;
-    int eyeBottom = EYE_CY + SCLERA_R;
-    int eyeHeight = 2 * SCLERA_R;
-
-    // Openness determines how much of the eye is visible
-    // 1.0 = fully open, 0.0 = fully closed
-    float visibleHeight = eyeHeight * openness;
-    int topLidY = EYE_CY - (int)(visibleHeight / 2);
-    int bottomLidY = EYE_CY + (int)(visibleHeight / 2);
-
-    // Draw top eyelid (skin tone, covering everything above)
-    lcd.fillRect(0, 0, LCD_WIDTH, topLidY, COLOR_EYELID);
-
-    // Draw bottom eyelid (skin tone, covering everything below)
-    lcd.fillRect(0, bottomLidY, LCD_WIDTH, LCD_HEIGHT - bottomLidY, COLOR_EYELID);
-
-    // Eyelid edge line
-    if (topLidY > 0 && topLidY < LCD_HEIGHT) {
-        lcd.drawFastHLine(0, topLidY, LCD_WIDTH, 0x5A88); // Darker eyelid line
-    }
-    if (bottomLidY > 0 && bottomLidY < LCD_HEIGHT) {
-        lcd.drawFastHLine(0, bottomLidY - 1, LCD_WIDTH, 0x5A88);
-    }
-}
-
-void Eyes::drawExpressionOverlay(GC9D01& lcd) {
-    switch (_expr) {
-        case EyeExpression::HAPPY:
-            // Curved happy eyebrows (above the eyes)
-            // Simple arc using multiple pixels
-            for (int x = -50; x <= 50; x++) {
-                int y = -SCLERA_R - 8 + (x * x) / 200;
-                lcd.drawPixel(EYE_CX + x, EYE_CY + y, COLOR_EYEBROW);
-            }
-            break;
-
-        case EyeExpression::ANGRY:
-            // Angry eyebrows - angled downward toward center
-            for (int x = -45; x <= -10; x++) {
-                int y = -SCLERA_R - 5 + (x + 45) * 1;
-                lcd.drawPixel(EYE_CX + x, EYE_CY + y, COLOR_EYEBROW);
-            }
-            for (int x = 10; x <= 45; x++) {
-                int y = -SCLERA_R - 5 - (x - 45) * 1;
-                lcd.drawPixel(EYE_CX + x, EYE_CY + y, COLOR_EYEBROW);
-            }
-            break;
-
-        case EyeExpression::SURPRISED:
-            // Raised eyebrows
-            for (int x = -40; x <= 40; x++) {
-                int y = -SCLERA_R - 12 + (x * x) / 300;
-                lcd.drawPixel(EYE_CX + x, EYE_CY + y, COLOR_EYEBROW);
-            }
-            break;
-
-        case EyeExpression::SEARCHING:
-        case EyeExpression::DETECTING:
-            // Pulsing ring around the eye (drawn as dashed circle)
-            for (int angle = 0; angle < 360; angle += 15) {
-                int rad = angle * 3.14159 / 180;
-                int px = EYE_CX + (int)((SCLERA_R + 5) * cos(rad));
-                int py = EYE_CY + (int)((SCLERA_R + 5) * sin(rad));
-                lcd.drawPixel(px, py, 0x080F); // Dark marker
-            }
-            break;
-
-        case EyeExpression::UPDATE:
-            // Two counter-rotating green arcs (spinner) around the eye.
-            // Drawn before the eyelids (see renderEye) so the ring is not
-            // clipped by the eyelid fill.
-            for (int a = 0; a < 120; a += 6) {
-                int rad = (_animPhase + a) * 3.14159f / 180.0f;
-                lcd.drawPixel(EYE_CX + (int)((SCLERA_R + 5) * cos(rad)),
-                               EYE_CY + (int)((SCLERA_R + 5) * sin(rad)),
-                               COLOR_UPDATE);
-            }
-            for (int a = 0; a < 120; a += 6) {
-                int rad = (180 - _animPhase + a) * 3.14159f / 180.0f;
-                lcd.drawPixel(EYE_CX + (int)((SCLERA_R + 5) * cos(rad)),
-                               EYE_CY + (int)((SCLERA_R + 5) * sin(rad)),
-                               COLOR_UPDATE);
-            }
-            break;
-
-        case EyeExpression::ERROR:
-            // Hardware fault: a red X across the eye (drawn after the eyelids,
-            // so it stays visible on top of the lid fill).
-            {
-                int r = SCLERA_R - 8;
-                for (int d = -r; d <= r; d += 2) {
-                    lcd.drawPixel(EYE_CX + d, EYE_CY + d, COLOR_ERROR);
-                    lcd.drawPixel(EYE_CX + d, EYE_CY - d, COLOR_ERROR);
-                }
-            }
-            break;
-
-        default:
-            break;
+        if (hi >= lo) lcd.drawFastHLine(lo, y, hi - lo + 1, color);
     }
 }

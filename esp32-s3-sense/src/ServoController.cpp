@@ -1,6 +1,7 @@
 #include "ServoController.h"
 
 ServoController::ServoController() {
+    _pcaReady = false;
     for (int i = 0; i < NUM_SERVO_CHANNELS; i++) {
         _currentAngles[i] = 0;
         _targetAngles[i] = 0;
@@ -9,10 +10,18 @@ ServoController::ServoController() {
 }
 
 bool ServoController::begin() {
-    _pca.begin();
+    // The PCA9685 is an I2C device. If it isn't reachable (unwired, no ACK, or
+    // the I2C bus is down) _pca.begin() returns false and the library's internal
+    // Adafruit_I2CDevice is left pointing at a non-ready bus. Driving it after
+    // that (setPWM -> i2c_dev->write) dereferences a null TwoWire and panics
+    // with LoadProhibited. So we record whether it came up and no-op all the
+    // PWM writes when it didn't.
+    _pcaReady = _pca.begin();
+    if (!_pcaReady) {
+        Serial.println(F("WARNING: PCA9685 servo driver not found - servos disabled"));
+        return false;
+    }
     _pca.setPWMFreq(50); // 50Hz for servos
-
-
 
     // Set all to center position
     setCenter();
@@ -46,6 +55,7 @@ float ServoController::getAngle(uint8_t channel) const {
 }
 
 void ServoController::update() {
+    if (!_pcaReady) return;  // PCA9685 not present - never touch the I2C bus
     for (int i = 0; i < NUM_SERVO_CHANNELS; i++) {
         if (!_dirty[i]) continue;
 
@@ -64,6 +74,7 @@ void ServoController::update() {
 }
 
 void ServoController::writeMicroseconds(uint8_t channel, uint16_t us) {
+    if (!_pcaReady) return;  // PCA9685 not present - never touch the I2C bus
     _pca.setPWM(channel, 0, us);
 }
 

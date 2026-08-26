@@ -21,6 +21,7 @@ private:
     float angleToUs(float angle);
 
     Adafruit_PWMServoDriver _pca;
+    bool _pcaReady;
     float _currentAngles[NUM_SERVO_CHANNELS];
     float _targetAngles[NUM_SERVO_CHANNELS];
     bool _dirty[NUM_SERVO_CHANNELS];

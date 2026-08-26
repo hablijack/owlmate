@@ -1,0 +1,66 @@
+# ============================================================================
+# sdkconfig fuer das ECHTE Firmware-Env (framework = arduino, espidf).
+#
+# Gilt nur fuer [env:xiao_esp32s3]. Die Diagnose-Envs laufen im reinen
+# Arduino-Modus und werden davon nicht beruehrt.
+#
+# Uebernommen aus facelab/, wo diese Konfiguration am 2026-08-26 auf der
+# Hardware nachgewiesen wurde: PSRAM 8 MB sauber, Kamera OV3660, esp-dl 48 ms.
+# ============================================================================
+
+# --- PSRAM: der kritische Teil der Umstellung -------------------------------
+# Im Arduino-Modus stellte "board_build.memory_type = qio_opi" das ein. Diese
+# Option wirkt hier NICHT - im espidf-Modus muss es ueber sdkconfig kommen.
+# Der XIAO ESP32-S3 hat 8 MB OCTAL-PSRAM (OPI), nicht Quad. Genau daran ist
+# eine frueher Sitzung mit "PSRAM ID read error: 0x00ffffff" gescheitert; in
+# diesem Modus kommt es beim ersten Versuch hoch.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+# --- Flash und Partitionen --------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- Konsole ---------------------------------------------------------------
+# Das Board hat keinen zweiten UART nach aussen; Serial muss auf demselben
+# USB-Port landen wie im Arduino-Modus.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# --- Arduino als Komponente ------------------------------------------------
+CONFIG_AUTOSTART_ARDUINO=y
+# HARTE Anforderung: der Arduino-Core prueft das in seiner CMakeLists und
+# bricht sonst ab ("esp32-arduino requires CONFIG_FREERTOS_HZ=1000"). Der
+# IDF-Standard ist 100 Hz.
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# --- Bluetooth aus ----------------------------------------------------------
+# Die Eule benutzt kein Bluetooth (WLAN nur fuer den OTA-Update-Modus), und der
+# BT-Stack kostet mehrere hundert KB im Image. Wieder einschalten ist eine
+# Zeile, falls doch mal BLE gebraucht wird.
+CONFIG_BT_ENABLED=n
+
+# --- C-Bibliothek -----------------------------------------------------------
+# EXPLIZIT newlib, nicht picolibc. Die Komponente espressif__cbor (die ueber
+# esp_rainmaker/esp_insights im Komponentensatz der Plattform mitkommt) benutzt
+# fopencookie(), das es unter picolibc nicht gibt - der Build bricht dann mit
+# "unknown type name 'cookie_io_functions_t'" ab.
+#
+# ACHTUNG bei Aenderungen hier: sdkconfig.defaults wird NUR ausgewertet, wenn
+# noch keine sdkconfig existiert. Nach einer Aenderung die generierte
+# sdkconfig.xiao_esp32s3 loeschen, sonst wirkt sie nicht.
+CONFIG_LIBC_NEWLIB=y
+
+# --- esp-dl ----------------------------------------------------------------
+# Die Modellklassen brauchen RTTI/Exceptions nicht zwingend, aber ohne sie
+# gibt es mit den Detect-Wrappern gelegentlich Aerger.
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
+CONFIG_COMPILER_CXX_RTTI=y

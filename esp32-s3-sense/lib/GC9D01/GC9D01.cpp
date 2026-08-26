@@ -1,231 +1,206 @@
 #include "GC9D01.h"
 
-// GC9D01 commands
-#define GC9D01_SWRESET 0x01
+// GC9D01 commands actually used by this driver.
 #define GC9D01_SLPOUT 0x11
 #define GC9D01_DISPON 0x29
-#define GC9D01_CASET 0x2A
-#define GC9D01_RASET 0x2B
-#define GC9D01_RAMWR 0x2C
-#define GC9D01_COLMOD 0x3A
-#define GC9D01_MADCTL 0x36
-#define GC9D01_PTLAR 0x30
-#define GC9D01_VSCRSDEF 0x33
-#define GC9D01_POFC 0xB1
-#define GC9D01_COMM 0xB4
-#define GC9D01_COLCTRL 0xB6
-#define GC9D01_PCMD 0xB7
-#define GC9D01_PWCTRL1 0xC1
-#define GC9D01_VCOMCTRL1 0xC5
-#define GC9D01_VCOMCTRL2 0xC7
-#define GC9D01_RDID1 0xA1
-#define GC9D01_RDID2 0xA2
-#define GC9D01_RDID3 0xA3
-#define GC9D01_RAMCTRL 0xB0
-#define GC9D01_RAMCFG 0xB4
-#define GC9D01_TCMD 0xB6
-#define GC9D01_PGC 0xE0
-#define GC9D01_NGC 0xE1
+#define GC9D01_CASET  0x2A
+#define GC9D01_RASET  0x2B
+#define GC9D01_RAMWR  0x2C
 
-GC9D01::GC9D01(int8_t sck, int8_t mosi, int8_t dc, int8_t cs, int8_t rst)
-    : _sck(sck), _mosi(mosi), _dc(dc), _cs(cs), _rst(rst) {
+// ============================================================================
+// Waveshare's official 0.71" GC9D01 power-on sequence, as a flat
+// {command, argc, args...} byte stream.
+//
+// The leading 0xFE / 0xEF pair is the command-page unlock. Without it every
+// power / timing / gamma register below is written to the wrong page and
+// silently dropped, and the panel sits there with its backlight lit and a
+// black screen -- indistinguishable from a dead panel.
+//
+// Each entry is sent as ONE chip-select assertion (command byte with DC low,
+// then its parameters with DC high). Splitting a command from its parameters
+// across two CS assertions is not safe on this controller.
+// ============================================================================
+static const uint8_t kInitSeq[] = {
+    0xFE, 0,
+    0xEF, 0,
+
+    // Unlock/enable registers 0x80..0x8F.
+    0x80, 1, 0xFF,   0x81, 1, 0xFF,   0x82, 1, 0xFF,   0x83, 1, 0xFF,
+    0x84, 1, 0xFF,   0x85, 1, 0xFF,   0x86, 1, 0xFF,   0x87, 1, 0xFF,
+    0x88, 1, 0xFF,   0x89, 1, 0xFF,   0x8A, 1, 0xFF,   0x8B, 1, 0xFF,
+    0x8C, 1, 0xFF,   0x8D, 1, 0xFF,   0x8E, 1, 0xFF,   0x8F, 1, 0xFF,
+
+    0x3A, 1, 0x05,                                       // COLMOD: RGB565
+    0xEC, 1, 0x01,
+    0x74, 6, 0x02, 0x0E, 0x00, 0x00, 0x00, 0x00,
+    0x98, 1, 0x3E,
+    0x99, 1, 0x3E,
+    0xB5, 2, 0x0D, 0x0D,
+
+    0x60, 4, 0x38, 0x0F, 0x79, 0x67,
+    0x61, 4, 0x38, 0x11, 0x79, 0x67,
+    0x64, 6, 0x38, 0x17, 0x71, 0x5F, 0x79, 0x67,
+    0x65, 6, 0x38, 0x13, 0x71, 0x5B, 0x79, 0x67,
+    0x6A, 2, 0x00, 0x00,
+    0x6C, 7, 0x22, 0x02, 0x22, 0x02, 0x22, 0x22, 0x50,
+    0x6E, 32, 0x03, 0x03, 0x01, 0x01, 0x00, 0x00, 0x0F, 0x0F,
+              0x0D, 0x0D, 0x0B, 0x0B, 0x09, 0x09, 0x00, 0x00,
+              0x00, 0x00, 0x0A, 0x0A, 0x0C, 0x0C, 0x0E, 0x0E,
+              0x10, 0x10, 0x00, 0x00, 0x02, 0x02, 0x04, 0x04,
+
+    0xBF, 1, 0x01,
+    0xF9, 1, 0x40,
+    0x9B, 1, 0x3B,
+    0x93, 3, 0x33, 0x7F, 0x00,
+    0x7E, 1, 0x30,
+    0x70, 6, 0x0D, 0x02, 0x08, 0x0D, 0x02, 0x08,
+    0x71, 3, 0x0D, 0x02, 0x08,
+    0x91, 2, 0x0E, 0x09,
+    0xC3, 1, 0x19,
+    0xC4, 1, 0x19,
+    0xC9, 1, 0x3C,
+
+    // Gamma.
+    0xF0, 6, 0x53, 0x15, 0x0A, 0x04, 0x00, 0x3E,
+    0xF2, 6, 0x53, 0x15, 0x0A, 0x04, 0x00, 0x3A,
+    0xF1, 6, 0x56, 0xA8, 0x7F, 0x33, 0x34, 0x5F,
+    0xF3, 6, 0x52, 0xA4, 0x7F, 0x33, 0x34, 0xDF,
+
+    0x36, 1, 0x00,                                       // MADCTL
+};
+
+GC9D01::GC9D01(int8_t dc, int8_t cs, int8_t rst)
+    : _dc(dc), _cs(cs), _rst(rst), _bus(nullptr),
+      _cfg(LCD_SPI_FREQ, MSBFIRST, SPI_MODE0), _txDepth(0), _fb(nullptr) {
 }
 
 GC9D01::~GC9D01() {
-    if (_fb) {
-        free(_fb);
-    }
+    if (_fb) free(_fb);
+}
+
+void GC9D01::attachBus(SPIClass* bus) {
+    _bus = bus;
+    // Park this panel deselected the moment it is attached, so that attaching
+    // every panel before initialising any of them is enough to guarantee no
+    // panel is listening while a sibling is being set up.
+    pinMode(_cs, OUTPUT);
+    digitalWrite(_cs, HIGH);
+    pinMode(_dc, OUTPUT);
+    digitalWrite(_dc, HIGH);
+}
+
+void GC9D01::resetShared() {
+    if (_rst < 0) return;
+    pinMode(_rst, OUTPUT);
+    digitalWrite(_rst, HIGH);
+    delay(20);
+    digitalWrite(_rst, LOW);
+    delay(20);
+    digitalWrite(_rst, HIGH);
+    delay(150);
 }
 
 bool GC9D01::begin() {
-    // Allocate framebuffer in PSRAM
-    _fb = (uint16_t*)ps_calloc(LCD_WIDTH * LCD_HEIGHT, sizeof(uint16_t));
-    if (!_fb) {
-        return false;
-    }
+    if (!_bus) return false;              // attachBus() was never called
 
-    // Setup SPI pins if using hardware SPI with arbitrary pins
-    _spi.begin(_sck, -1, _mosi, _cs);
-    _spi.setFrequency(LCD_SPI_FREQ);
+    _fb = (uint16_t*)ps_calloc((size_t)LCD_WIDTH * LCD_HEIGHT, sizeof(uint16_t));
+    if (!_fb) return false;               // no PSRAM framebuffer
 
-    pinMode(_dc, OUTPUT);
-    pinMode(_cs, OUTPUT);
-    digitalWrite(_cs, HIGH);
-    digitalWrite(_dc, LOW);
-
+    // The shared RST has already been pulsed once by resetShared(); just make
+    // sure it stays released for the whole init.
     if (_rst >= 0) {
         pinMode(_rst, OUTPUT);
         digitalWrite(_rst, HIGH);
-        delay(20);
-        digitalWrite(_rst, LOW);
-        delay(20);
-        digitalWrite(_rst, HIGH);
-        delay(120);
     }
 
-    // GC9D01 initialization sequence (based on TFT_eSPI PR #3783)
-    writeCommand(GC9D01_SWRESET);
-    delay(120);
+    for (size_t i = 0; i < sizeof(kInitSeq); ) {
+        const uint8_t cmd = kInitSeq[i++];
+        const uint8_t argc = kInitSeq[i++];
+        writeCmd(cmd, &kInitSeq[i], argc);
+        i += argc;
+    }
 
-    writeCommand(GC9D01_SLPOUT);
-    delay(120);
-
-    // Power control A
-    writeCmdData((const uint8_t[]){0x00, 0x00, 0x00, 0x00}, 4); // Register needs to be written
-
-    // Power control B
-    writeCommand(GC9D01_PWCTRL1);
-    writeData8(0x00);
-
-    // Panel driving settings
-    writeCommand(GC9D01_COMM);
-    writeData8(0x00); // ENCOM_NONE
-
-    // Display timing control
-    writeCommand(GC9D01_POFC);
-    writeData8(0x01); // Frame rate 75Hz
-    writeData8(0x3B); // Dummy sequences related to RGB interface
-    writeData8(0x03);
-
-    writeCommand(GC9D01_VSCRSDEF); // Vertical scroll definitions
-    writeData8(0x00); // TFA
-    writeData8(0x00); // VSA
-    writeData8(0xA0); // BFA
-
-    writeCommand(GC9D01_PTLAR);
-    writeData8(0x00);
-    writeData8(0x00);
-    writeData8(0x00);
-    writeData8(0xA0);
-
-    writeCommand(GC9D01_VCOMCTRL2);
-    writeData8(0x00);
-    writeData8(0x00);
-
-    writeCommand(GC9D01_PWCTRL1);
-    writeData8(0x80); // VRH=5.0V
-
-    writeCommand(GC9D01_COMM);
-    writeData8(0x00); // COM_SPLIT_NONE, COM_INTLEAVE_NONE
-
-    writeCommand(GC9D01_COLCTRL);
-    writeData8(0x00); // NR=011b (6 lines), SC=0, NC=0
-
-    // Pixel format - RGB565
-    writeCommand(GC9D01_COLMOD);
-    writeData8(0x05); // 16-bit/pixel
-
-    // Memory access control - BGR order, row/col increment
-    uint8_t madctl = GC9D01_MADCTL;
-    writeCommand(madctl);
-    writeData8(0xC8); // MY=0, MX=0, MV=0, ML=1(BGR), MH=1, SS=0, RR=0
-
-    // Gamma curve - positive gamma
-    writeCommand(GC9D01_PGC);
-    const uint8_t pgc[] = {
-        0x00, 0x03, 0x09, 0x08, 0x08, 0x1A, 0x25, 0x2F,
-        0x3D, 0x46, 0x4B, 0x55, 0x5C, 0x66, 0x6E, 0x74
-    };
-    writeData(pgc, sizeof(pgc));
-
-    // Gamma curve - negative gamma
-    writeCommand(GC9D01_NGC);
-    const uint8_t ngc[] = {
-        0x00, 0x03, 0x09, 0x08, 0x07, 0x1A, 0x25, 0x2F,
-        0x3C, 0x46, 0x4B, 0x54, 0x5B, 0x65, 0x6D, 0x73
-    };
-    writeData(ngc, sizeof(ngc));
-
-    // Display on
-    writeCommand(GC9D01_DISPON);
+    writeCmd(GC9D01_SLPOUT);
+    delay(200);
+    writeCmd(GC9D01_DISPON);
     delay(20);
 
-    fillScreen(0x0000); // Black
+    fillScreen(0x0000);
     flush();
-
     return true;
 }
 
-void GC9D01::writeCommand(uint8_t cmd) {
-    digitalWrite(_dc, LOW);
-    _spi.transfer(cmd);
-    digitalWrite(_dc, HIGH);
-}
-
-void GC9D01::writeData(const uint8_t* data, size_t len) {
-    _spi.writeBytes(data, len);
-}
-
-void GC9D01::writeData8(uint8_t data) {
-    _spi.transfer(data);
-}
-
-void GC9D01::writeCmdData(const uint8_t* params, size_t len) {
-    writeCommand(0xFF); // Register write command
-    writeData(params, len);
-}
-
-void GC9D01::reset() {
-    writeCommand(GC9D01_SWRESET);
-    delay(120);
-}
-
-void GC9D01::setWindow(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
-    // Column address set
-    writeCommand(GC9D01_CASET);
-    uint8_t data[] = {
-        (uint8_t)(x0 >> 8), (uint8_t)x0,
-        (uint8_t)(x1 >> 8), (uint8_t)x1
-    };
-    writeData(data, 4);
-
-    // Row address set
-    writeCommand(GC9D01_RASET);
-    data[0] = (uint8_t)(y0 >> 8);
-    data[1] = (uint8_t)y0;
-    data[2] = (uint8_t)(y1 >> 8);
-    data[3] = (uint8_t)y1;
-    writeData(data, 4);
-
-    // Memory write
-    writeCommand(GC9D01_RAMWR);
-}
-
-void GC9D01::pushPixels(const uint16_t* data, size_t len) {
-    // Bulk 16-bit pixel write: the SPI HAL batches 64 bytes per
-    // hardware-FIFO transaction instead of one 16-bit transfer per pixel.
-    _spi.writePixels(data, len * sizeof(uint16_t));
-}
-
-void GC9D01::flush() {
-    setWindow(0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
-    digitalWrite(_dc, HIGH);
-    // Push the whole framebuffer in one bulk pixel write (800 FIFO
-    // transactions) rather than 25,600 individual 16-bit transfers.
-    _spi.writePixels(_fb, LCD_WIDTH * LCD_HEIGHT * sizeof(uint16_t));
-}
-
-void GC9D01::fillScreen(uint16_t color) {
-    for (size_t i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++) {
-        _fb[i] = color;
+// ----------------------------------------------------------------------------
+// Transport
+// ----------------------------------------------------------------------------
+void GC9D01::startWrite() {
+    if (_txDepth++ == 0) {
+        _bus->beginTransaction(_cfg);
+        digitalWrite(_cs, LOW);
     }
 }
 
+void GC9D01::endWrite() {
+    if (_txDepth == 0) return;            // unbalanced call; ignore
+    if (--_txDepth == 0) {
+        digitalWrite(_cs, HIGH);
+        _bus->endTransaction();
+    }
+}
+
+void GC9D01::writeCmd(uint8_t cmd, const uint8_t* args, size_t n) {
+    startWrite();
+    digitalWrite(_dc, LOW);               // command phase
+    _bus->transfer(cmd);
+    if (n) {
+        digitalWrite(_dc, HIGH);          // parameter phase
+        for (size_t i = 0; i < n; i++) _bus->transfer(args[i]);
+    }
+    endWrite();
+}
+
+void GC9D01::setWindow(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+    uint8_t a[4];
+    startWrite();
+    a[0] = x0 >> 8; a[1] = x0 & 0xFF; a[2] = x1 >> 8; a[3] = x1 & 0xFF;
+    writeCmd(GC9D01_CASET, a, 4);
+    a[0] = y0 >> 8; a[1] = y0 & 0xFF; a[2] = y1 >> 8; a[3] = y1 & 0xFF;
+    writeCmd(GC9D01_RASET, a, 4);
+    writeCmd(GC9D01_RAMWR);
+    endWrite();
+}
+
+void GC9D01::flush() {
+    if (!_fb || !_bus) return;
+    startWrite();                         // one chip-select for the whole frame
+    setWindow(0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
+    digitalWrite(_dc, HIGH);              // pixel data
+    // writePixels() byte-swaps each 16-bit word, which is what the panel wants
+    // (RGB565, high byte first on the wire).
+    _bus->writePixels(_fb, (size_t)LCD_WIDTH * LCD_HEIGHT * sizeof(uint16_t));
+    endWrite();
+}
+
+// ----------------------------------------------------------------------------
+// Framebuffer drawing (no SPI traffic -- call flush() to make it visible)
+// ----------------------------------------------------------------------------
+void GC9D01::fillScreen(uint16_t color) {
+    if (!_fb) return;
+    for (size_t i = 0; i < (size_t)LCD_WIDTH * LCD_HEIGHT; i++) _fb[i] = color;
+}
+
 void GC9D01::drawPixel(int16_t x, int16_t y, uint16_t color) {
+    if (!_fb) return;
     if (x < 0 || x >= LCD_WIDTH || y < 0 || y >= LCD_HEIGHT) return;
     _fb[y * LCD_WIDTH + x] = color;
 }
 
 void GC9D01::drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color) {
-    for (int16_t i = 0; i < h; i++) {
-        drawPixel(x, y + i, color);
-    }
+    for (int16_t i = 0; i < h; i++) drawPixel(x, y + i, color);
 }
 
 void GC9D01::drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color) {
-    for (int16_t i = 0; i < w; i++) {
-        drawPixel(x + i, y, color);
-    }
+    for (int16_t i = 0; i < w; i++) drawPixel(x + i, y, color);
 }
 
 void GC9D01::drawLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color) {
@@ -252,15 +227,11 @@ void GC9D01::drawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color
 }
 
 void GC9D01::fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) {
-    for (int16_t i = 0; i < h; i++) {
-        drawFastHLine(x, y + i, w, color);
-    }
+    for (int16_t i = 0; i < h; i++) drawFastHLine(x, y + i, w, color);
 }
 
 void GC9D01::drawCircle(int16_t cx, int16_t cy, int16_t r, uint16_t color) {
-    int16_t x = r;
-    int16_t y = 0;
-    int16_t err = 0;
+    int16_t x = r, y = 0, err = 0;
 
     auto plot = [this, cx, cy, color](int16_t dx, int16_t dy) {
         drawPixel(cx + dx, cy + dy, color);
@@ -274,40 +245,26 @@ void GC9D01::drawCircle(int16_t cx, int16_t cy, int16_t r, uint16_t color) {
     };
 
     plot(x, y);
-
     while (x > y) {
         y++;
         err += 1 + 2 * y;
-        if (err + 2 * (-x - 1) + 1 > 0) {
-            x--;
-            err += 1 + 2 * (-x);
-        }
+        if (err + 2 * (-x - 1) + 1 > 0) { x--; err += 1 + 2 * (-x); }
         plot(x, y);
     }
 }
 
 void GC9D01::fillCircle(int16_t cx, int16_t cy, int16_t r, uint16_t color) {
-    drawFastVLine(cx, cy - r, 2 * r + 1, color);
-    int16_t x = r;
-    int16_t y = 0;
-    int16_t err = 0;
-
-    auto plot = [this, cx, cy, color](int16_t dx, int16_t dy) {
-        if (dy <= dx) {
-            drawFastVLine(cx + dx, cy - dy, 2 * dy + 1, color);
-            drawFastVLine(cx - dx, cy - dy, 2 * dy + 1, color);
-        }
-    };
-
-    plot(x, y);
-
-    while (x > y) {
-        y++;
-        err += 1 + 2 * y;
-        if (err + 2 * (-x - 1) + 1 > 0) {
-            x--;
-            err += 1 + 2 * (-x);
-        }
-        plot(x, y);
+    // Plain scanline fill: for each row, solve the circle for its half-width.
+    // The previous implementation walked a single Bresenham octant and only
+    // filled the columns between cx +/- r and cx +/- r/sqrt(2), leaving the
+    // whole middle band of every circle unpainted -- circles came out as two
+    // crescents either side of a one-pixel centre line. At r <= 80 the cost of
+    // doing this the obvious way is irrelevant.
+    if (r < 0) return;
+    for (int16_t dy = -r; dy <= r; dy++) {
+        const int32_t w2 = (int32_t)r * r - (int32_t)dy * dy;
+        if (w2 < 0) continue;
+        const int16_t dx = (int16_t)(sqrtf((float)w2) + 0.5f);
+        drawFastHLine(cx - dx, cy + dy, 2 * dx + 1, color);
     }
 }

@@ -13,6 +13,11 @@ typedef struct {
     float confidence; // Detection confidence (0.0-1.0)
     float gaze_x;     // Gaze offset X (-1.0 to 1.0)
     float gaze_y;     // Gaze offset Y (-1.0 to 1.0)
+    // Kumulative Zahl erkannter Gesichter seit dem Boot. Absichtlich in der
+    // Telemetrie: bei sporadischer Erkennung ist ein Momentanwert von
+    // "detected" wertlos, ein steigender Zaehler dagegen eindeutig. Konstant
+    // bei einem Gesicht vor der Kamera = Erkennung arbeitet nicht.
+    uint32_t total;
 } FaceResult_t;
 
 // Initialize face detection module

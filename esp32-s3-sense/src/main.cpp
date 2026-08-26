@@ -10,13 +10,23 @@
 #include "Sensors.h"
 #include "ServoController.h"
 #include "FaceDetector.h"
+#include "esp_camera.h"
+// NOTE: psramFound() comes from esp32-hal-psram.h, which is pulled in via
+// Arduino.h -> esp32-hal.h. The old core's <esp_spiram.h> does not exist in
+// ESP-IDF 5.x (pioarduino / core 3.x), so we no longer include it directly.
 #include <ArduinoJson.h>
 
 // ============================================================================
 // Global instances
 // ============================================================================
-static GC9D01 lcdLeft(LCD_SCK, LCD_MOSI, LCD_DC_L, LCD_CS_L, LCD_RST);
-static GC9D01 lcdRight(LCD_SCK, LCD_MOSI, LCD_DC_R, LCD_CS_R, LCD_RST);
+// Both eye displays share the SAME SPI SCK/MOSI (only DC/CS differ), so they
+// must share ONE SPIClass. If each owned its own SPIClass and both called
+// begin() on the same pins, the second begin() re-inits an already-configured
+// SPI peripheral and hangs under ESP-IDF 5.x (pioarduino core 3.x). The shared
+// bus is attached to both displays and initialised once in setup().
+static SPIClass lcdSharedBus(FSPI);
+static GC9D01 lcdLeft(LCD_DC_L, LCD_CS_L, LCD_RST);
+static GC9D01 lcdRight(LCD_DC_R, LCD_CS_R, LCD_RST);
 static Eyes eyes(lcdLeft, lcdRight);
 static Sensors sensors;
 static ServoController servos;
@@ -62,29 +72,49 @@ static float overrideGazeY = 0.0f;
 static uint32_t overrideGazeUntil = 0;
 
 // ============================================================================
+// Display bring-up
+//
+// Both panels sit on ONE SPI bus (shared SCK/MOSI/RST, private CS/DC), so the
+// order below is load-bearing:
+//   1. begin the bus ONCE, with SS = -1 -- CS is driven in software by the
+//      driver (see lib/GC9D01/GC9D01.h; relying on the peripheral's hardware
+//      SS is what broke the two-panel case for so long),
+//   2. attach BOTH panels before initialising either, so neither floats
+//      selected while its sibling is being set up,
+//   3. pulse the shared RST exactly once,
+//   4. then init each panel.
+// ============================================================================
+static void bringUpDisplays(bool& leftOk, bool& rightOk) {
+    lcdSharedBus.begin(LCD_SCK, -1, LCD_MOSI, -1);
+    lcdLeft.attachBus(&lcdSharedBus);
+    lcdRight.attachBus(&lcdSharedBus);
+    lcdLeft.resetShared();
+    leftOk = lcdLeft.begin();
+    rightOk = lcdRight.begin();
+}
+
+// ============================================================================
 // Forward declarations
 // ============================================================================
 const char* stateToString(State state);
 void transitionTo(State newState);
 void applyExpression(EyeExpression stateExpr);
 void applyGaze(float stateGx, float stateGy);
+void runHardwareCheck();
 
 // ============================================================================
 // Protocol handlers
 // ============================================================================
 // Map an expression name (from the RPi) to an EyeExpression.
+// Name -> expression. Backed by the single NAMES table in Eyes.cpp, so adding a
+// mood there makes it addressable over the protocol automatically. An unknown
+// name falls back to NEUTRAL rather than being rejected, matching the previous
+// behaviour of this command.
 EyeExpression parseExpression(const char* name) {
-    if (strcmp(name, "happy") == 0) return EyeExpression::HAPPY;
-    if (strcmp(name, "sleepy") == 0) return EyeExpression::SLEEPY;
-    if (strcmp(name, "surprised") == 0) return EyeExpression::SURPRISED;
-    if (strcmp(name, "angry") == 0) return EyeExpression::ANGRY;
-    if (strcmp(name, "sleeping") == 0) return EyeExpression::SLEEPING;
-    if (strcmp(name, "searching") == 0) return EyeExpression::SEARCHING;
-    if (strcmp(name, "detecting") == 0) return EyeExpression::DETECTING;
-    if (strcmp(name, "update") == 0) return EyeExpression::UPDATE;
-    if (strcmp(name, "error") == 0) return EyeExpression::ERROR;
-    return EyeExpression::NEUTRAL;
+    EyeExpression e;
+    return Eyes::parseName(name, e) ? e : EyeExpression::NEUTRAL;
 }
+
 
 void handleCommand(const char* json) {
     JsonDocument doc;
@@ -240,6 +270,13 @@ void sendTelemetry() {
         doc["imu"]["roll"] = imu.roll;
         doc["imu"]["yaw"] = imu.yaw;
         doc["imu"]["calibrated"] = imu.isCalibrated;
+        // Per-sensor calibration progress (0..3 each). yaw is not a usable
+        // compass bearing until mag reaches 3 -- wave the owl in a figure 8.
+        doc["imu"]["cal"]["sys"] = imu.calSys;
+        doc["imu"]["cal"]["gyro"] = imu.calGyro;
+        doc["imu"]["cal"]["accel"] = imu.calAccel;
+        doc["imu"]["cal"]["mag"] = imu.calMag;
+        doc["imu"]["cal"]["restored"] = imu.calRestored;
     }
 
     // GPS data
@@ -256,6 +293,9 @@ void sendTelemetry() {
     VibrationData vib = sensors.getVibration();
     doc["vibration"]["detected"] = vib.detected;
     doc["vibration"]["count"] = vib.count;
+    // Rohe Flankenzahl seit Boot (siehe Sensors.h): macht sichtbar, ob am
+    // Sensorpin ueberhaupt etwas passiert, unabhaengig von der Auswertung.
+    doc["vibration"]["pulses"] = sensors.vibrationPulseTotal();
 
     // Navigation status (present only while the owl is NAVIGATING). Lets the
     // RPi confirm the head is actually being held at the requested angle.
@@ -288,12 +328,12 @@ void sendTelemetry() {
     doc["face"]["confidence"] = faceResult.confidence;
     doc["face"]["gaze_x"] = faceResult.gaze_x;
     doc["face"]["gaze_y"] = faceResult.gaze_y;
+    // Kumulativ (siehe FaceDetector.h): macht sporadische Erkennung sichtbar,
+    // die ein Momentanwert von "detected" verschluckt.
+    doc["face"]["total"] = faceResult.total;
 
-    // Eye expression
-    const char* exprNames[] = {
-        "neutral", "happy", "sleepy", "surprised", "angry", "sleeping", "searching", "detecting", "update", "error"
-    };
-    doc["eye"] = exprNames[(int)eyes.getCurrentExpression()];
+    // Eye expression (name comes from the same table parseExpression() uses)
+    doc["eye"] = Eyes::nameOf(eyes.getCurrentExpression());
 
     String output;
     serializeJson(doc, output);
@@ -537,27 +577,243 @@ void parseSerialCommands() {
 }
 
 // ============================================================================
+// Hardware check (first-run wiring verification)
+// ============================================================================
+// Probes every peripheral the owl depends on and reports each one's status over
+// serial (and on the eye displays) so a fresh wiring can be verified in seconds
+// without reading a log. Add "HARDWARE_CHECK=1" to build_flags (or the
+// PlatformIO CLI) to run this instead of the normal boot. Each probe is
+// independent, so one bad wire doesn't stop the rest from being reported.
+//
+//   LCDs        -> lcdLeft/Right.begin() (SPI; false = no display on the bus)
+//   PCA9685     -> I2C scan for 0x40 (the servo driver)
+//   GPS         -> I2C scan for 0x10 (PA1010D)
+//   BNO055 IMU  -> I2C scan for 0x28 + ready flag
+//   Vibration   -> SW420 idle level on VIBRATION_PIN (HIGH = pull-up intact)
+//   OV3660 cam  -> esp_camera frame grab (null = no camera / bad ribbon)
+//
+// Note: the I2C scan re-begins the bus (Wire.begin is idempotent), so the
+// check runs BEFORE Sensors::begin() below.
+void runHardwareCheck() {
+    // XIAO S3 senses the 5 V input on D4 = GPIO5 = ADC1_CH4 through a 2:1
+    // divider. (The old code read GPIO7, which is NOT ADC-capable on the S3, so
+    // it always returned 0.) Read it once up front: if the board is still
+    // brownout-looping, this line is the last thing we'll ever see, which tells
+    // us the power supply - not a peripheral - is the problem.
+    int vccMv = (int)((analogRead(5) * 3300) / (4095 / 2));
+    Serial.print(F("[check] VCC = "));
+    Serial.print(vccMv);
+    Serial.println(F(" mV"));
+
+    // PSRAM gates the LCD framebuffers (and the camera). If the XIAO's octal
+    // PSRAM failed to init, lcdLeft/Right.begin() return false and the eyes
+    // render nothing -> black screens even though the panels are wired. Report
+    // whether PSRAM is present so we can tell "PSRAM down" from "panels down".
+    // NOTE: use psramFound() (Arduino HAL) - it safely returns false when PSRAM
+    // is absent. Do NOT call esp_spiram_get_size() here: that IDF API ABORTS on
+    // core 1 when PSRAM is missing, which crashed this board into a reset loop.
+    bool psramOk = psramFound();
+    Serial.print(F("[check] PSRAM = "));
+    Serial.println(psramOk ? "present" : "NOT FOUND (octal PSRAM down)");
+
+    // Bring up both displays. Eyes::render() writes into a framebuffer that
+    // does not exist until begin() has allocated it in PSRAM, so nothing may
+    // render before this point.
+    bool lcdL = false, lcdR = false;
+    bringUpDisplays(lcdL, lcdR);
+    Serial.print(F("[check] lcd_left.begin()="));
+    Serial.print(lcdL ? "true" : "false");
+    Serial.print(F("  lcd_right.begin()="));
+    Serial.println(lcdR ? "true" : "false");
+
+    // Confirm both are up: hold LEFT=RED, RIGHT=GREEN steady.
+    Serial.println(F("[diag] both up: left=RED right=GREEN (steady)"));
+    if (lcdL) { lcdLeft.fillScreen(0xF800);  lcdLeft.flush(); }
+    if (lcdR) { lcdRight.fillScreen(0x07E0); lcdRight.flush(); }
+    delay(4000);
+
+    // Only draw the "probing" face if at least one display came up; otherwise
+    // rendering would be a no-op anyway and we skip the work.
+    if (lcdL || lcdR) {
+        eyes.setExpression(EyeExpression::DETECTING);
+        eyes.setGaze(0, 0);
+        eyes.render();
+    }
+
+    // I2C bus scan: report every address that answers, then flag the peripherals
+    // we specifically expect.
+    Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
+    bool pcaSeen = false, gpsSeen = false, bnoSeen = false;
+    // Build a compact "[28,40,10]" string of every I2C address that answers.
+    String foundStr = "[";
+    bool firstFound = true;
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+            if (!firstFound) foundStr += ",";
+            foundStr += String(addr, HEX);
+            firstFound = false;
+            if (addr == ADDR_PCA9685) pcaSeen = true;
+            if (addr == ADDR_GPS) gpsSeen = true;
+            if (addr == ADDR_BNO055) bnoSeen = true;
+        }
+    }
+    foundStr += "]";
+
+    bool imuReady = sensors.isImuReady();
+    bool vibOk = (digitalRead(VIBRATION_PIN) == HIGH);  // idle: pulled up
+    bool camOk = false;
+#if FACE_DETECTION_ENABLED
+    if (FaceDetector_Init()) {
+        camera_fb_t* fb = esp_camera_fb_get();
+        if (fb) { camOk = true; esp_camera_fb_return(fb); }
+    }
+#endif
+
+    bool allOk = lcdL && lcdR && pcaSeen && gpsSeen && bnoSeen && imuReady && vibOk && camOk;
+
+    JsonDocument doc;
+    doc["type"] = "hardware_check";
+    doc["vcc_mv"] = vccMv;
+    doc["psram"] = psramOk;
+    doc["lcd_left"] = lcdL;
+    doc["lcd_right"] = lcdR;
+    doc["servo"] = pcaSeen;
+    doc["gps"] = gpsSeen;
+    doc["imu"] = bnoSeen && imuReady;
+    doc["vibration"] = vibOk;
+    doc["camera"] = camOk;
+    doc["i2c_found"] = foundStr;
+    doc["all_ok"] = allOk;
+    String out;
+    serializeJson(doc, out);
+    Serial.println(out);
+
+    // ---- Unmissable diagnostic: flood each eye SOLID white or SOLID black ---
+    // The Mac can't power the board, so we can't rely on serial. A fully-lit
+    // panel is impossible to miss (unlike a small glyph).
+    //
+    //   LEFT eye  = PSRAM      (WHITE = PSRAM up / BLACK = PSRAM down)
+    //   RIGHT eye = LCD + I2C  (WHITE = panel wired AND all I2C devices answer
+    //                                 / BLACK = panel not wired or I2C missing)
+    //
+    // (psramOk is already resolved above via psramFound().)
+    // NOTE: the right-eye "OK" gate is the I2C *bus* (all three expected
+    // devices answer), NOT the IMU's software "ready" flag. The BNO055 can be
+    // present on the bus (answers 0x28) yet still not report ready in this
+    // check window; we don't want a healthy panel painted black over that.
+    bool i2cOk = pcaSeen && gpsSeen && bnoSeen;
+    bool lcdOk = lcdL && lcdR;
+
+    // DIAGNOSTIC (eyes show only backlight, no image, at 27 MHz): now at 6 MHz, alternate
+    // each eye between BLACK and a bright color. If a panel is receiving SPI
+    // data at all, it will FLASH - impossible to miss. Per-eye colors keep the
+    // two panels distinguishable.
+    //   LEFT  flashes RED    (0xF800)
+    //   RIGHT flashes GREEN  (0x07E0)
+    // If a panel stays solidly black through all flashes, its data path is dead.
+    Serial.println(F("[diag] flashing eyes 5x (left=RED, right=GREEN) at 6 MHz..."));
+    for (int i = 0; i < 5; i++) {
+        if (lcdL) {
+            lcdLeft.fillScreen(0x0000);  lcdLeft.flush();
+            lcdLeft.fillScreen(0xF800);  lcdLeft.flush();  // RED
+        }
+        if (lcdR) {
+            lcdRight.fillScreen(0x0000); lcdRight.flush();
+            lcdRight.fillScreen(0x07E0); lcdRight.flush();  // GREEN
+        }
+        delay(600);
+    }
+    // Hold the final colors a moment longer so they can be seen.
+    if (lcdL) { lcdLeft.fillScreen(0xF800);  lcdLeft.flush(); }
+    if (lcdR) { lcdRight.fillScreen(0x07E0); lcdRight.flush(); }
+    delay(2000);
+
+    Serial.print(F("[eyes] PSRAM="));
+    Serial.print(psramOk ? "OK" : "FAIL");
+    Serial.print(F(" LCD="));
+    Serial.print(lcdOk ? "OK" : "FAIL");
+    Serial.print(F(" servo="));
+    Serial.print(pcaSeen ? "OK" : "--");
+    Serial.print(F(" gps="));
+    Serial.print(gpsSeen ? "OK" : "--");
+    Serial.print(F(" imu="));
+    Serial.println(bnoSeen ? "OK" : "--");
+
+    Serial.println(allOk
+        ? F("HARDWARE CHECK: all peripherals detected")
+        : F("HARDWARE CHECK: one or more peripherals missing (see JSON above)"));
+}
+
+// ============================================================================
 // Setup
 // ============================================================================
 void setup() {
     Serial.begin(SERIAL_BAUD);
     delay(100);
 
+#if POWER_PROBE
+    // Lightest possible boot: ONLY serial. No PSRAM, no LCD, no camera, no
+    // I2C, no servos. If the board holds here (no RTC_SW_SYS_RST loop) but
+    // loops with the full firmware, the 3.3 V rail is fine under light load
+    // and is being dragged down by a peripheral (backlights / I2C bus).
+    Serial.println(F("POWER-PROBE: up (no PSRAM/LCD/camera/I2C/servo)"));
+    // XIAO ESP32-S3: the 5 V INPUT is sensed on D4 = GPIO5 = ADC1_CH4 through
+    // a 2:1 divider (D2/D3 are the other ADC pins; GPIO7 is NOT ADC-capable,
+    // which is why the old analogRead(7) always read 0).
+    Serial.println(F("POWER-PROBE: 5Vin sense on D4=GPIO5=ADC1_CH4, 2:1 divider"));
+    return;
+#endif
+
+#if HARDWARE_CHECK
+    // I2C-only probe, run FIRST (before PSRAM/LCD/camera) so it needs minimal
+    // current and can boot even on a marginal supply. Tells us which devices
+    // actually ANSWER on the bus (vs. just having their power LED lit).
+    Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
+    Serial.print(F("[i2c] answers:"));
+    bool any = false;
+    for (uint8_t a = 1; a < 127; a++) {
+        Wire.beginTransmission(a);
+        if (Wire.endTransmission() == 0) {
+            Serial.print(F(" 0x"));
+            Serial.print(a, HEX);
+            any = true;
+        }
+    }
+    if (!any) Serial.print(F(" (none)"));
+    Serial.println(F("  <- GPS=0x10 IMU=0x28 servo=0x40"));
+#endif
+
+#if !HARDWARE_CHECK
     // Wait for USB CDC to connect, but only briefly: the owl must boot
     // standalone (for the 4-tap update mode) even without the RPi.
+    // Skipped in HARDWARE_CHECK mode: the check must run headless (power
+    // adapter only, no host), so we must not block on a USB connection that
+    // never comes.
     uint32_t usbWaitStart = millis();
     while (!Serial && millis() - usbWaitStart < USB_WAIT_TIMEOUT_MS) {
         delay(10);
     }
+#endif
 
     Serial.println(F("Robot Owl ESP32-S3 starting..."));
 
-    // Initialize displays
-    if (!lcdLeft.begin()) {
+    // Optional wiring-verification boot: build with -DHARDWARE_CHECK=1 (see
+    // platformio.ini) to probe every peripheral and report the results instead
+    // of entering the normal state machine. The owl then idles (eyes show the
+    // pass/fail face); re-flash without the flag to resume normal operation.
+#if HARDWARE_CHECK
+    runHardwareCheck();
+    return;
+#endif
+
+    bool lcdLeftOk = false, lcdRightOk = false;
+    bringUpDisplays(lcdLeftOk, lcdRightOk);
+    if (!lcdLeftOk) {
         Serial.println(F("ERROR: Left LCD failed"));
         currentState = State::ERROR;
     }
-    if (!lcdRight.begin()) {
+    if (!lcdRightOk) {
         Serial.println(F("ERROR: Right LCD failed"));
         currentState = State::ERROR;
     }
@@ -593,6 +849,26 @@ void setup() {
 // Main loop
 // ============================================================================
 void loop() {
+#if POWER_PROBE
+    // Rolling VCC readout, 1 Hz. D4=GPIO5=ADC1_CH4 senses the 5 V INPUT through
+    // a 2:1 divider, so a healthy 5 V supply reads ~2500 mV here. Watch for a
+    // sag below ~2.0-2.2 V (=> <4-4.4 V input) at any point, especially in the
+    // first second after boot. (Reading the non-ADC GPIO7 previously gave 0.)
+    int raw = analogRead(5);
+    int vccMv = (int)((raw * 3300L) / (4095L / 2));
+    Serial.printf("t=%lu  5Vin~%d mV  (raw %d)\n",
+                  (unsigned long)millis(), vccMv, raw);
+    delay(1000);
+    return;
+#endif
+
+    // Vibration auswerten: genau einmal pro Runde, VOR allen Lesern. Der
+    // Interrupt zaehlt Flanken, diese Funktion macht daraus Zustand und
+    // Klopfzaehler. Wuerde stattdessen jeder Leser selbst abholen, nehmen sich
+    // updateState() (60 Hz) und sendTelemetry() (2 Hz) die Flanken gegenseitig
+    // weg.
+    sensors.updateVibration();
+
     // Parse incoming commands
     parseSerialCommands();
 

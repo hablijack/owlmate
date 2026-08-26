@@ -1,0 +1,46 @@
+# ============================================================================
+# PSRAM: der eigentliche Knackpunkt dieser Umstellung.
+#
+# Im Arduino-Framework-Modus stellt das Hauptprojekt das ueber
+# "board_build.memory_type = qio_opi" ein. Das ist eine Arduino-spezifische
+# Option und wirkt hier NICHT - im espidf-Modus muss es ueber sdkconfig
+# kommen. Der XIAO ESP32-S3 hat 8 MB OCTAL-PSRAM (OPI), nicht Quad.
+# Frueher scheiterte genau das mit "PSRAM ID read error: 0x00ffffff".
+# ============================================================================
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+# 8 MB Flash
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Konsole ueber USB-Serial-JTAG, damit Serial auf demselben Port landet wie
+# im Hauptprojekt (das Board hat keinen zweiten UART nach aussen).
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Arduino als Komponente: setup()/loop() sollen automatisch starten.
+CONFIG_AUTOSTART_ARDUINO=y
+
+# HARTE ANFORDERUNG des Arduino-Cores: er prueft das in seiner CMakeLists und
+# bricht sonst ab ("esp32-arduino requires CONFIG_FREERTOS_HZ=1000"). Der
+# IDF-Standard ist 100 Hz - im Arduino-Framework-Modus setzt die Plattform das
+# selbst, im espidf-Modus muss es hier stehen.
+CONFIG_FREERTOS_HZ=1000
+
+# 240 MHz, sonst laeuft die Inferenz unnoetig langsam.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# esp-dl braucht C++ Exceptions nicht, aber RTTI-freie Builds machen manchmal
+# Probleme mit den Modellklassen - vorsichtshalber an lassen.
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
+CONFIG_COMPILER_CXX_RTTI=y
+
+# Groesserer Main-Task-Stack: die Modelle allozieren im Konstruktor.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

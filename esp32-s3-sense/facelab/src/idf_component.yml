@@ -1,0 +1,13 @@
+## Verwaltete ESP-IDF-Komponenten.
+##
+## Im Arduino-Framework-Modus kamen esp32-camera und (frueher) esp-dl als
+## vorkompilierte Bibliotheken mit. In Core 3.x fehlt esp-dl dort - deshalb
+## dieses Projekt im espidf-Modus, wo sich beide als Komponenten holen lassen.
+dependencies:
+  idf:
+    version: ">=5.3"
+  ## esp-dl v3 Modell fuer Gesichtserkennung. Bringt esp-dl selbst als
+  ## Abhaengigkeit mit. Unterstuetzt esp32s3.
+  espressif/human_face_detect: "*"
+  ## Kameratreiber. Im espidf-Modus nicht automatisch dabei.
+  espressif/esp32-camera: "*"
