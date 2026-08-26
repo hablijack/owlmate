@@ -7,17 +7,17 @@ A robotic owl companion with expressive LCD eyes, face detection, IMU, GPS, and 
 ## Hardware
 
 ### Main Board
-- **Seeed Studio XIAO ESP32-S3 Sense** — ESP32-S3 dual-core @ 240 MHz, 8 MB Flash, 8 MB PSRAM (OPI), USB-CDC on boot, built-in OV2640 camera connector
+- **Seeed Studio XIAO ESP32-S3 Sense** — ESP32-S3 dual-core @ 240 MHz, 8 MB Flash, 8 MB PSRAM (OPI), USB-CDC on boot, 24-pin FPC camera connector on the Sense expansion (fitted with an **OV3660**, verified on hardware — the docs previously said OV3660 throughout)
 
 ### Peripherals
 | Component | Model | Interface | Address / Pins | Function |
 |---|---|---|---|---|
-| **LCD Eyes** | Waveshare 0.71" round (×2) | SPI (shared bus) | SCK=5, MOSI=7, DC_L=6, CS_L=8, DC_R=9, CS_R=44, RST=43 | Expressive eyes with GC9D01 driver |
-| **Camera** | OV2640 (on-board) | SCCB/I2C + parallel | XCLK=10, SIOD=40, SIOC=39, D0-D7 on GPIO 15-18,38-48, VSYNC=38, HREF=47, PCLK=13 | Face detection input |
+| **LCD Eyes** | Waveshare 0.71" round (×2) | SPI (shared bus) | shared SCK=5 (D4), MOSI=7 (D8), RST=43 (D6); left CS=44 (D7) DC=9 (D10); right CS=8 (D9) DC=4 (D3) | Expressive eyes with GC9D01 driver. Verified on hardware 2026-08-26 |
+| **Camera** | OV3660 (on-board, Sense expansion) | SCCB/I2C + parallel | XCLK=10, SIOD=40, SIOC=39, D0-D7 on GPIO 15-18,38-48, VSYNC=38, HREF=47, PCLK=13 | Face detection input |
 | **IMU** | Adafruit BNO055 | I2C | SDA=1, SCL=2, addr 0x28 | Orientation (pitch/roll/yaw) |
 | **GPS** | Adafruit PA1010D | I2C | SDA=1, SCL=2, addr 0x10 | Position/satellites |
 | **Servo Driver** | PCA9685 | I2C | SDA=1, SCL=2, addr 0x40 | 5-channel PWM for servos |
-| **Vibration** | SW420 | Digital GPIO | Pin 4 (input) | Wake-on-vibration trigger |
+| **Vibration** | SW420 | Digital GPIO | GPIO3 (D2), input | Wake-on-vibration trigger |
 | **Audio Amp** | MAX98357A (Adafruit) | I2S — **on the Raspberry Pi**, not the ESP32 | BCLK=GPIO18, LRCLK=GPIO19, DIN=GPIO21 (Pi 40-pin header) | Sound effects / voice |
 
 ### Servo Channels (PCA9685)
@@ -189,7 +189,12 @@ While in **UPDATE** state the owl is on an isolated SoftAP (`RobotOwl-Update`); 
 **Implementation:** Direct SPI register writes, PSRAM allocation via `heap_caps_calloc()`, DMA-enabled transfers.
 
 ### 3. Shared SPI Bus for Both LCDs
-**Decision:** Both eyes share SCK/MOSI/RST lines, each with independent CS and DC pins.
+**Decision:** Both eyes share SCK/MOSI/RST lines, each with independent CS and DC pins, and **CS is
+driven in software** by the driver rather than by the SPI peripheral's hardware SS.
+
+> The hardware-SS shortcut works with one panel and silently fails with two — the shared bus is
+> begun with `SS = -1`, so no chip-select is ever asserted and both panels ignore everything. That
+> single omission was the cause of the long "the eyes don't work" saga; see `BACKLOG.md`.
 
 **Rationale:**
 - ESP32-S3 has limited GPIO (only ~20 usable pins available)
@@ -232,17 +237,28 @@ While in **UPDATE** state the owl is on an isolated SoftAP (`RobotOwl-Update`); 
 - Eliminates the previous duplicate state machine that existed on both sides and fought over expressions/gaze
 
 ### 8. Face Detection Placement
-**Decision:** Face detection runs on the ESP32-S3 using esp-dl's `HumanFaceDetectMSR01` model.
+**Decision:** Face detection runs on the ESP32-S3 using **esp-dl v3** (`HumanFaceDetect`,
+model `MSRMNP_S8_V1`), which requires the firmware to build as
+**`framework = arduino, espidf`** — Arduino compiled as an ESP-IDF component.
 
-**Rationale for ESP32:**
-- ESP32-S3 has AI instructions and 8 MB PSRAM — sufficient for esp-dl face detection (~25 FPS with MSR_S8_V1 model)
-- Keeps latency low (no frame transfer to RPi needed)
-- ESP32 already sends gaze coordinates in telemetry
-- The Arduino SDK ships esp-dl headers and prebuilt `libhuman_face_detect.a`/`libdl.a`/`libesp32-camera.a`, all linked by the framework build script — no wrapper or framework switch needed
+**Why that framework:** esp-dl shipped prebuilt with Arduino core 2.0.x, but was removed from the
+prebuilt libraries in core 3.x. It is still available as a *managed IDF component*, and only the
+espidf build mode can pull those in (`src/idf_component.yml`). Downgrading the core is not an option:
+only the newer versions bring up this board's octal PSRAM, which now feeds the LCD framebuffers and
+the camera.
 
-**Implementation:** `FaceDetector.cpp` init the OV2640 (QVGA RGB565, PSRAM frame buffer), runs `HumanFaceDetectMSR01(0.25, 0.3, 5, 0.3)` per frame, publishes the best box + gaze offset into telemetry, and drives the DETECTING→INTERACTING state transitions on-device.
+**Measured on hardware (2026-08-26):** 48 ms inference, ~21 frames/s, detection scores 0.58-1.00.
 
----
+**Two things that are load-bearing:**
+- `CAM_VFLIP 1` in `config.h`. The camera is mounted vertically flipped in the owl's head, and these
+  models only find *upright* faces — without the flip, detection can never succeed at any threshold
+  or lighting. Measured across all four orientations: normal 0 hits, vflip 57, hmirror 2, 180° 10.
+- `CONFIG_LIBC_NEWLIB=y` and `CONFIG_FREERTOS_HZ=1000` in `sdkconfig.defaults`; the build fails
+  without either.
+
+**Trade-off:** the firmware env's build time goes from ~4 s to minutes, and all `board_build.*`
+options move into `sdkconfig.defaults`. The diagnostic envs stay on plain Arduino via the
+`[arduino_base]` section and keep their ~1.5 s builds.
 
 ## Project Structure
 
@@ -262,7 +278,7 @@ esp32-s3-sense/                    # ESP32 firmware
 │   │   ├── Eyes.h/.cpp            # Sclera, iris, pupil, eyelids, 8 expressions
 │   │   └── common.h               # Eye geometry, colors
 │   └── FaceDetector/              # Face detection module (esp-dl MSR01)
-│       ├── FaceDetector.h/.cpp    # OV2640 + HumanFaceDetectMSR01 integration
+│       ├── FaceDetector.h/.cpp    # OV3660 + HumanFaceDetectMSR01 integration
 │                                    # Enabled with FACE_DETECTION_ENABLED=1
 ├── src/
 │   ├── main.cpp                   # State machine, protocol, telemetry, main loop
@@ -424,7 +440,7 @@ Expect log lines like `Robot Owl Brain started (supervisor mode)` and `ESP32 own
 
 ### 7. Test the OTA update mode end-to-end
 
-This is the first thing to validate once the mechanical build is wired, since the 4-tap vibration trigger is the one part not yet hardware-tested.
+**Validated end to end on hardware 2026-08-26**: 4 taps entered update mode, the SoftAP came up, a phone connected and loaded the page, and a single tap returned the owl to normal operation.
 
 1. **Enter update mode:** tap the owl's body (the SW420 vibration sensor) **4 times** within ~1.5 s. The eyes switch to the green spinner and the RPi supervisor logs the SoftAP credentials.
 2. **Join the SoftAP:** on a phone or laptop, connect to WiFi **`RobotOwl-Update`** (password **`robotowl123`**). The owl is on an isolated AP — you lose normal internet while connected, which is expected.
@@ -433,7 +449,7 @@ This is the first thing to validate once the mechanical build is wired, since th
 5. **Confirm the new version:** after flashing, the owl reboots into the new firmware. The RPi supervisor logs `Owl firmware changed: <old> -> <new>` — this is the confirmation the OTA took.
 6. **Exit update mode:** tap the owl **once** (after the ~1 s grace period). The eyes return to normal and the owl rejoins normal operation.
 
-> ⚠️ If the 4-tap trigger doesn't fire, the SW420 debounce / tap-counting in `Sensors.cpp` is the thing to debug first (see `BACKLOG.md`). The owl boots standalone (5 s USB wait), so you can test update mode without the RPi attached — you just won't get the credential log lines.
+> ℹ️ Tap roughly once per second. The gap between taps must be **under 1.5 s** (`UPDATE_TAP_GAP_MS`) but also over ~0.75 s — a tap's own chatter rings for ~0.5 s, and two taps closer than that merge into one. `esp32-s3-sense/tools/klopftest.py` shows each tap's exact interval live if the timing needs checking. The owl boots standalone (5 s USB wait), so update mode works without the RPi attached — you just won't get the credential log lines.
 
 ---
 
@@ -454,8 +470,8 @@ python main.py [config.yaml]   # Default config path
 
 | Component | Status | Notes |
 |---|---|---|
-| **GC9D01 LCD Driver** | ✅ Complete | Custom SPI driver, PSRAM framebuffers, 27 MHz |
-| **Eye Renderer** | ✅ Complete | 8 expressions, auto-blink, gaze tracking, eyelids |
+| **GC9D01 LCD Driver** | ✅ Complete | Custom SPI driver, PSRAM framebuffers, software chip-select, 16 MHz. Both panels verified working on one shared bus |
+| **Eye Renderer** | ✅ Complete | 8 expressions, auto-blink, gaze tracking, eyelids. Two-colour black-on-white "manga" styling (see AGENTS.md) |
 | **BNO055 IMU** | ✅ Complete | Euler angles + calibration status via I2C |
 | **PA1010D GPS** | ✅ Complete | Native I2C (Adafruit_GPS), RMC+GGA NMEA parsing |
 | **SW420 Vibration** | ✅ Complete | Digital input with debounce, event counting |
@@ -463,7 +479,7 @@ python main.py [config.yaml]   # Default config path
 | **State Machine** | ✅ Complete | 8 states on ESP32 (owns behavior): BOOT/IDLE/DETECTING/INTERACTING/SLEEPING/NAVIGATING/UPDATE/ERROR |
 | **NDJSON Protocol** | ✅ Complete | Telemetry (500ms) + commands (expression/servo/gaze/nav/wake/blink/heartbeat) |
 | **Navigation "guide me home"** | ✅ Implemented | RPi computes the compass bearing to a named destination and streams the head aim; ESP32 holds it in the NAVIGATING state (live compass). Start via voice ("Bring mich nach Home") or web UI; exit via spoken keyword, web UI, arrival, or timeout. See `NAVIGATION_PLAN.md`. On-hardware `aim_sign` verification pending |
-| **Face Detection (ESP32)** | ✅ Complete | esp-dl `HumanFaceDetectMSR01`, OV2640 QVGA RGB565, gaze offsets + state transitions on-device |
+| **Face Detection (ESP32)** | ✅ Complete | esp-dl `HumanFaceDetectMSR01`, OV3660 QVGA RGB565, gaze offsets + state transitions on-device |
 | **OTA Update Mode** | ✅ Complete | 4-tap vibration → SoftAP `RobotOwl-Update` + `/update` HTTP page (HTTPUpdateServer); one tap exits; dual-bank ota_0/ota_1; standalone boot (5s USB wait) |
 | **Face Detection (RPi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
@@ -472,9 +488,10 @@ python main.py [config.yaml]   # Default config path
 
 ## Known Issues & TODO
 
+- [x] **First-run wiring check** — build with `HARDWARE_CHECK=1` (in `include/config.h` or `-DHARDWARE_CHECK=1` in `build_flags`) to boot into a self-test that probes every peripheral (both LCDs, PCA9685 servo driver, PA1010D GPS, BNO055 IMU, SW420 vibration, OV3660 camera) and prints one `{"type":"hardware_check",...}` JSON line + shows a happy/red-X face on the eyes. The `i2c_found` field lists every I2C address that answers, so a mis-wired or missing device is obvious. Flip the flag back to `0` and re-flash for normal operation. See `BACKLOG.md` (Navigation → on-hardware step 1).
 - [ ] **Face detection on ESP32:** Use esp-dl `HumanFaceDetectMSR01` (implemented). Tune score threshold / resize scale for speed vs accuracy; test indoors with good lighting
 - [x] **RPi face detection fallback:** Resolved — detection is fully on-device; an OpenCV/MediaPipe fallback on the RPi is only needed if ESP32 detection is later disabled
-- [x] **OTA updates:** Implemented — 4-tap vibration enters update mode (SoftAP `RobotOwl-Update` + `/update` HTTP page), one tap exits. Dual-bank (ota_0/ota_1) partitions; owl boots standalone without the RPi. RPi supervisor surfaces the AP credentials. Remaining: RPi-side push tooling, firmware version reporting, hardware validation of the 4-tap trigger
+- [x] **OTA updates:** Implemented — 4-tap vibration enters update mode (SoftAP `RobotOwl-Update` + `/update` HTTP page), one tap exits. Dual-bank (ota_0/ota_1) partitions; owl boots standalone without the RPi. RPi supervisor surfaces the AP credentials. Hardware-validated end to end (entry, SoftAP, web page, exit). Remaining: RPi-side push tooling
 - [ ] **Mechanical assembly:** 3D printing/enclosure, servo attachment for ears/head/wings, LCD bezels
 
 ---
@@ -484,5 +501,5 @@ python main.py [config.yaml]   # Default config path
 - XIAO ESP32-S3 Sense pinout: https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/
 - GC9D01 init sequence (TFT_eSPI PR #3783): https://github.com/Bodmer/TFT_eSPI/pull/3783
 - ESP-DL (formerly esp-face): https://github.com/espressif/esp-dl
-- OV2640 camera pinout (XIAO Sense): PWDN=-1, RESET=-1, XCLK=10, SIOD=40, SIOC=39, D7-D0=48,11,12,14,16,18,17,15, VSYNC=38, HREF=47, PCLK=13
+- OV3660 camera pinout (XIAO Sense): PWDN=-1, RESET=-1, XCLK=10, SIOD=40, SIOC=39, D7-D0=48,11,12,14,16,18,17,15, VSYNC=38, HREF=47, PCLK=13
 - PlatformIO ESP-IDF framework: https://docs.platformio.org/en/latest/platforms/espressif32.html

@@ -1,3 +1,90 @@
+## >>> NEXT SESSION (planned 2026-08-27) <<<
+
+Four items, in dependency order. Note this is NOT the order they were listed in:
+the camera extension has to go in **before** the detection tuning, because
+remounting the camera changes the framing and may change the required
+`CAM_VFLIP` — tuning detection against a camera that is about to move is wasted
+work.
+
+### 1. Re-calibrate the BNO055  (~2 min, do it first, it is quick)
+
+The calibration was wiped during the 2026-08-26 session by flashing
+`firmware.factory.bin` at 0x0, which reaches past 0x9000 and erases NVS.
+
+    ~/.platformio/penv/bin/python esp32-s3-sense/tools/kalibrieren.py
+
+**Order matters**: the figure-8 for `mag` comes BEFORE the static poses for
+`accel`, never after — sustained motion resets the accel counter to 0.
+**Done when**: the tool reports all four counters at 3/3 and prints
+`IMU: calibration complete - offsets saved to flash`. A reboot must then log
+`IMU: restored calibration offsets from flash` with `cal.restored: true`.
+
+### 2. Fit the camera extension cable
+
+Parts ordered: 24-pin 0.5 mm **type A** FFC cable (50 mm) plus a 24-pin 0.5 mm
+female-to-female coupler. Chain: camera tail -> coupler -> extension -> Sense
+socket. Adds ~7 cm.
+
+**Done when**: `pio run -e camtest -t upload` (or a reset with camtest flashed)
+still reports `0x3C antwortet`, ID `0x3660`, ~110 mean brightness with a clear
+drop when the lens is covered.
+**If the image degrades** (torn frames, low contrast, ID read failing): the
+extra ~7 cm plus two connector transitions are marginal for a 20 MHz DVP bus.
+Drop `CAM_XCLK_FREQ_HZ` in `config.h` from 20 to 10 MHz — halves the data rate
+and is much more tolerant of length.
+**Then RE-MEASURE the mounting orientation** if the camera moved at all: the
+detection models only find upright faces, and `CAM_VFLIP` was determined
+empirically (normal 0 hits / vflip 57 / hmirror 2 / 180° 10).
+
+### 3. Detection is too sporadic — investigate
+
+Measured 2026-08-26: 6 detections in 25 s in the firmware, versus near
+every-frame in the isolated `facelab/` project. Same model, same camera, same
+thresholds — so it is the integration, not the detector.
+
+Two concrete leads, in order of suspicion:
+* **The main loop is slower than `FACE_DETECT_INTERVAL_MS` (100 ms).** Eye
+  rendering alone costs ~61 ms for both panels at 16 MHz, plus servos and
+  telemetry. Fewer attempts happen than intended. Measure the actual loop period
+  first (a `millis()` delta print in `loop()`), then decide: raise
+  `LCD_SPI_FREQ`, redraw only the changed band instead of the whole 160x160
+  frame, or run detection on the second core.
+* **Stale camera frames.** With `CAMERA_GRAB_WHEN_EMPTY` and `fb_count = 2`,
+  grabbing only every 100 ms may return an old buffer. Try
+  `CAMERA_GRAB_LATEST`, and compare hit rate.
+
+Use `face.total` in telemetry as the metric — it is cumulative and therefore
+immune to the 2 Hz sampling problem that made this look like a total failure at
+first (39 of 39 frames said `detected: false` while the owl was demonstrably in
+INTERACTING).
+
+### 4. Full hardware check — everything still works
+
+Run last, as the gate. Tools all exist:
+
+| what | how | expected |
+|---|---|---|
+| eyes | `pio run -e dualtest -t upload` | both panels, distinct colours, they swap |
+| I2C bus | `pio run -e i2ctest -t upload` | 0x10, 0x28, 0x40 all answer |
+| IMU | `pio run -e imuaxis -t upload` | level owl -> roll/pitch near 0; counters 3/3 |
+| vibration | `tools/klopftest.py` | quiet = 0 edges; 4 taps enter OTA mode |
+| camera | `pio run -e camtest -t upload` | OV3660 at 0x3C, brightness responds |
+| firmware | flash `xiao_esp32s3`, watch telemetry | no LCD errors, ~535 ms cadence, `idle` at rest |
+| face | hold a face in front | `face.total` climbing, state -> `interacting`, eyes `happy` |
+| eyes design | `tools/preview_eyes.py` | all 21 expressions render |
+
+**Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes
+NVS and with it the IMU calibration. Flash `bootloader.bin` @0x0,
+`partitions.bin` @0x8000, `boot_app0.bin` @0xf000, `firmware.bin` @0x20000.
+
+### Also still open (not for tomorrow unless there is time)
+
+* `navigation.aim_sign` in the RPi `config.yaml` has never been verified against
+  hardware — flip it if the head turns the wrong way on the first nav test.
+* Nothing from the 2026-08-26 session is committed. The tree holds the whole
+  day's work: eye library, GC9D01 driver, sensor rework, esp-dl migration, five
+  diagnostic envs and four tools.
+
 # Robot Owl — Backlog
 
 Cross-session working backlog. Update the status as items get done so any
@@ -6,6 +93,419 @@ session can pick up where the last one left off.
 Status legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` blocked
 
 ---
+
+## Face detection PORTED into the real firmware — 2026-08-26
+
+`[env:xiao_esp32s3]` now runs as **`framework = arduino, espidf`** with esp-dl.
+Verified on hardware: camera OV3660 up, `FaceDetector: Sensor PID 0x3660,
+vflip=1 hmirror=0`, `Face detection enabled`, and the full behaviour chain works
+— `face.total` climbing, confidence 0.61-0.87, state going
+`idle -> detecting -> interacting` and the eyes turning `happy`.
+
+### platformio.ini restructure
+
+The diagnostic envs must NOT be dragged into espidf mode (their build time would
+go from ~1.5 s to minutes). So the common Arduino settings moved into an
+`[arduino_base]` section; the diagnostics extend that, and only the firmware env
+adds espidf. Verified: `pio run -e dualtest` still takes ~7 s.
+
+### Traps hit on the way, all fixed
+
+1. **Dead `main/CMakeLists.txt`** — a committed leftover from an ancient
+   ESP-IDF attempt, registering `main.c`/`gc9d01.c`/`pca9685.c` (C files that
+   never existed in this C++/Arduino project). Ignored in Arduino mode, fatal in
+   espidf mode. Directory removed.
+2. **`src/CMakeLists.txt` globbed `src/*.*`** — which now also swept up the new
+   `idf_component.yml` as a source file. Restricted to `*.c`/`*.cpp`.
+3. **picolibc vs newlib.** The build died compiling `espressif__cbor`
+   ("unknown type name 'cookie_io_functions_t'") because it needs
+   `fopencookie()`, which picolibc lacks. `CONFIG_LIBC_NEWLIB=y` is now explicit
+   in sdkconfig.defaults.
+4. **`sdkconfig.defaults` is only read when no `sdkconfig` exists.** A stale
+   committed `sdkconfig.xiao_esp32s3` (with picolibc) silently overrode
+   everything. After changing sdkconfig.defaults you MUST delete the generated
+   `sdkconfig.<env>` or the change does nothing.
+5. **Image too big**: 3.23 MB against 3.00 MB slots. The 1.875 MB `spiffs`
+   partition was unused (no SPIFFS/LittleFS/FFat anywhere in the code), so it
+   was folded into the OTA slots -> `0x3F0000` (4.03 MB) each, 78 % used.
+   `nvs` deliberately stays at 0x9000/0x6000 so the BNO055 offsets survive.
+
+### DO NOT flash firmware.factory.bin at 0x0
+
+It spans 0x0..0x33FDB0 and therefore **overwrites the NVS partition at 0x9000**,
+with 0xFF padding that reads as erased flash. Doing that during this session
+wiped the BNO055 calibration (`restored: false`, `mag: 0`) and it had to be
+redone. Flash the pieces separately instead:
+
+    0x0      bootloader.bin
+    0x8000   partitions.bin      (3072 B, fits the one sector, does not reach NVS)
+    0xf000   boot_app0.bin
+    0x20000  firmware.bin
+
+### FaceDetector rewritten, interface unchanged
+
+`lib/FaceDetector/FaceDetector.cpp` now targets esp-dl v3 (`HumanFaceDetect`,
+`run(dl::image::img_t)`). `FaceResult_t` and `FaceDetector_Init/Detect/Deinit`
+kept exactly as they were, so `main.cpp` needed no changes at all. Camera pins
+moved out of the .cpp into `config.h` (`CAM_PIN_*`), which is this project's
+authority for pins. `CAM_VFLIP 1` is mandatory — see the camera section above.
+
+`face.total` (cumulative detections) and `FACE_HOLD_MS` (400 ms) were added for
+the same reason `vibration.pulses` exists: detection is intermittent, the state
+machine sees every hit at ~60 Hz, but telemetry samples an instantaneous flag at
+2 Hz and missed **39 of 39** frames while the owl was demonstrably in
+INTERACTING. Never expose an intermittent event as a bare instantaneous flag.
+
+### Open
+
+Detection is far more sporadic in the firmware than in `facelab` (6 hits in 25 s
+versus near-every-frame). Suspects: the main loop exceeds
+`FACE_DETECT_INTERVAL_MS` because eye rendering costs ~61 ms, so fewer attempts
+happen; or the camera frame is stale under `CAMERA_GRAB_WHEN_EMPTY` with
+infrequent grabs. Worth measuring during the next hardware check.
+
+## Face detection WORKS with esp-dl v3 — 2026-08-26
+
+Proven end to end on hardware in `esp32-s3-sense/facelab/`, an **isolated
+PlatformIO project** (deliberately not another env in the main project — see
+below). Measured: **48 ms inference, ~21 frames/s**, detection scores 0.58-1.00.
+
+### How it was made to work
+
+1. **`framework = arduino, espidf`** — Arduino compiled as an ESP-IDF component.
+   This is what makes managed IDF components available; the normal Arduino
+   framework mode uses prebuilt libraries and cannot take new components.
+   The pioarduino platform supports it (`Frameworks: ['arduino', 'espidf']`,
+   `framework-espidf` = esp-idf v5.5.5, plus a `component_manager.py` builder).
+2. **esp-dl was already there.** `espressif__esp-dl` appears in the platform's
+   component list — it is only missing from the *prebuilt Arduino libs*, which
+   is why Core 3.x looked like it had dropped it. `espressif/human_face_detect`
+   pulls it in.
+3. **`CONFIG_FREERTOS_HZ=1000` is a hard requirement.** The Arduino core checks
+   it in its CMakeLists and aborts: "esp32-arduino requires
+   CONFIG_FREERTOS_HZ=1000 (currently 100)". The IDF default is 100.
+4. **PSRAM works, and better than before.** In espidf mode the octal PSRAM is
+   configured via sdkconfig (`CONFIG_SPIRAM_MODE_OCT`), not
+   `board_build.memory_type`. It came up first try with full diagnostics
+   ("Found 8MB PSRAM device, Speed: 80MHz, SPI SRAM memory test OK"). The old
+   "PSRAM ID read error" never appeared. This was the main risk of the switch
+   and it is retired.
+
+### THE actual cause of "detects nothing"
+
+**The camera is mounted VERTICALLY FLIPPED in the owl's head.** Measured across
+all four orientations with a face held in front:
+
+| orientation | hits |
+|---|---|
+| normal | **0** |
+| **vflip** | **57** |
+| hmirror | 2 |
+| vflip+hmirror (180 deg) | 10 |
+
+These models only find UPRIGHT faces — a flipped face is not a face to them, so
+without `sensor->set_vflip(s, 1)` detection can NEVER work, at any threshold or
+lighting. Same story as the BNO055 being mounted bottom-PCB-up: the whole
+assembly sits inverted in the head.
+
+Byte order was also settled by measurement, not guesswork: **RGB565BE** (62 hits
+vs 2 for LE). And the score thresholds were NOT the problem — the default 0.5 is
+fine, measured scores are 0.58-1.00, mostly above 0.9. Lowering them to 0.2
+while hunting was useful but is only an invitation for false positives in
+production.
+
+### esp-dl v3 API (completely different from v1)
+
+`HumanFaceDetectMSR01` does not exist any more. Read from the real headers in
+`facelab/managed_components/`, not from docs:
+
+```cpp
+HumanFaceDetect(model_type_t = ..., bool lazy_load = true);   // MSRMNP_S8_V1
+std::list<dl::detect::result_t> &run(const dl::image::img_t &img);
+Detect &set_score_thr(float thr, int idx);   // idx 0 = MSR, 1 = MNP
+
+dl::image::img_t     { void *data; uint16_t width, height; pix_type_t pix_type; }
+dl::detect::result_t { int category; float score;
+                       std::vector<int> box;      // lx, ly, rx, ry
+                       std::vector<int> keypoint; }
+```
+
+`lazy_load` defaults to true, so the constructor reports 0 ms / 0 bytes and the
+model actually loads on the first `run()`. That is normal, not a failure.
+
+### Why facelab is a separate project, not an env
+
+`framework = arduino, espidf` needs its own `sdkconfig.defaults`, and an
+`idf_component.yml` in `src/` is visible to **every** env of a project. The
+main project's seven working envs — including the hard-won PSRAM config — must
+not be exposed to that. Build times also differ by two orders of magnitude
+(~280 s cold, ~8 s incremental, versus ~4 s for the Arduino-only envs).
+
+### Still to do
+
+Port this into the real firmware. That means migrating the main env to
+`framework = arduino, espidf` and rewriting `lib/FaceDetector/FaceDetector.cpp`
+against the v3 API. `FACE_DETECTION_ENABLED` stays 0 until then.
+Also: README "Decision #8" still claims the Arduino SDK ships esp-dl and quotes
+`HumanFaceDetectMSR01` — both stale.
+
+## Camera brought up 2026-08-26 — and it is an OV3660, not an OV2640
+
+The camera works: driver init OK, sensor identified, frames captured, and it
+demonstrably *sees* (mean brightness dropped 122 -> 53 the instant a hand covered
+the lens). `pio run -e camtest` is the bring-up tool.
+
+**The sensor is an OV3660** (PID 0x3660 at SCCB address 0x3C), not the OV2640
+this project claimed in README, config.h and FaceDetector.cpp. Corrected
+throughout. Nothing functional had to change -- the pin map and
+RGB565/QVGA settings are sensor-independent and the esp32-camera driver handles
+the difference -- but the wrong name cost real time here, because:
+
+**OV3660 uses 16-BIT register addresses.** Its ID lives at 0x300A/0x300B. Probing
+it the OV2640 way (8-bit register 0x0A) returns garbage, so a healthy sensor
+looks absent. If you ever hand-probe this camera, use 16-bit reads.
+
+**The separately bought module does not work in the XIAO Sense socket.** Both it
+and the Seeed original are labelled OV3660, but the bought one produces NO ACK on
+0x3C at all while the original answers immediately and initialises first try.
+Socket, FPC connector, B2B connection, SCCB bus and driver are therefore all
+proven good. Cause not established -- FPC contact side or signal order are the
+candidates -- but it is the module, not the owl.
+
+Two diagnostic traps recorded so we do not fall in again:
+* `ESP_ERR_NOT_SUPPORTED` + "Detected camera not supported" from esp32-camera
+  does NOT mean "camera found but model unknown". `camera_probe()` leaves
+  `out_camera_model = CAMERA_NONE` and returns the same error when *nothing*
+  answers, so it is also the no-camera-at-all message.
+* Pull-ups on SDA/SCL (GPIO40/39) say NOTHING about the camera: they sit on the
+  Sense expansion board. Verified by unplugging the camera entirely -- the
+  pull-ups stayed. This session briefly concluded "the module is connected" from
+  that reading, which was wrong.
+* GPIO39/40 have no ADC on the ESP32-S3 (ADC1 = GPIO1-10, ADC2 = GPIO11-20).
+  `analogReadMilliVolts()` there does not just fail, it takes the HAL down with
+  a LoadProhibited panic.
+
+Also removed: `CAMERA_ENABLED` in config.h, which was defined but never read.
+
+### Face detection is still blocked
+
+`FaceDetector.cpp` needs `human_face_detect_msr01.hpp` from esp-dl. **esp-dl is
+not present in Arduino core 3.x** (verified: nothing matching `*human_face*` or
+`libdl.a` anywhere in ~/.platformio). It shipped with core 2.0.x, and this
+project moved to pioarduino 3.3.11 / IDF 5.5 to fix PSRAM. README "Decision #8"
+still claims the SDK provides it -- that rationale is stale.
+`FACE_DETECTION_ENABLED` stays 0 until this is resolved. Options, none started:
+  1. Detection on the RPi over USB CDC (OpenCV is already in requirements.txt;
+     USB CDC ignores the baud setting so QVGA JPEG streaming is realistic).
+     Costs the "ESP32 owns behavior" property of Decisions #7/#8.
+  2. Revert to Arduino core 2.0.x to regain esp-dl -- risks the PSRAM
+     regression that forced the upgrade, and PSRAM now feeds both the LCD
+     framebuffers and the camera.
+  3. Integrate esp-dl for IDF 5.x by hand; different API, uncertain effort.
+
+## Vibration sensor (SW-420) — RESOLVED 2026-08-26
+
+The sensor and the wiring were fine; the firmware could not read this class of
+sensor at all. Symptom: telemetry reported `vibration: {detected: true, count: 1}`
+on a motionless owl and the state machine sat permanently in DETECTING.
+
+**What the sensor actually does.** Measured with `pio run -e vibtest`: an
+AZDelivery SW-420 on D2/GPIO3 emits BURSTS OF PULSES, not a level. 3252 edges in
+28 s of tapping, median gap between edges 1 ms (63 % of gaps <= 2 ms). One tap
+is a burst of ~66 edges over ~510 ms when polled at 5 kHz, and 200-600 edges
+when counted by an interrupt that catches every one. Idle: 0 edges in 20 s.
+
+**Why the old code could never work** — two independent structural faults:
+1. `getVibration()` did a single `digitalRead()` and was called once per
+   telemetry tick (~2 Hz). Sampling a ~1 kHz chattering signal at 2 Hz is a coin
+   flip.
+2. The debounce required the raw level to be STABLE for 100 ms before accepting
+   a change. A real burst chatters for ~510 ms, so the condition never held and
+   `detected` stayed frozen at whatever the very first sample happened to be.
+
+**Now**: an `IRAM_ATTR` ISR counts edges on CHANGE, and `Sensors::updateVibration()`
+turns counts into state. Counting on CHANGE is polarity-agnostic, which also
+retires the unanswerable active-high/active-low question for this module.
+
+Two follow-on bugs found while fixing it, both worth remembering:
+* The evaluation must run ONCE PER MAIN LOOP (~60 Hz), not per telemetry tick.
+  At 2 Hz the interval between evaluations (535 ms) always exceeded
+  `VIBRATION_BURST_GAP_MS`, so every burst spanning two calls was counted twice
+  — measured 8 counts for 5 taps. The gap test compares against the last PULSE,
+  which only advances if the evaluation runs often enough.
+* Both callers (`updateState()` at 60 Hz and `sendTelemetry()` at 2 Hz) used to
+  call `getVibration()`, and each drained the pulse counter — they stole edges
+  from each other. `getVibration()` is now a side-effect-free getter.
+
+`vibration.pulses` (raw ISR edge count since boot) is now in telemetry on
+purpose: with a chattering sensor it is the only way to tell "nobody tapped"
+from "the sensor is dead", and it earned its place twice during this debugging.
+Constant at rest, jumps by hundreds per tap, continuously rising while
+motionless = interference or the pot set too sensitive.
+
+Verified on hardware: 20 s at rest -> `detected` false in 34/34 frames, counter
+0, state `idle` (it used to hang in `detecting`). 5 taps -> counter exactly 5.
+3 further taps -> counter 5 -> 8, exactly as predicted.
+
+**Do not read the module's varying DO impedance as a hardware fault.** It
+measured ~989 ohm / 75 mV in one run and ~5.6 kohm with mid-range voltages in a
+later one, and this session first mistook that for a marginal solder joint. It
+is not: the user was turning the sensitivity pot between those measurements,
+which is the whole explanation. The LM393 on the module has an OPEN-COLLECTOR
+output, so the pot moves it between two very different electrical states:
+  * pot at maximum sensitivity -> comparator permanently triggered, output
+    transistor saturated. At the ~73 uA the ESP32's internal pull-up supplies,
+    that reads as ~75 mV / ~1 kohm.
+  * pot toward less sensitive -> comparator off or near threshold, output high
+    impedance, so the pin simply FOLLOWS whichever internal pull is enabled --
+    which is exactly the 367 / 842 / 1629 mV (pullup / none / pulldown) that was
+    measured. A node that tracks the pull direction is an open-collector output
+    switched off, not a bad connection.
+The lesson is the recurring one in this project: before inventing an independent
+hardware cause, check what changed between the two measurements.
+
+Pot is now tuned so a real tap triggers but lifting the owl does not. Verified:
+60 s untouched -> 0 raw edges, 0 counter change, `detected` false in 107/107
+frames, state `idle` throughout.
+
+**The 4-tap OTA sequence is now hardware-validated end to end** (2026-08-26):
+four taps entered UPDATE, the SoftAP came up, a phone connected and loaded the
+`/update` page, and a single tap returned the owl to normal operation.
+
+Timing, for the record. The window is not a total budget but a per-gap rule:
+each tap must follow the previous within `UPDATE_TAP_GAP_MS` (1500 ms), so four
+taps span at most 4.5 s. There is also an implicit LOWER bound that is not in
+any constant: a new tap only counts after `VIBRATION_BURST_GAP_MS` (250 ms) of
+quiet measured from the previous burst's LAST PULSE, and a tap rings for ~510 ms
+— so gaps below ~0.75 s merge two taps into one. Usable band ~0.75-1.5 s, i.e.
+tap about once per second. That was judged tight enough to be worth widening,
+but it was hit first try on hardware, so 1500 ms stays.
+`tools/klopftest.py` shows each tap's exact interval live if it ever needs
+re-tuning.
+
+## Eye expressions — reference-sheet set implemented 2026-08-26
+
+All 21 moods from the reference sheet plus the 3 owl-only states now render, and
+all 24 were verified on hardware (set over serial, drawn, and echoed back in
+telemetry's `eye` field).
+
+They are NOT 21 hand-drawn shapes: `Eyes::drawBlob()` renders any of them from a
+row of `SHAPES[]` in `lib/Eyes/Eyes.cpp` — a superellipse plus `topSag`,
+`botRise`, `slantIn`, `slantOut`, `yOff`, `asymH`. Retune a mood by editing its
+row. `tools/preview_eyes.py` parses that same table and renders an HTML contact
+sheet with identical maths, so shapes can be judged without a flash cycle.
+
+Two hazards removed along the way:
+* `main.cpp` kept a second, hand-maintained `exprNames[]` array indexed by the
+  enum. Every new expression would have shifted it and made telemetry report the
+  wrong name. Names now come from `NAMES[]` via `Eyes::nameOf()`, and both
+  tables are `static_assert`-checked against `EyeExpression::_COUNT`.
+* `SLEEPY` was squashed twice — once by its shape and again by a hard-coded
+  lid override in `currentOpenness()`. The lid override is gone.
+
+Open question for the user: the slant direction on angry/furious vs
+worried/sad_down could not be read reliably off the reference image, so the
+emotional-standard convention was used (angry lowers the INNER brow, worried and
+sad lower the OUTER one). Swapping `slantIn`/`slantOut` in those four rows flips
+it if the reference actually differs.
+
+RPi side updated to match: `web_ui.py` `EXPRESSIONS` and `config.yaml`
+`expressions:`. Note an override only lasts `EXPRESSION_OVERRIDE_MS` (3 s)
+before the firmware's own state machine reclaims the eyes — re-send faster than
+that to hold a mood.
+
+## I2C bus / sensors — RESOLVED 2026-08-26
+
+The bus was never broken. A bit-banged scan (bypassing the ESP-IDF driver
+entirely) plus a Wire scan both found all three devices — 0x10 PA1010D,
+0x28 BNO055, 0x40 PCA9685 — on the configured pins GPIO1/GPIO2, at 100 kHz and
+at 400 kHz, with SDA/SCL idling HIGH. `pio run -e i2ctest` re-runs that check.
+
+What the symptoms actually were:
+
+1. **The `ESP_ERR_INVALID_STATE` (259) burst at boot is benign.** In the IDF 5.x
+   `i2c_master` driver that code is how a plain slave NACK is reported.
+   `Adafruit_BNO055::begin()` soft-resets the chip and then polls its ID
+   (`while (read8(CHIP_ID) != BNO055_ID)`); every poll before the chip finishes
+   rebooting NACKs and logs two lines. ~18 of them over ~490 ms, then it works.
+   A previous session read this as a dead bus. `CORE_DEBUG_LEVEL=0` now keeps
+   this noise off the NDJSON stream the RPi parses (diagnostic envs keep logs).
+2. **~700 ms telemetry ticks were a runaway GPS read loop.**
+   `Adafruit_GPS::available()` is hardcoded to `return 1` in I2C mode, so
+   `while (GPS.available()) GPS.read();` never exits. Now a fixed 128-byte
+   budget per call, parsing sentences as they complete. Cadence: ~535 ms.
+3. **All three IMU axes were mislabelled.** `getVector(VECTOR_EULER)` reads from
+   `BNO055_EULER_H_LSB_ADDR`, so the block is Heading, Roll, Pitch — i.e.
+   `orientation.x` is YAW, `.y` is ROLL, `.z` is PITCH. The code had
+   pitch←roll, roll←heading, yaw←pitch, which is why a level owl reported
+   `roll: 359.9`. Navigation consumes `imu.yaw` as a compass bearing
+   (`geo.aim_angle`), so it was steering the head with a pitch angle.
+4. **Fusion mode was IMUPLUS (accel+gyro, no magnetometer).** No absolute north,
+   and `calibrated` requires `mag >= 3` so it could never become true — while
+   `navigation.py:162` refuses to aim until it is. Now `OPERATION_MODE_NDOF`.
+5. **The sensor is mounted bottom-PCB-up**, 180 deg about its Y axis. Measured
+   with `pio run -e imuaxis` (owl standing level: gravity (-0.53,-1.21,-9.71),
+   7.7 deg off-axis, Euler pitch +172.8). Corrected in hardware via the
+   BNO055 AXIS_MAP registers, placement P7 — verified: pitch +172.8 -> +8.1,
+   roll -3.1 -> +2.9. The ~8 deg residual is physical mounting slop.
+6. **Calibration offsets now persist** in NVS (`owl-imu`/`bno-offsets`) and are
+   restored at boot, so the figure-8 dance is a one-off instead of a
+   per-boot prerequisite. Save/restore round-trip verified on hardware.
+   Note `getSensorOffsets()` only works when fully calibrated, and restoring
+   offsets makes the chip report 3/3/3/3 immediately — so never store bogus
+   offsets, and clear them with
+   `esptool --before usb-reset erase-region 0x9000 0x6000` if you do.
+
+Telemetry gained `imu.cal.{sys,gyro,accel,mag,restored}` so calibration progress
+is visible. Additive only; the RPi parser ignores unknown fields.
+
+**Still to do (needs the user, not code):** run the calibration dance once —
+hold still for gyro, hold stationary in ~6 orientations for accel, slow figure-8
+for mag. Until `mag` reaches 3, `yaw` is not a usable compass bearing and
+navigation will not engage. `IMU_HEADING_OFFSET_DEG` in config.h is still 0 and
+unverified: it aligns yaw with the beak direction and needs one measurement
+against a known bearing.
+
+## Eyes / shared SPI bus — RESOLVED 2026-08-26
+
+Both eyes now run on the shared SPI bus and display independent images. The
+fault was never in the hardware. Four separate bugs, in the order they bit:
+
+1. **No chip-select was ever asserted.** `GC9D01` drove no CS in any write path.
+   A single panel still worked because CS was handed to `SPIClass::begin()` as
+   the peripheral's hardware SS pin and toggled automatically; the shared-bus
+   path begins with `SS = -1`, so with two panels *neither* was ever selected
+   and both ignored the bus. Fixed: software CS around every transaction
+   (`startWrite`/`endWrite` in `lib/GC9D01`).
+2. **`Eyes::renderEye()` never called `flush()`.** Frames were drawn into the
+   PSRAM framebuffer and dropped. Fixed.
+3. **`GC9D01::fillCircle()` only filled a quarter of each circle.** It walked
+   one Bresenham octant and painted columns from `cx±r` inward to `cx±r/√2`
+   only, so every circle rendered as two crescents flanking a 1 px centre line.
+   Replaced with a scanline fill.
+4. **`Sensors::getGps()` spun forever.** `while (GPS.available()) GPS.read();`
+   never terminates when the I2C bus is wedged — `available()` keeps reporting
+   data that `read()` cannot consume. This hung the whole main loop on the first
+   telemetry tick, freezing the eyes on their first frame. Now bounded.
+
+Also corrected: `config.h` had the left and right eyes' CS/DC pairs swapped
+(verified on hardware by colouring each panel differently).
+
+**Do not re-run "read the panel ID" diagnostics.** The panel connector is 8 pins
+(VCC, GND, DIN, CLK, CS, DC, RST, BL) with no SDO/MISO — nothing can ever be
+read back, so an ID probe always returns `0x00`. A previous session read that as
+"both panels dead" and spent a day chasing a hardware fault that did not exist;
+`EYES_DEBUG_HANDOFF.md` documented that wrong conclusion and has been deleted.
+
+Removed with it: `src/pinmap.cpp` + `[env:pinmap]` (the ID-probe sweep),
+`src/tfttest.cpp` + `[env:tfttest]` + vendored `lib/TFT_eSPI/` (an A/B test
+against Waveshare's driver, question now answered), and the `*.bak` files.
+`[env:dualtest]` (`src/dualtest.cpp`) is kept as the shared-bus regression test:
+it drives both panels with distinct colours and patterns from a minimal sketch.
+
+Open, unrelated: the I2C bus (BNO055 / PA1010D / PCA9685) reports
+`ESP_ERR_INVALID_STATE` on every read, and a telemetry tick costs ~700 ms
+waiting on it. Out of scope for the eyes session.
 
 ## Eyes rendering
 
@@ -41,7 +541,8 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` blocked
   `updateServerReady` one-shot guard (`main.cpp`), so it works, but the handler
   stays registered forever. Low priority; revisit if a second `WebServer` or a
   path change is ever added.
-- [ ] **4-tap trigger not hardware-validated** — SW420 debounce / tap-counting
+- [x] **4-tap trigger hardware-validated 2026-08-26** (entry, SoftAP, web page,
+      exit all confirmed) — SW420 debounce / tap-counting
   in `Sensors.cpp` is written but untested on the real sensor. First thing to
   verify once the mechanical build is wired.
 
@@ -133,22 +634,74 @@ Full design + math + open questions: `NAVIGATION_PLAN.md`.
   entry; `NAVIGATION_PLAN.md` checklist marked done.
 
 **On-hardware (needs the Pi/ESP32) — the test procedure:**
-1. [ ] **Flash 1.2.0** — 4-tap OTA (join `RobotOwl-Update` AP → `/update`) or
-   USB; confirm `journalctl -u robot-owl-brain` shows `fw 1.2.0`.
-2. [ ] **Nav command moves the head** — from the web UI Navigate card, pick a
+  0. [x] **RESOLVED 2026-08-24 — the "brownout loop" was a corrupt flash, not a
+    power fault.** (First hardware connect.) The XIAO rebooted in a tight loop
+    (`rst:0x3 RTC_SW_SYS_RST`, ~30×/sec) and never reached `setup()`. We first
+    suspected a 3.3 V rail brownout (the minimal probe firmware also looped),
+    but reading flash over the powered-hub port revealed the **real** cause:
+    the flash was **corrupt** — the app image at `0x20000` was truncated
+    (`TE 45 00 45 … "ESP_ERR_WIFI"`, not valid code) and the OTA select at
+    `0xf000` was erased (`00 00 00 00`). The ROM aborted on the invalid image
+    → the reset storm. **Fix: `esptool erase-flash` + a clean re-write** (this
+    also clears the bad otadata). After that the board booted cleanly every
+    time. Note the board's real partition layout (from `partitions.csv`): app
+    `ota_0` is at **`0x20000`**, otadata at **`0xf000`** — NOT the stock
+    `0x10000`/`0x9000` (the earlier reads of those offsets were misleading).
+    **Flashing over the hub:** `esptool --chip esp32s3 --port
+    /dev/cu.usbmodem12101 --baud 460800 erase-flash` then `write-flash 0x0
+    bootloader.bin 0x8000 partitions.bin 0xE000 boot_app0.bin 0x20000
+    firmware.bin` (use the framework's `boot_app0.bin`; the build dir has no
+    separate `otadata.bin`).
+  0a. [x] **Two real firmware bugs fixed (were crash-looping after the flash
+    was repaired):** (1) `runHardwareCheck()` called `esp_spiram_get_size()`,
+    which **aborts on core 1 when PSRAM is absent** → replaced with
+    `psramFound()` (main.cpp). (2) `ServoController::update()` drove the
+    PCA9685 over I2C through a **non-ready `Adafruit_I2CDevice`** after
+    `_pca.begin()` failed → `LoadProhibited` null-deref (offset 0xC) at
+    `Adafruit_I2CDevice::write`. Added a `_pcaReady` guard: `begin()` records
+    the result, and `update()`/`writeMicroseconds()` no-op when the PCA isn't
+    present (ServoController.cpp/h). Also: `GC9D01::drawPixel` now guards a
+    null PSRAM framebuffer, and the 5 V sense read moved to **D4=GPIO5=ADC1_CH4**
+    (the old `analogRead(7)`/GPIO3 was a non-ADC pin → always read 0).
+  0b. [!] **The XIAO's octal PSRAM is down (hardware fault) — eyes will be
+    blank.** Every valid PSRAM mode was tried: stock `qio_opi` and `qio_qspi`
+    both report `psram: PSRAM ID read error: 0x00ffffff` (chip not found), and
+    `opi_qspi` aborts at the ROM (`Octal Flash option selected, but EFUSE not configured`) because the flash efuses aren't set for octal. The firmware now **degrades gracefully**:
+    it boots, runs the full state machine, streams telemetry, and the I2C bus is
+    healthy (GPS 0x10, IMU 0x28, servo 0x40 all answer) — only the two LCD
+    framebuffers are unavailable, so the eyes stay black. **This is not a wiring
+    mistake on your side.** To restore the eyes the module's PSRAM needs to be
+    repaired/replaced (reseat/reflow the octal part, or swap the XIAO). Face
+    detection + navigation + servos do NOT depend on PSRAM and will work once
+    the RPi brain is connected.
+  1. [ ] **First-run wiring check** — set `HARDWARE_CHECK 1` (in
+   `include/config.h`, or add `-DHARDWARE_CHECK=1` to `build_flags` in
+   `platformio.ini`), `pio run`, and flash. On boot the owl probes **every**
+   peripheral — both LCDs, the PCA9685 servo driver, the PA1010D GPS, the BNO055
+   IMU, the SW420 vibration pin, and the OV2640 camera — and prints one JSON line:
+   `{"type":"hardware_check","lcd_left":..,"lcd_right":..,"servo":..,"gps":..,
+   "imu":..,"vibration":..,"camera":..,"i2c_found":"[..]","all_ok":..}`.
+   The eyes show **happy** (all present) or **red X** (something missing);
+   `i2c_found` lists every address that answers, so a wrong-address or dead-bus
+   wire is obvious. Flip `HARDWARE_CHECK` back to `0` and re-flash to return to
+   normal operation. (The check runs before the normal init, so it doesn't depend
+   on the RPi being attached.)
+ 2. [ ] **Flash 1.2.0** (normal build) — 4-tap OTA (join `RobotOwl-Update` AP →
+   `/update`) or USB; confirm `journalctl -u robot-owl-brain` shows `fw 1.2.0`.
+ 3. [ ] **Nav command moves the head** — from the web UI Navigate card, pick a
    place and hit **Start**; the head should turn and *hold* (NAVIGATING, not
    snap back to center). **Stop** should recenter it.
-3. [ ] **Verify `aim_sign`** (the one unknown, §10.1): stand the owl facing a
+ 4. [ ] **Verify `aim_sign`** (the one unknown, §10.1): stand the owl facing a
    known direction, read its BNO055 yaw from the web UI, and Start navigation to
    a place whose bearing you know (e.g. due north). If the head points the
    *opposite* way, set `navigation.aim_sign: -1` in `config.yaml` and restart — a
    config fix, not a re-code.
-4. [ ] **Live end-to-end** — teach a place in the web UI (map picker or manual
+ 5. [ ] **Live end-to-end** — teach a place in the web UI (map picker or manual
    lat/lon), say *"Bring mich nach <name>"*, and walk toward it: the head should
    keep re-aiming (a live compass). Exercise all four exits — spoken stop phrase,
    web UI Stop, arrival (within `arrive_m`), and the 5 s no-refresh timeout —
    and confirm each recenters the head cleanly.
-5. [ ] **Confirm yaw ≈ compass heading** and that the ~3–10 m GPS accuracy is
+ 6. [ ] **Confirm yaw ≈ compass heading** and that the ~3–10 m GPS accuracy is
    acceptable for the 15 m `arrive_m` threshold (see `NAVIGATION_PLAN.md` §10).
 
 ## Hardware
