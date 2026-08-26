@@ -53,7 +53,16 @@ WING_DOWN = 40
 CENTER = 0
 
 # Expressions offered in the UI (subset of the firmware's EyeExpression names).
-EXPRESSIONS = ["neutral", "happy", "sleepy", "surprised", "angry", "searching"]
+# Every expression the firmware can draw, in the order of the reference sheet
+# the eye shapes are based on. Must match NAMES[] in
+# esp32-s3-sense/lib/Eyes/Eyes.cpp -- the firmware falls back to "neutral" for
+# a name it does not know, so a typo here shows up as an eye that will not change.
+EXPRESSIONS = [
+    "neutral", "blink_high", "happy", "glee", "blink_low", "sad_down", "sad_up",
+    "worried", "focused", "annoyed", "surprised", "skeptic", "bored",
+    "unimpressed", "sleepy", "suspicious", "squint", "angry", "furious",
+    "scared", "awe", "searching", "detecting",
+]
 
 # Sound effects the RPi can play through the MAX98357A amp (see brain/audio.py).
 # The owl-call voices (detecting/interacting/happy/sleeping/waking/alert) play a

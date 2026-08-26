@@ -6,16 +6,40 @@ serial:
   timeout: 1
 
 # The ESP32 owns behavior timing (see esp32-s3-sense/include/config.h).
-# The RPi supervisor only sends these expression names as temporary overrides.
+# The RPi supervisor only sends these expression names as temporary overrides,
+# and each override lasts 3 s (EXPRESSION_OVERRIDE_MS) before the firmware's own
+# state machine takes the eyes back -- re-send faster than that to hold a mood.
+#
+# The full set the firmware can draw is NAMES[] in
+# esp32-s3-sense/lib/Eyes/Eyes.cpp. An unknown name silently renders as
+# "neutral", so a typo looks like an eye that refuses to change.
 expressions:
+  neutral: "neutral"
+  # reference-sheet moods
   happy: "happy"
-  sleepy: "sleepy"
+  glee: "glee"
+  sad_down: "sad_down"
+  sad_up: "sad_up"
+  worried: "worried"
+  focused: "focused"
+  annoyed: "annoyed"
   surprised: "surprised"
+  skeptic: "skeptic"
+  bored: "bored"
+  unimpressed: "unimpressed"
+  sleepy: "sleepy"
+  suspicious: "suspicious"
+  squint: "squint"
   angry: "angry"
+  furious: "furious"
+  scared: "scared"
+  awe: "awe"
+  blink_high: "blink_high"
+  blink_low: "blink_low"
+  # owl states rather than moods
   searching: "searching"
   detecting: "detecting"
   sleeping: "sleeping"
-  neutral: "neutral"
 
 # Autonomous sleep (Phase 4): the owl falls asleep BY ITSELF when the
 # environment goes quiet, and wakes on a real interaction. There is deliberately
