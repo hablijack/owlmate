@@ -76,9 +76,7 @@ public:
     void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color);
     void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color);
     void drawLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color);
-    void drawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color);
     void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color);
-    void drawCircle(int16_t cx, int16_t cy, int16_t r, uint16_t color);
     void fillCircle(int16_t cx, int16_t cy, int16_t r, uint16_t color);
 
     bool ready() const { return _fb != nullptr && _bus != nullptr; }

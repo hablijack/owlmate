@@ -197,6 +197,16 @@ class FakeSupervisor:
         self.last = replace(self.last, state=state, **changes)
         self.last_state = state
 
+    def play_sound(self, sound):
+        """Mirrors Supervisor.play_sound(): the supervisor owns the amp."""
+        return self.audio.play(sound) if self.audio else False
+
+    def current_state(self):
+        """Mirrors Supervisor.current_state()."""
+        if self.last_state:
+            return self.last_state
+        return self.last.state if self.last else None
+
     def register_activity(self, now=None):
         if self.auto_sleep_enabled:
             import time as _t

@@ -153,6 +153,19 @@ class Supervisor:
                 ",".join(f"{a:g}" for a in telemetry.servos),
             )
 
+    def current_state(self) -> Optional[str]:
+        """The owl's behavior state as last observed, or None before the first frame.
+
+        Prefers last_state (updated on every transition) and falls back to the
+        newest frame. This expression was duplicated verbatim in
+        check_auto_sleep() and in Speech.feed(); Speech reached across into two
+        supervisor attributes to rebuild it, which made the supervisor's own
+        bookkeeping part of Speech's contract.
+        """
+        if self.last_state:
+            return self.last_state
+        return self.last.state if self.last else None
+
     def check_stale(self) -> None:
         """Warn (throttled) if no telemetry frame arrived for a while.
 
@@ -209,8 +222,7 @@ class Supervisor:
         if self.last is None:
             return
         now = now if now is not None else time.time()
-        state = self.last_state or (self.last.state if self.last else None)
-        if state in ("sleeping", "update"):
+        if self.current_state() in ("sleeping", "update"):
             return
         # Never auto-sleep while guiding: the owl is actively pointing the user
         # somewhere and may have no face in frame while they walk.
@@ -234,12 +246,12 @@ class Supervisor:
     def sleep(self) -> bool:
         """Put the owl to sleep."""
         logger.info("Supervisor: sleep")
-        return self.serial.send_command({"type": "sleep"})
+        return self.serial.sleep()
 
     def wake(self) -> bool:
         """Wake the owl from sleep."""
         logger.info("Supervisor: wake")
-        return self.serial.send_command({"type": "wake"})
+        return self.serial.wake()
 
     # Navigation ("guide me home"): thin wrappers over the Navigation controller
     # so the web UI and speech can start/stop it through the supervisor.

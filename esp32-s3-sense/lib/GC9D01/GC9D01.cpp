@@ -219,38 +219,8 @@ void GC9D01::drawLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t c
     }
 }
 
-void GC9D01::drawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) {
-    drawFastHLine(x, y, w, color);
-    drawFastHLine(x, y + h - 1, w, color);
-    drawFastVLine(x, y, h, color);
-    drawFastVLine(x + w - 1, y, h, color);
-}
-
 void GC9D01::fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) {
     for (int16_t i = 0; i < h; i++) drawFastHLine(x, y + i, w, color);
-}
-
-void GC9D01::drawCircle(int16_t cx, int16_t cy, int16_t r, uint16_t color) {
-    int16_t x = r, y = 0, err = 0;
-
-    auto plot = [this, cx, cy, color](int16_t dx, int16_t dy) {
-        drawPixel(cx + dx, cy + dy, color);
-        drawPixel(cx + dy, cy + dx, color);
-        drawPixel(cx - dy, cy + dx, color);
-        drawPixel(cx - dx, cy + dy, color);
-        drawPixel(cx - dx, cy - dy, color);
-        drawPixel(cx - dy, cy - dx, color);
-        drawPixel(cx + dy, cy - dx, color);
-        drawPixel(cx + dx, cy - dy, color);
-    };
-
-    plot(x, y);
-    while (x > y) {
-        y++;
-        err += 1 + 2 * y;
-        if (err + 2 * (-x - 1) + 1 > 0) { x--; err += 1 + 2 * (-x); }
-        plot(x, y);
-    }
 }
 
 void GC9D01::fillCircle(int16_t cx, int16_t cy, int16_t r, uint16_t color) {

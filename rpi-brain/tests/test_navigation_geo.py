@@ -215,5 +215,63 @@ class TestLocationsStore(unittest.TestCase):
         self.assertEqual(store.names(), ["zoo"])
 
 
+class TestLocationsMatch(unittest.TestCase):
+    """Fuzzy name matching, now owned by the store rather than by Speech.
+
+    ASR mangles proper nouns, so the store tries exact, then prefix, then a
+    small edit distance. It moved here from Speech._match_place on 2026-08-27:
+    the store owns the names and the normalization, and the web UI works with
+    the same store but could not fuzzy-match at all while this was private to
+    Speech.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.mkdtemp(prefix="owl-match-")
+        self.store = LocationsStore(os.path.join(self._dir, "locations.json"))
+        self.store.add("Hotel", 48.0, 11.0)
+        self.store.add("Zuhause", 49.0, 12.0)
+
+    def test_exact_and_case_insensitive(self):
+        self.assertEqual(self.store.match("hotel"), "hotel")
+        self.assertEqual(self.store.match("HOTEL"), "hotel")
+        self.assertEqual(self.store.match("  Hotel  "), "hotel")
+
+    def test_prefix_both_directions(self):
+        # ASR truncation is the common case.
+        self.assertEqual(self.store.match("hote"), "hotel")
+        self.assertEqual(self.store.match("hotelzimmer"), "hotel")
+
+    def test_small_edit_distance(self):
+        self.assertEqual(self.store.match("hotal"), "hotel")     # 1 substitution
+        self.assertEqual(self.store.match("zuhauze"), "zuhause")
+
+    def test_too_different_is_rejected(self):
+        # Must NOT guess wildly: a wrong guess sends the owl's head the wrong
+        # way, which is worse than admitting it did not understand.
+        self.assertIsNone(self.store.match("bahnhof"))
+        self.assertIsNone(self.store.match(""))
+        self.assertIsNone(self.store.match(None))
+
+    def test_empty_store_matches_nothing(self):
+        empty = LocationsStore(os.path.join(self._dir, "empty.json"))
+        self.assertIsNone(empty.match("hotel"))
+
+
+class TestLevenshtein(unittest.TestCase):
+    def test_known_distances(self):
+        from brain.locations import levenshtein
+        self.assertEqual(levenshtein("", ""), 0)
+        self.assertEqual(levenshtein("abc", "abc"), 0)
+        self.assertEqual(levenshtein("abc", ""), 3)
+        self.assertEqual(levenshtein("", "abc"), 3)
+        self.assertEqual(levenshtein("kitten", "sitting"), 3)
+        self.assertEqual(levenshtein("hotel", "hotal"), 1)
+
+    def test_symmetric(self):
+        from brain.locations import levenshtein
+        for a, b in (("hotel", "hotal"), ("kitten", "sitting"), ("a", "xyz")):
+            self.assertEqual(levenshtein(a, b), levenshtein(b, a))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

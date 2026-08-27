@@ -43,6 +43,11 @@ class StubSupervisor:
             self.audio.play(s)
         return True
 
+    def current_state(self):
+        if self.last_state:
+            return self.last_state
+        return self.last.state if self.last else None
+
     def sleep(self):
         self.serial.commands.append(("sleep", "sleep"))
         return True

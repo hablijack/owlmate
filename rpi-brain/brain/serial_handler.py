@@ -324,8 +324,18 @@ class SerialHandler:
             "active": active,
         })
 
+    def sleep(self) -> bool:
+        """Put the owl to sleep (policy command; enters the SLEEPING state).
+
+        The counterpart to wake(). This was missing while wake() existed, so
+        Supervisor.sleep() hand-rolled the raw dict and bypassed this layer --
+        and tests/stubs.py FakeSerial already defined sleep(), i.e. the test
+        double modelled the interface better than the class did.
+        """
+        return self.send_command({"type": "sleep"})
+
     def wake(self) -> bool:
-        """Wake up ESP32 from sleep"""
+        """Wake the owl from sleep (only meaningful while SLEEPING)."""
         return self.send_command({"type": "wake"})
 
     def blink(self, speed: int = 3) -> bool:

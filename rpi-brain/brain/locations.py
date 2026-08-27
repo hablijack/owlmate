@@ -26,6 +26,22 @@ DEFAULT_LOCATIONS_FILE = os.path.join(
 )
 
 
+def levenshtein(a: str, b: str) -> int:
+    """Classic edit distance. Strings here are place names, so cost is trivial."""
+    if len(a) < len(b):
+        a, b = b, a
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost))
+        prev = cur
+    return prev[-1]
+
+
 class LocationsStore:
     """A persisted, name -> {lat, lon} map the owl can navigate to."""
 
@@ -112,6 +128,35 @@ class LocationsStore:
     def get(self, name: str):
         """Return {"name","lat","lon"} for a location, or None if unknown."""
         return self._items.get(self.normalize(name))
+
+    def match(self, name: str):
+        """Fuzzy-match a possibly garbled name against the saved places.
+
+        Returns the normalized key, or None. Speech recognition mangles proper
+        nouns, so an exact lookup is not enough; the tiers are tried in order of
+        confidence:
+
+          1. exact (after normalization),
+          2. one is a prefix of the other -- ASR truncates ("hote" -> "hotel"),
+          3. Levenshtein distance <= 2, i.e. a couple of misheard letters.
+
+        This lived in Speech as a private helper, which meant the web UI could
+        not fuzzy-match at all even though it works with the same store.
+        """
+        target = self.normalize(name)
+        if not target:
+            return None
+        keys = self.names()
+        for key in keys:
+            if key == target:
+                return key
+        for key in keys:
+            if key.startswith(target) or target.startswith(key):
+                return key
+        for key in keys:
+            if levenshtein(target, key) <= 2:
+                return key
+        return None
 
     def names(self):
         """Normalized (key) names, sorted."""

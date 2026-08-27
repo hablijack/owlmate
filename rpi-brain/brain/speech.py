@@ -59,9 +59,6 @@ class Speech:
     def __init__(self, serial: SerialHandler, supervisor: Supervisor, config: dict):
         self.serial = serial
         self.supervisor = supervisor
-        # Audio is optional: reactions that include a sound no-op cleanly if
-        # the amp/I2S is absent (supervisor.play_sound already handles that).
-        self.audio = getattr(supervisor, "audio", None)
 
         cfg = (config or {}).get("speech", {})
         self.enabled = bool(cfg.get("enabled", False))
@@ -378,9 +375,7 @@ class Speech:
 
         # 0) Phase 4: hearing the user is an interaction trigger.
         self.supervisor.register_activity(now)
-        state = self.supervisor.last_state or (
-            self.supervisor.last.state if self.supervisor.last else None)
-        if state == "sleeping":
+        if self.supervisor.current_state() == "sleeping":
             # The normal pipeline below is gated off while asleep. The
             # exceptions are a clearly addressed wake keyword (wake the owl)
             # and a navigation STOP keyword (end an in-progress navigation so
@@ -477,8 +472,10 @@ class Speech:
             ok = self.serial.set_expression(expression)
             if not ok:
                 logger.warning("Speech: failed to send expression %r", expression)
-        if sound and self.audio is not None:
-            self.audio.play(sound)
+        if sound:
+            # The supervisor owns the amp; it no-ops cleanly when the I2S amp
+            # is absent, so there is nothing to check here.
+            self.supervisor.play_sound(sound)
 
         self._last_reaction = time.time()
         logger.info(
@@ -528,8 +525,7 @@ class Speech:
             name = self._match_place(raw_name)
             if not name:
                 logger.info("Speech: nav trigger %r but no place matches %r", trigger, raw_name)
-                if self.audio is not None:
-                    self.audio.play("alert")
+                self.supervisor.play_sound("alert")
                 self._last_reaction = time.time()
                 return
             self.supervisor.nav_start(name)
@@ -537,46 +533,15 @@ class Speech:
             return
 
     def _match_place(self, raw_name: str):
-        """Fuzzy-match a (possibly garbled) place name against the saved places.
+        """Fuzzy-match a heard place name against the saved places.
 
-        Returns the normalized key if something matches, else None. Order:
-          1. exact / normalized match,
-          2. one is a prefix of the other (ASR often truncates: "hote" -> "hotel"),
-          3. Levenshtein distance <= 2 (a couple of mis-heard letters).
+        The matching itself belongs to the store (it owns the names and the
+        normalization), so this is just the None-guard for a supervisor without
+        one. It used to be ~45 lines of matching plus a Levenshtein
+        implementation here, which kept it out of reach of the web UI.
         """
-        stores = self.supervisor.locations
-        if stores is None:
+        store = getattr(self.supervisor, "locations", None)
+        if store is None:
             return None
-        target = (raw_name or "").strip().lower()
-        if not target:
-            return None
-        names = stores.names()
-        # 1) exact / normalized
-        for n in names:
-            if n == target:
-                return n
-        # 2) prefix (shorter is a prefix of the other)
-        for n in names:
-            if n.startswith(target) or target.startswith(n):
-                return n
-        # 3) Levenshtein <= 2
-        for n in names:
-            if self._levenshtein(target, n) <= 2:
-                return n
-        return None
+        return store.match(raw_name)
 
-    @staticmethod
-    def _levenshtein(a: str, b: str) -> int:
-        """Classic Levenshtein edit distance (small strings; cheap enough)."""
-        if len(a) < len(b):
-            a, b = b, a
-        if not b:
-            return len(a)
-        prev = list(range(len(b) + 1))
-        for i, ca in enumerate(a, 1):
-            cur = [i]
-            for j, cb in enumerate(b, 1):
-                cost = 0 if ca == cb else 1
-                cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost))
-            prev = cur
-        return prev[-1]

@@ -52,6 +52,15 @@ class StubSupervisor:
         self.last = None
         self.last_state = "interacting"
 
+    def play_sound(self, sound):
+        """The supervisor owns the amp; Navigation cues through it."""
+        return self.audio.play(sound) if self.audio else False
+
+    def current_state(self):
+        if self.last_state:
+            return self.last_state
+        return self.last.state if self.last else None
+
 
 def make_nav(serial, sup, cfg_overrides=None, locations_file=None):
     cfg = make_config()

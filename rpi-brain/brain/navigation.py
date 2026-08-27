@@ -39,7 +39,6 @@ class Navigation:
         self.serial = serial
         self.supervisor = supervisor
         self.locations = locations
-        self.audio = getattr(supervisor, "audio", None)
 
         cfg = (config or {}).get("navigation", {})
         self.enabled = bool(cfg.get("enabled", False))
@@ -193,5 +192,11 @@ class Navigation:
             self.serial.nav(angle=0.0, active=False)
 
     def _cue(self, sound) -> None:
-        if sound and self.audio is not None:
-            self.audio.play(sound)
+        """Play a cue through the supervisor, which owns the amp.
+
+        Used to hold its own `audio` handle lifted off the supervisor with
+        getattr, so there were three independent ways to reach the amp and two
+        modules bypassing the supervisor to do it.
+        """
+        if sound and self.supervisor is not None:
+            self.supervisor.play_sound(sound)
