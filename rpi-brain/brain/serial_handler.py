@@ -14,10 +14,16 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+# Servos fitted, and therefore the length of the telemetry "servos" array.
+# Mirrors NUM_SERVOS in esp32-s3-sense/include/config.h. The array order is
+# fixed regardless of the physical PCA9685 channels (which are sparse -- the
+# ears sit on 14 and 15): [left_ear, right_ear, head, left_wing, right_wing].
+NUM_SERVOS = 5
 
-@dataclass
+
+@dataclass(frozen=True)
 class FaceDetection:
-    """Face detection result from ESP32"""
+    """Face detection result from the ESP32's on-device esp-dl inference."""
     detected: bool = False
     x: int = 0
     y: int = 0
@@ -26,20 +32,52 @@ class FaceDetection:
     confidence: float = 0.0
     gaze_x: float = 0.0
     gaze_y: float = 0.0
+    # Cumulative hits since boot. `detected` is an INSTANTANEOUS flag sampled at
+    # the 2 Hz telemetry rate, so it misses sporadic detections: the firmware
+    # once reported detected:false in 39 of 39 frames while the owl was
+    # demonstrably in INTERACTING. A rising `total` is how you tell "detecting
+    # sporadically" from "not detecting at all".
+    total: int = 0
 
 
-@dataclass
+@dataclass(frozen=True)
+class IMUCalibration:
+    """BNO055 per-sensor calibration counters, 0..3 each.
+
+    Sent so the figure-8 dance can be guided from the web UI instead of a serial
+    log. `sys` and `accel` are live confidence values that fall during any
+    movement, which is why IMUData.calibrated deliberately excludes them (see
+    Sensors::getImu() -- requiring all four made the flag false in 0 of 23
+    frames on a fully calibrated sensor). `restored` means the offsets came back
+    from NVS at boot, so the owl started up already calibrated.
+    """
+    sys: int = 0
+    gyro: int = 0
+    accel: int = 0
+    mag: int = 0
+    restored: bool = False
+
+
+@dataclass(frozen=True)
 class IMUData:
-    """IMU sensor data"""
+    """Fused orientation from the BNO055.
+
+    `yaw` is a TRUE geographic heading of the beak: the firmware folds the
+    mounting rotation and the magnetic declination into IMU_HEADING_OFFSET_DEG,
+    so it shares one north reference with geo.bearing_deg(). Accurate to roughly
+    +/-5..10 deg.
+    """
     pitch: float = 0.0
     roll: float = 0.0
     yaw: float = 0.0
+    # gyro >= 3 and mag >= 3. Navigation refuses to aim while this is false.
     calibrated: bool = False
+    cal: IMUCalibration = field(default_factory=IMUCalibration)
 
 
-@dataclass
+@dataclass(frozen=True)
 class GPSData:
-    """GPS sensor data"""
+    """PA1010D fix. Everything is zero until `valid` goes true."""
     valid: bool = False
     latitude: float = 0.0
     longitude: float = 0.0
@@ -47,20 +85,24 @@ class GPSData:
     satellites: int = 0
 
 
-@dataclass
+@dataclass(frozen=True)
 class VibrationData:
-    """Vibration sensor data"""
+    """SW-420 tap state, derived from an edge-counting ISR (not a level read)."""
     detected: bool = False
     count: int = 0
+    # Raw ISR edge count since boot. The only way to distinguish "nobody tapped"
+    # from "the sensor is dead": constant at rest, rising while the owl is
+    # motionless means interference or an over-sensitive pot.
+    pulses: int = 0
 
 
-@dataclass
+@dataclass(frozen=True)
 class UpdateMode:
     """Firmware update mode (SoftAP + /update HTTP server).
 
-    Populated only while the owl is in the UPDATE state (entered by a
-    4-tap vibration sequence). The owl is on an isolated SoftAP during this
-    time, so the RPi can no longer reach it over the normal USB serial link.
+    Populated only while the owl is in the UPDATE state (entered by a 4-tap
+    vibration sequence). The owl is on an isolated SoftAP during this time, so
+    the RPi can no longer reach it over the normal USB serial link.
     """
     active: bool = False
     ssid: str = ""
@@ -69,9 +111,9 @@ class UpdateMode:
     url: str = ""
 
 
-@dataclass
+@dataclass(frozen=True)
 class NavigationState:
-    """Navigation (compass-to-destination) status from ESP32.
+    """Navigation (compass-to-destination) status from the ESP32.
 
     Present only while the owl is in the NAVIGATING state. `active` is False
     otherwise; `angle` is the head angle the owl is currently holding.
@@ -80,9 +122,14 @@ class NavigationState:
     angle: float = 0.0
 
 
-@dataclass
+@dataclass(frozen=True)
 class Telemetry:
-    """Complete telemetry frame from ESP32"""
+    """One complete telemetry frame from the ESP32.
+
+    Frozen: a frame is an observation of a moment, and the supervisor hands the
+    same object to navigation, speech and the web UI. Nothing may edit it after
+    the fact.
+    """
     timestamp: float = field(default_factory=time.time)
     state: str = "idle"
     uptime_ms: int = 0
@@ -91,10 +138,110 @@ class Telemetry:
     gps: GPSData = field(default_factory=GPSData)
     vibration: VibrationData = field(default_factory=VibrationData)
     update: UpdateMode = field(default_factory=UpdateMode)
-    servos: list = field(default_factory=lambda: [0.0] * 5)
+    servos: list = field(default_factory=lambda: [0.0] * NUM_SERVOS)
     face: FaceDetection = field(default_factory=FaceDetection)
     eye_expression: str = "neutral"
     navigation: NavigationState = field(default_factory=NavigationState)
+
+
+# ============================================================================
+# Wire format
+#
+# One row per field: (wire key, attribute, coercion). These tables ARE the
+# contract with sendTelemetry() in esp32-s3-sense/src/main.cpp -- adding a
+# firmware field means adding one row here and one field to the dataclass
+# above, and nothing else.
+#
+# Until 2026-08-27 this was ~60 lines of hand-written .get() calls, and seven
+# fields the firmware sends had simply never been transcribed: the five
+# imu.cal.* counters, vibration.pulses and face.total. Every one of them exists
+# specifically to make an invisible failure visible, and all seven were being
+# dropped on the floor.
+# ============================================================================
+_IMU_CAL_FIELDS = (
+    ("sys", "sys", int),
+    ("gyro", "gyro", int),
+    ("accel", "accel", int),
+    ("mag", "mag", int),
+    ("restored", "restored", bool),
+)
+_IMU_FIELDS = (
+    ("pitch", "pitch", float),
+    ("roll", "roll", float),
+    ("yaw", "yaw", float),
+    ("calibrated", "calibrated", bool),
+)
+_GPS_FIELDS = (
+    ("valid", "valid", bool),
+    ("latitude", "latitude", float),
+    ("longitude", "longitude", float),
+    ("altitude", "altitude", float),
+    ("satellites", "satellites", int),
+)
+_VIBRATION_FIELDS = (
+    ("detected", "detected", bool),
+    ("count", "count", int),
+    ("pulses", "pulses", int),
+)
+_FACE_FIELDS = (
+    ("detected", "detected", bool),
+    ("x", "x", int),
+    ("y", "y", int),
+    ("w", "w", int),
+    ("h", "h", int),
+    ("confidence", "confidence", float),
+    ("gaze_x", "gaze_x", float),
+    ("gaze_y", "gaze_y", float),
+    ("total", "total", int),
+)
+_UPDATE_FIELDS = (
+    ("ssid", "ssid", str),
+    ("password", "password", str),
+    ("ip", "ip", str),
+    ("url", "url", str),
+)
+_NAVIGATION_FIELDS = (
+    ("active", "active", bool),
+    ("angle", "angle", float),
+)
+
+
+def _as_dict(value) -> dict:
+    """A wire section as a dict, whatever actually arrived."""
+    return value if isinstance(value, dict) else {}
+
+
+def _scalar(data: dict, key: str, cast, default):
+    """One coerced scalar, falling back to `default` on absent/null/bad type."""
+    value = data.get(key)
+    if value is None:
+        return default
+    try:
+        return cast(value)
+    except (TypeError, ValueError):
+        logger.debug("telemetry: ignoring bad %s=%r", key, value)
+        return default
+
+
+def _section(cls, spec, data: dict, **extra):
+    """Build one frozen dataclass from a wire section using `spec`.
+
+    A field that is absent, null, or of an unusable type keeps the dataclass's
+    own default rather than raising -- one malformed field must never cost the
+    whole frame, because this runs on the foreground read loop.
+    """
+    kwargs = {}
+    for wire_key, attr, cast in spec:
+        value = data.get(wire_key)
+        if value is None:
+            continue
+        try:
+            kwargs[attr] = cast(value)
+        except (TypeError, ValueError):
+            logger.debug("telemetry: ignoring bad %s=%r", wire_key, value)
+    kwargs.update(extra)
+    return cls(**kwargs)
+
 
 
 class SerialHandler:
@@ -190,73 +337,57 @@ class SerialHandler:
         return self.send_command({"type": "heartbeat"})
 
     def parse_telemetry(self, json_str: str) -> Optional[Telemetry]:
-        """Parse a telemetry JSON string into Telemetry object"""
+        """Parse one NDJSON line into a Telemetry, or None if it is not one.
+
+        None means "not a telemetry frame" -- an ack, a boot line, a
+        hardware_check, or malformed JSON. Callers treat that as "not for me",
+        not as an error.
+
+        Field-by-field transcription lives in the _*_FIELDS tables above; this
+        function only handles the frame's shape. Two sections are
+        PRESENCE-flagged rather than value-flagged: the firmware emits `update`
+        and `navigation` only while in that state, so the section merely being
+        there is what means active.
+        """
         try:
             data = json.loads(json_str)
-            if data.get("type") != "telemetry":
-                return None
-
-            telemetry = Telemetry()
-            telemetry.timestamp = time.time()
-            telemetry.state = data.get("state", "idle")
-            telemetry.uptime_ms = data.get("uptime", 0)
-            telemetry.firmware = data.get("fw", "")
-            telemetry.eye_expression = data.get("eye", "neutral")
-
-            # Parse IMU
-            imu_data = data.get("imu", {})
-            telemetry.imu.pitch = imu_data.get("pitch", 0.0)
-            telemetry.imu.roll = imu_data.get("roll", 0.0)
-            telemetry.imu.yaw = imu_data.get("yaw", 0.0)
-            telemetry.imu.calibrated = imu_data.get("calibrated", False)
-
-            # Parse GPS
-            gps_data = data.get("gps", {})
-            telemetry.gps.valid = gps_data.get("valid", False)
-            telemetry.gps.latitude = gps_data.get("latitude", 0.0)
-            telemetry.gps.longitude = gps_data.get("longitude", 0.0)
-            telemetry.gps.altitude = gps_data.get("altitude", 0.0)
-            telemetry.gps.satellites = gps_data.get("satellites", 0)
-
-            # Parse vibration
-            vib_data = data.get("vibration", {})
-            telemetry.vibration.detected = vib_data.get("detected", False)
-            telemetry.vibration.count = vib_data.get("count", 0)
-
-            # Parse update mode (present only while the owl is in UPDATE state)
-            update_data = data.get("update")
-            if update_data:
-                telemetry.update.active = True
-                telemetry.update.ssid = update_data.get("ssid", "")
-                telemetry.update.password = update_data.get("password", "")
-                telemetry.update.ip = update_data.get("ip", "")
-                telemetry.update.url = update_data.get("url", "")
-
-            # Parse servos
-            telemetry.servos = data.get("servos", [0.0] * 5)
-
-            # Parse navigation status (present only while the owl is NAVIGATING).
-            nav_data = data.get("navigation")
-            if nav_data:
-                telemetry.navigation.active = bool(nav_data.get("active", False))
-                telemetry.navigation.angle = nav_data.get("angle", 0.0)
-
-            # Parse face detection
-            face_data = data.get("face", {})
-            telemetry.face.detected = face_data.get("detected", False)
-            telemetry.face.x = face_data.get("x", 0)
-            telemetry.face.y = face_data.get("y", 0)
-            telemetry.face.w = face_data.get("w", 0)
-            telemetry.face.h = face_data.get("h", 0)
-            telemetry.face.confidence = face_data.get("confidence", 0.0)
-            telemetry.face.gaze_x = face_data.get("gaze_x", 0.0)
-            telemetry.face.gaze_y = face_data.get("gaze_y", 0.0)
-
-            return telemetry
-
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.warning(f"Failed to parse telemetry: {e}")
+        except json.JSONDecodeError as e:
+            logger.warning("Failed to parse telemetry: %s", e)
             return None
+
+        if not isinstance(data, dict) or data.get("type") != "telemetry":
+            return None
+
+        imu_raw = _as_dict(data.get("imu"))
+        update_raw = data.get("update")
+        nav_raw = data.get("navigation")
+
+        servos = data.get("servos")
+        if not isinstance(servos, list):
+            servos = [0.0] * NUM_SERVOS
+
+        return Telemetry(
+            state=_scalar(data, "state", str, "idle"),
+            uptime_ms=_scalar(data, "uptime", int, 0),
+            firmware=_scalar(data, "fw", str, ""),
+            eye_expression=_scalar(data, "eye", str, "neutral"),
+            imu=_section(
+                IMUData, _IMU_FIELDS, imu_raw,
+                cal=_section(IMUCalibration, _IMU_CAL_FIELDS,
+                             _as_dict(imu_raw.get("cal"))),
+            ),
+            gps=_section(GPSData, _GPS_FIELDS, _as_dict(data.get("gps"))),
+            vibration=_section(VibrationData, _VIBRATION_FIELDS,
+                               _as_dict(data.get("vibration"))),
+            update=(_section(UpdateMode, _UPDATE_FIELDS, _as_dict(update_raw),
+                             active=True)
+                    if update_raw else UpdateMode()),
+            navigation=(_section(NavigationState, _NAVIGATION_FIELDS,
+                                 _as_dict(nav_raw))
+                        if nav_raw else NavigationState()),
+            servos=servos,
+            face=_section(FaceDetection, _FACE_FIELDS, _as_dict(data.get("face"))),
+        )
 
     def _handle_message(self, line: str, callback: Optional[Callable[[Telemetry], None]] = None):
         """Dispatch a single NDJSON line by its 'type' field.

@@ -21,6 +21,7 @@ from brain.locations import LocationsStore  # noqa: E402
 from brain.navigation import Navigation  # noqa: E402
 from brain.serial_handler import (Telemetry, FaceDetection, VibrationData,  # noqa: E402
                                   IMUData, GPSData, UpdateMode)
+from dataclasses import replace  # noqa: E402
 
 
 def make_tel(state, face, t, gps_valid, lat, lon, yaw, calibrated):
@@ -127,8 +128,11 @@ class TestSpeechNavigate(unittest.TestCase):
         speech._last_reaction = 0.0
         speech.feed("Bring mich nach home")
         self.assertTrue(sup.navigation.is_active())
-        # The face leaves frame before the user says stop.
-        sup.last.face.detected = False
+        # The face leaves frame before the user says stop. Telemetry frames are
+        # frozen, so this replaces the frame rather than editing it in place --
+        # which is what actually happens on the wire: the next frame is a new
+        # observation, never a mutation of the previous one.
+        sup.last = replace(sup.last, face=FaceDetection(detected=False))
         speech.feed("Danke")   # a stop keyword; no face required
         self.assertFalse(sup.navigation.is_active())
 

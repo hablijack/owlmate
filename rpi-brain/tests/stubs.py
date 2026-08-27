@@ -124,42 +124,45 @@ class FakeSerial:
         return True
 
 
-class FakeTelemetry:
-    """Stand-in for the Telemetry dataclass (only the fields Speech / the web
-    UI telemetry endpoint / the auto-sleep policy / navigation use)."""
-    def __init__(self, state="interacting", face_detected=True, confidence=0.9,
-                 vibration_detected=False,
-                 gps_valid=True, lat=48.0, lon=11.0,
-                 imu_yaw=0.0, imu_calibrated=True):
-        self.state = state
-        self.face = types.SimpleNamespace(
-            detected=face_detected,
-            confidence=confidence,
-            x=0, y=0, w=0, h=0, gaze_x=0.0, gaze_y=0.0,
-        )
-        self.uptime_ms = 1000
-        self.firmware = "test"
-        self.eye_expression = "neutral"
-        self.servos = [0.0] * 5
-        self.timestamp = 0.0
-        self.update = types.SimpleNamespace(active=False)
-        self.vibration = types.SimpleNamespace(
-            detected=vibration_detected,
-            count=1 if vibration_detected else 0,
-        )
-        # Navigation reads the GPS fix + IMU heading from each frame.
-        self.gps = types.SimpleNamespace(
-            valid=gps_valid, latitude=lat, longitude=lon,
-            altitude=0.0, satellites=8 if gps_valid else 0,
-        )
-        self.imu = types.SimpleNamespace(
-            pitch=0.0, roll=0.0, yaw=imu_yaw, calibrated=imu_calibrated,
-        )
-        self.navigation = types.SimpleNamespace(active=False, angle=0.0)
-        # Command log so auto-sleep (sleep), wake-on-speech (wake) and
-        # navigation (nav) are assertable. The real SerialHandler owns this on
-        # the RPi; here the FakeSupervisor / FakeSerial appends to it.
-        self.commands = []
+def FakeTelemetry(state="interacting", face_detected=True, confidence=0.9,
+                  vibration_detected=False,
+                  gps_valid=True, lat=48.0, lon=11.0,
+                  imu_yaw=0.0, imu_calibrated=True):
+    """A REAL Telemetry frame, built from the real dataclasses.
+
+    This used to be a hand-written class of SimpleNamespaces, which made it a
+    THIRD mirror of the wire format -- and it drifted exactly as you would
+    expect: when imu.cal / vibration.pulses / face.total were finally parsed on
+    2026-08-27, every consumer of this stub broke, because the fake lacked
+    fields the real frame has.
+
+    Building the real dataclass instead means it cannot drift again: a field
+    added to Telemetry appears here for free, with the real defaults.
+
+    Imported lazily so install_stub_modules() has already run (brain.*
+    imports pyserial at module scope).
+    """
+    from brain.serial_handler import (Telemetry, FaceDetection, IMUData,
+                                      IMUCalibration, GPSData, VibrationData,
+                                      UpdateMode, NavigationState, NUM_SERVOS)
+    # A calibrated IMU implies the two counters navigation actually gates on.
+    cal = IMUCalibration(gyro=3, mag=3) if imu_calibrated else IMUCalibration()
+    return Telemetry(
+        timestamp=0.0,
+        state=state,
+        uptime_ms=1000,
+        firmware="test",
+        eye_expression="neutral",
+        face=FaceDetection(detected=face_detected, confidence=confidence),
+        vibration=VibrationData(detected=vibration_detected,
+                                count=1 if vibration_detected else 0),
+        gps=GPSData(valid=gps_valid, latitude=lat, longitude=lon,
+                    satellites=8 if gps_valid else 0),
+        imu=IMUData(yaw=imu_yaw, calibrated=imu_calibrated, cal=cal),
+        update=UpdateMode(active=False),
+        navigation=NavigationState(),
+        servos=[0.0] * NUM_SERVOS,
+    )
 
 
 class FakeSupervisor:
@@ -170,6 +173,9 @@ class FakeSupervisor:
                  auto_sleep_enabled=False, after_s=60.0):
         self.last = FakeTelemetry(state=state, face_detected=face_detected)
         self.last_state = state
+        # Commands this fake supervisor was asked to send. (These used to be
+        # appended to the telemetry object itself, which nothing ever read.)
+        self.commands = []
         self.audio = audio if audio is not None else FakeAudio()
         self.auto_sleep_enabled = auto_sleep_enabled
         self.auto_sleep_after_s = after_s
@@ -177,11 +183,18 @@ class FakeSupervisor:
         self._last_auto_sleep_sent = 0.0
 
     def set_state(self, state, face_detected=None, vibration_detected=None):
+        # Telemetry frames are frozen, so this builds the NEXT observation
+        # rather than editing the current one -- which is what the wire does:
+        # the owl sends a whole new frame, it never patches the last.
+        from dataclasses import replace
+        changes = {}
         if face_detected is not None:
-            self.last.face.detected = face_detected
+            changes["face"] = replace(self.last.face, detected=face_detected)
         if vibration_detected is not None:
-            self.last.vibration.detected = vibration_detected
-        self.last.state = state
+            changes["vibration"] = replace(
+                self.last.vibration, detected=vibration_detected,
+                count=1 if vibration_detected else 0)
+        self.last = replace(self.last, state=state, **changes)
         self.last_state = state
 
     def register_activity(self, now=None):
@@ -204,11 +217,11 @@ class FakeSupervisor:
                 self.sleep()
 
     def sleep(self):
-        self.last.commands.append(("sleep", "sleep"))
+        self.commands.append(("sleep", "sleep"))
         return True
 
     def wake(self):
-        self.last.commands.append(("wake", "wake"))
+        self.commands.append(("wake", "wake"))
         return True
 
 

@@ -120,6 +120,7 @@ TEMPLATE = r"""<!doctype html>
   .duo-col button { width:64px; height:48px; font-size:20px; }
   .duo-label { text-align:center; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
   #msg { min-height:18px; font-size:13px; color:var(--muted); }
+  .hint { font-size:12px; color:var(--muted); }
   .telemetry { font-size:13px; color:var(--muted); line-height:1.7; }
   .telemetry b { color:var(--fg); }
   .heard { margin-top:6px; padding-top:6px; border-top:1px solid rgba(128,128,128,.25); }
@@ -461,9 +462,41 @@ async function poll() {
     $('#fw').textContent = t.firmware || '?';
     const s = t.servos || [];
     const servoStr = servoNames.map((n,i) => `${n}:${(s[i]||0).toFixed(0)}\u00b0`).join('  ');
-    const face = t.face ? `face:${t.face.detected?'yes':'no'}` : '';
+    const face = t.face
+      ? `face:<b>${t.face.detected?'yes':'no'}</b> (${t.face.total||0} total)` : '';
+    // IMU: the four calibration counters are shown individually because
+    // navigation only needs gyro and mag at 3 -- sys and accel dip during any
+    // movement and are NOT a fault. "restored" means the offsets came back
+    // from flash, so the owl booted already calibrated.
+    let imuStr = '&ndash;';
+    if (t.imu) {
+      const c = t.imu.cal || {};
+      const ok = t.imu.calibrated;
+      imuStr = `yaw <b>${t.imu.yaw.toFixed(0)}&deg;</b> ` +
+        `<span style="color:${ok?'#57ab5a':'#c9a227'}">` +
+        `${ok?'calibrated':'needs figure-8'}</span> ` +
+        `<span class="hint">(gyro ${c.gyro||0}/3 mag ${c.mag||0}/3 ` +
+        `&middot; sys ${c.sys||0} accel ${c.accel||0}` +
+        `${c.restored?' &middot; from flash':''})</span>`;
+    }
+    let gpsStr = '&ndash;';
+    if (t.gps) {
+      gpsStr = t.gps.valid
+        ? `<b>${t.gps.latitude.toFixed(5)}, ${t.gps.longitude.toFixed(5)}</b> ` +
+          `<span class="hint">(${t.gps.satellites} sats)</span>`
+        : `<span style="color:#c9a227">no fix</span> ` +
+          `<span class="hint">(${t.gps.satellites||0} sats)</span>`;
+    }
+    const vib = t.vibration
+      ? `tap:<b>${t.vibration.detected?'yes':'no'}</b> ` +
+        `<span class="hint">(${t.vibration.count||0} taps, ` +
+        `${t.vibration.pulses||0} edges)</span>`
+      : '';
     $('#telemetry').innerHTML =
       `state <b>${t.state}</b> &middot; eye <b>${t.eye || '-'}</b> &middot; ${face}<br>` +
+      `imu: ${imuStr}<br>` +
+      `gps: ${gpsStr}<br>` +
+      `${vib}<br>` +
       `servos: ${servoStr}`;
     renderHeard(t);
     if (window.owlNav) window.owlNav.renderNavStatus(t);
@@ -519,6 +552,42 @@ class WebUI:
                     "confidence": t.face.confidence,
                     "gaze_x": t.face.gaze_x,
                     "gaze_y": t.face.gaze_y,
+                    # Cumulative hits: `detected` is an instantaneous 2 Hz
+                    # sample and misses sporadic detection entirely.
+                    "total": t.face.total,
+                },
+                # IMU + GPS were absent from this payload entirely, so the page
+                # could not show heading, position, or WHY navigation was
+                # refusing to aim. The calibration counters are the actionable
+                # part: navigation needs gyro >= 3 and mag >= 3, and `mag` only
+                # rises during a figure-8 -- which you cannot perform while
+                # reading a serial log.
+                "imu": {
+                    "yaw": t.imu.yaw,
+                    "pitch": t.imu.pitch,
+                    "roll": t.imu.roll,
+                    "calibrated": t.imu.calibrated,
+                    "cal": {
+                        "sys": t.imu.cal.sys,
+                        "gyro": t.imu.cal.gyro,
+                        "accel": t.imu.cal.accel,
+                        "mag": t.imu.cal.mag,
+                        "restored": t.imu.cal.restored,
+                    },
+                },
+                "gps": {
+                    "valid": t.gps.valid,
+                    "latitude": t.gps.latitude,
+                    "longitude": t.gps.longitude,
+                    "satellites": t.gps.satellites,
+                },
+                "vibration": {
+                    "detected": t.vibration.detected,
+                    "count": t.vibration.count,
+                    # Raw ISR edge count since boot. Constant at rest; rising
+                    # on a motionless owl means interference or too sensitive a
+                    # pot. The only way to tell a quiet sensor from a dead one.
+                    "pulses": t.vibration.pulses,
                 },
             }
             # Phase 3: surface what the owl last heard (and how recently) so the

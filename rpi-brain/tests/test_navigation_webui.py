@@ -197,6 +197,38 @@ class TestWebUINavEndpoints(unittest.TestCase):
         self.assertIn("navigation", d)
         self.assertFalse(d["navigation"]["active"])
 
+    def test_telemetry_exposes_the_diagnostic_fields(self):
+        """The web UI must surface the fields that explain a refusal to aim.
+
+        Navigation silently declines to aim while imu.calibrated is false. Until
+        2026-08-27 the RPi did not even parse the per-sensor counters, so the
+        page could not say WHY -- and the figure-8 that fixes it cannot be
+        performed while staring at a serial log.
+        """
+        ui, serial, sup = make_webui(locations_file=self.path)
+        from brain.serial_handler import (Telemetry, FaceDetection, VibrationData,
+                                          IMUData, IMUCalibration, GPSData,
+                                          UpdateMode)
+        sup.last = Telemetry(
+            timestamp=100.0, state="idle", firmware="test",
+            face=FaceDetection(detected=True, total=57),
+            vibration=VibrationData(detected=False, count=2, pulses=3252),
+            imu=IMUData(yaw=210.0, calibrated=False,
+                        cal=IMUCalibration(sys=1, gyro=3, accel=2, mag=1,
+                                           restored=True)),
+            gps=GPSData(valid=True, latitude=48.0, longitude=11.0, satellites=8),
+            update=UpdateMode(active=False), servos=[0.0] * 5)
+        d = ui.app.view_functions["api_telemetry"]()
+
+        self.assertEqual(d["imu"]["cal"], {"sys": 1, "gyro": 3, "accel": 2,
+                                          "mag": 1, "restored": True})
+        self.assertFalse(d["imu"]["calibrated"])
+        self.assertAlmostEqual(d["imu"]["yaw"], 210.0)
+        self.assertTrue(d["gps"]["valid"])
+        self.assertEqual(d["gps"]["satellites"], 8)
+        self.assertEqual(d["vibration"]["pulses"], 3252)
+        self.assertEqual(d["face"]["total"], 57)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
