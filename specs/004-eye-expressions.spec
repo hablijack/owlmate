@@ -17,6 +17,8 @@ away. The design has to survive that.
   the owl needs that the sheet does not cover.
 * **R-004.3** Adding or retuning a mood must not mean writing a drawing routine.
 * **R-004.4** Expression names, shapes and the enum cannot drift apart silently.
+* **R-004.6** The RPi's copy of the name list is derived from the firmware's, not
+  maintained alongside it. Any hand-kept mirror is a defect.
 * **R-004.5** Asymmetric shapes must mirror between the eyes, so the pair leans
   toward the beak rather than both leaning the same way.
 
@@ -58,6 +60,18 @@ worried and sad lower the *outer* one. `drawBlob()` mirrors it via its
 `NAMES[]` and `EyeExpression` are size-checked against `_COUNT` with
 `static_assert`, so a mismatch is a build error rather than a wrong eye.
 
+**The RPi's list is generated, not mirrored** (R-004.6).
+`rpi-brain/tools/gen_expressions.py` parses `NAMES[]` out of `Eyes.cpp` and
+writes `rpi-brain/brain/expressions.py`, following the precedent of
+`tools/preview_eyes.py`, which parses `SHAPES[]` from the same file so the
+preview sheet cannot drift. The generated file is committed, so a deployed Pi
+never needs the firmware tree; `tests/test_expressions.py` re-derives the list
+independently and fails if the two diverge.
+
+`SELECTABLE` (what the web UI offers) is every name minus `update` and `error`:
+those two are driven by the firmware's own state machine, bypass the shape table
+entirely, and are not moods anyone should pick from a palette.
+
 **Three expressions bypass the table** because they are not eyes: `UPDATE` (a
 rotating spinner), `ERROR` (a cross), `SLEEPING` (a single closed bar).
 `SEARCHING` and `DETECTING` are aliases of `SUSPICIOUS` and `FOCUSED`.
@@ -77,6 +91,17 @@ reads as a machine idling.
   firmware.
 * An expression override lasts `EXPRESSION_OVERRIDE_MS` (3 s) before the state
   machine reclaims the eyes. Holding a mood means re-sending faster than that.
+* **The mirrors had drifted, measured 2026-08-27**: firmware `NAMES[]` 26 names,
+  `web_ui.EXPRESSIONS` 23, `config.yaml expressions:` 24. `sleeping` was present
+  in one mirror and absent from the other with no stated reason. Nothing failed,
+  because an unknown name renders as `neutral` and a *missing* one simply never
+  appears in the UI.
+* `config.yaml`'s 36-line `expressions:` block was read by **no code at all** —
+  verified by grepping for every form of the key. It was pure duplication of the
+  vocabulary, and it was one of the two copies that had drifted. Deleted; the
+  only expression names that are genuinely configurable are those inside
+  `speech.reactions`, which the test suite now validates against the firmware
+  list.
 
 ## Falsified
 
@@ -91,14 +116,28 @@ reads as a machine idling.
 * **`main.cpp` kept a second, hand-maintained name array** (`exprNames[]`)
   indexed by the enum. Every new expression would have shifted it and made
   telemetry report the wrong name. This is why names now come from one table.
+* **"One source of truth in the firmware is enough."** Removing `exprNames[]`
+  fixed the firmware and left two *more* copies on the RPi, which then drifted
+  in exactly the way the firmware fix had prevented. The lesson generalises: a
+  vocabulary shared across a process boundary needs generation or a test, and
+  "it is documented as a mirror" is not either of those. `NAMES[]` even carried
+  a comment saying the RPi mirrors lived in `web_ui.py` and `config.yaml` — the
+  duplication was known, written down, and still drifted.
+* **`Eyes::markDirty()` was public API nobody called.** Documented in
+  `AGENTS.md` as the way to force a redraw "when state changes by some other
+  route"; no such route existed. Removed 2026-08-27.
 
 ## Acceptance
 
-1. `python3 tools/preview_eyes.py && open /tmp/eyes.html` — 24 shapes render and
+1. `python3 tools/preview_eyes.py && open /tmp/eyes.html` — the shapes render and
    match the reference sheet.
 2. Send each name from `NAMES[]` as an `expression` command; telemetry's `eye`
    field echoes the same name back.
-3. A build with a deliberately mismatched table fails at compile time.
+3. A build with a deliberately mismatched table fails at compile time
+   (`static_assert` against `EyeExpression::_COUNT`).
+4. `cd rpi-brain && python3 tools/gen_expressions.py --check` exits 0. Adding a
+   name to `NAMES[]` without regenerating must fail this and two tests in
+   `tests/test_expressions.py` — verified by doing exactly that.
 
 ## Open
 

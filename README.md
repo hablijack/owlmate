@@ -303,14 +303,36 @@ esp32-s3-sense/                    # ESP32 firmware
 └── .pio/build/xiao_esp32s3/       # Build output (firmware.bin)
 
 rpi-brain/                         # Raspberry Pi brain (Python)
-├── main.py                        # Entry point, config loading, serial loop
-├── config.yaml                    # Serial port, expression names
-├── requirements.txt               # pyserial, opencv-python-headless, numpy, pyyaml
+├── main.py                        # Entry point, config loading, hands the main thread to read_loop
+├── config.yaml                    # Serial port + every feature block (all opt-in, enabled: false)
+├── requirements.txt               # pyserial, numpy, pyyaml, flask, sounddevice, faster-whisper
+├── setup.sh                       # Pi provisioning: venv, systemd unit, udev rule (idempotent)
+├── assets/sounds/                 # Owl-call WAVs played through the I2S amp
+├── tools/
+│   └── gen_expressions.py         # GENERATES brain/expressions.py from the firmware's NAMES[]
+├── tests/                         # 174 tests; run on a plain Mac, no Pi or audio stack needed
+│   ├── run_tests.py               # unittest discovery
+│   ├── stubs.py                   # fakes third-party modules ONLY when not importable
+│   ├── test_protocol.py           # the ESP32<->RPi wire contract (39 tests)
+│   └── test_expressions.py        # drift guard: RPi list vs firmware NAMES[]
 └── brain/
-    ├── __init__.py
-    ├── serial_handler.py          # NDJSON parser, ESP32 communication API
-    └── supervisor.py              # Supervisor: logs telemetry, sends policy (no state machine)
+    ├── serial_handler.py          # NDJSON parse/send; the _*_FIELDS tables ARE the wire contract
+    ├── supervisor.py              # Logs telemetry, sends policy; owns the amp, state and locations
+    ├── navigation.py              # "Guide me home": computes the head aim, streams it to the ESP32
+    ├── geo.py                     # Bearing, haversine, angle wrap, aim clamp (pure functions)
+    ├── locations.py               # Named places + JSON persistence + fuzzy name matching
+    ├── speech.py                  # Mic -> VAD -> faster-whisper -> reaction pipeline (German)
+    ├── audio.py                   # WAV/tone playback via aplay on the MAX98357A amp
+    ├── web_ui.py                  # Flask control page (LAN only, no auth, disabled by default)
+    ├── templates/index.html       # The web UI page (HTML/CSS/JS; not a Python string)
+    ├── expressions.py             # GENERATED from NAMES[] -- do not edit by hand
+    └── banner.py                  # Startup banner
 ```
+
+> The RPi mirrors nothing by hand. `brain/expressions.py` is generated from the
+> firmware's `NAMES[]`, and the telemetry field tables in `serial_handler.py` are
+> the single place a new field is added. Both are drift-guarded by tests — see
+> `specs/010-serial-protocol.spec` and `specs/012-rpi-brain.spec`.
 
 ---
 
@@ -487,10 +509,10 @@ python main.py [config.yaml]   # Default config path
 | Component | Status | Notes |
 |---|---|---|
 | **GC9D01 LCD Driver** | ✅ Complete | Custom SPI driver, PSRAM framebuffers, software chip-select, 16 MHz. Both panels verified working on one shared bus |
-| **Eye Renderer** | ✅ Complete | 8 expressions, auto-blink, gaze tracking, eyelids. Two-colour black-on-white "manga" styling (see AGENTS.md) |
+| **Eye Renderer** | ✅ Complete | 26 expressions (24 user-selectable) from ONE parametric routine driven by the `SHAPES[]` table — retune a mood by editing numbers, never by adding a draw function. Auto-blink, gaze, eyelids. Two colours only, black on white (see `AGENTS.md` and `specs/004-eye-expressions.spec`) |
 | **BNO055 IMU** | ✅ Complete | Euler angles + calibration status via I2C |
 | **PA1010D GPS** | ✅ Complete | Native I2C (Adafruit_GPS), RMC+GGA NMEA parsing |
-| **SW420 Vibration** | ✅ Complete | Digital input with debounce, event counting |
+| **SW420 Vibration** | ✅ Complete | **Edge-counting ISR**, evaluated once per main loop (~60 Hz). Explicitly *not* a level read and *not* debounced: the sensor emits ~1 kHz pulse bursts, and reading it as a stable level is what pinned the owl in DETECTING forever. `vibration.pulses` reports raw edges since boot so a dead sensor is distinguishable from a quiet one. See `specs/007-vibration-and-ota.spec` |
 | **PCA9685 Servo Ctrl** | ✅ Complete | 5 channels, smooth interpolation (2°/iteration) |
 | **State Machine** | ✅ Complete | 8 states on ESP32 (owns behavior): BOOT/IDLE/DETECTING/INTERACTING/SLEEPING/NAVIGATING/UPDATE/ERROR |
 | **NDJSON Protocol** | ✅ Complete | Telemetry (500ms) + commands (expression/servo/gaze/nav/wake/blink/heartbeat) |
@@ -498,6 +520,9 @@ python main.py [config.yaml]   # Default config path
 | **Face Detection (ESP32)** | ✅ Complete | esp-dl **v3** `HumanFaceDetect` (managed IDF component, *not* the old `HumanFaceDetectMSR01`), OV3660 QVGA RGB565BE, `set_vflip(1)` mandatory, 48 ms inference (~21 fps), gaze offsets + state transitions on-device. Detection is currently more sporadic in the firmware than in the isolated `facelab/` project — see `BACKLOG.md` |
 | **OTA Update Mode** | ✅ Complete | 4-tap vibration → SoftAP `RobotOwl-Update` + `/update` HTTP page (HTTPUpdateServer); one tap exits; dual-bank ota_0/ota_1; standalone boot (5s USB wait) |
 | **Face Detection (RPi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
+| **Web UI (RPi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and BNO055 calibration counters, and a map place-picker for navigation. Page lives in `brain/templates/index.html` |
+| **Speech (RPi)** | ✅ Implemented | German. Mic → RMS VAD gate → faster-whisper (CTranslate2, not torch) → keyword clusters / navigation triggers. Gated on awake + face + energy so the owl does not react to the TV. Disabled by default. See `SPEECH_RECOGNITION_PLAN.md` |
+| **RPi test suite** | ✅ 174 tests | Runs on a plain dev machine with no Pi, mic, PortAudio, faster-whisper, Flask, Jinja2 or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔RPi wire contract (39) and firmware-vs-RPi drift guards (11) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
 
 ---
@@ -509,6 +534,9 @@ python main.py [config.yaml]   # Default config path
 - [x] **RPi face detection fallback:** Resolved — detection is fully on-device; an OpenCV/MediaPipe fallback on the RPi is only needed if ESP32 detection is later disabled
 - [x] **OTA updates:** Implemented — 4-tap vibration enters update mode (SoftAP `RobotOwl-Update` + `/update` HTTP page), one tap exits. Dual-bank (ota_0/ota_1) partitions; owl boots standalone without the RPi. RPi supervisor surfaces the AP credentials. Hardware-validated end to end (entry, SoftAP, web page, exit). Remaining: RPi-side push tooling
 - [ ] **Mechanical assembly:** 3D printing/enclosure, servo attachment for ears/head/wings, LCD bezels
+- [ ] **Detection is too sporadic (open bug):** 6 hits in 25 s in the firmware versus near-every-frame in the isolated `facelab/` project — same model, same camera, same thresholds, so it is the integration. Leading suspect is the main loop exceeding `FACE_DETECT_INTERVAL_MS` (eye rendering alone is ~61 ms). **Measure the actual loop period first.** `facelab/` is kept precisely as the A/B control
+- [ ] **`navigation.aim_sign` unverified on hardware:** flip it in `rpi-brain/config.yaml` if the head turns the wrong way on the first nav test
+- [ ] **`src/main.cpp` split (883 lines):** deliberately parked at lowest priority — it would alter loop structure while loop timing is the leading suspect for the bug above. Seams are written down in `BACKLOG.md`
 
 ---
 

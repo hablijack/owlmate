@@ -1,5 +1,13 @@
 # Navigation / "Guide me home" — Implementation Plan
 
+> **Design document, written before implementation.** It records the plan and
+> the reasoning behind it, and is kept for that. It is **not** a description of
+> the current code: for that read `specs/` (index: `specs/000-index.spec`,
+> and `specs/012-rpi-brain.spec` for the RPi side) plus `AGENTS.md`. Test counts and file
+> layouts quoted below are from the time of writing.
+>
+> Status: Navigation shipped; `navigation.aim_sign` is still unverified against hardware.
+
 The owl becomes a **compass that points at a named destination**. You teach it
 places (name + lat/lon) through the web UI, then say *"Bring mich nach Hause"*
 or *"Zeig mir den Weg zum Hotel"* and the owl enters a **NAVIGATING** mode in
@@ -383,7 +391,7 @@ actually tracks a live bearing, `aim_sign` correct) is the on-hardware step.
 - [x] `FW_VERSION` bump (1.1.0 → 1.2.0)
 - [ ] **On hardware:** flash (OTA 4-tap or USB) + verify `aim_sign` (§10.1)
 
-**RPi (brain)** — all implemented + unit-tested (104 tests pass):
+**RPi (brain)** — all implemented + unit-tested (104 tests at the time of writing; the suite is 174 as of 2026-08-27):
 - [x] `brain/geo.py` — bearing / haversine / wrap / aim math (pure, tested)
 - [x] `brain/locations.py` — store + JSON persistence
 - [x] `brain/navigation.py` — controller (start/stop/on_telemetry, 4 exit paths)

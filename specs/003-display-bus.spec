@@ -60,6 +60,20 @@ Bring-up order, encoded in `bringUpDisplays()` in `main.cpp`:
 * The panel connector is **8 pins** — VCC, GND, DIN, CLK, CS, DC, RST, BL.
   There is no SDO/MISO. Nothing can be read back from these panels, ever.
 
+## Driver surface
+
+`GC9D01` is deliberately small. Drawing only touches the PSRAM framebuffer;
+`flush()` is what transmits, and `Eyes::renderEye()` ends with it.
+
+Public: `attachBus`, `resetShared`, `begin`, `flush`, `fillScreen`, `fillRect`,
+`fillCircle`, `drawLine`, `drawFastVLine`, `drawFastHLine`, `drawPixel`.
+`drawRect` and `drawCircle` were removed on 2026-08-27 — neither had a caller,
+internally or externally. The eye renderer works column by column through
+`drawFastVLine` (that is what makes independent top and bottom edge profiles
+fall out for free, see SPEC-004), so the outline primitives never found a use.
+Unused generality in a driver on a 160×160 panel is cost without benefit; add
+back whatever a caller actually needs.
+
 ## Falsified
 
 This subsystem produced the two most expensive wrong beliefs in the project.

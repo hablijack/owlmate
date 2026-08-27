@@ -1,5 +1,13 @@
 # Speech Recognition — Implementation Plan
 
+> **Design document, written before implementation.** It records the plan and
+> the reasoning behind it, and is kept for that. It is **not** a description of
+> the current code: for that read `specs/` (index: `specs/000-index.spec`,
+> and `specs/012-rpi-brain.spec` for the RPi side) plus `AGENTS.md`. Test counts and file
+> layouts quoted below are from the time of writing.
+>
+> Status: Speech shipped and is disabled by default (`speech.enabled: false`).
+
 Goal: the owl hears the user's voice and reacts (expression + owl-call), per the
 spec's `handle_behavior_pipeline`. The spec is a sketch; this plan maps it onto
 the **actual** architecture (see README "Software Decisions") so nothing existing

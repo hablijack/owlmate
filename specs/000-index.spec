@@ -1,7 +1,7 @@
 # SPEC-000: Index and format
 
 Status: living document
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 ## What this directory is
 
@@ -16,6 +16,14 @@ worked. That is unusual and worth stating plainly: the numbers in here are not
 targets that were designed up front, they are values measured on the one physical
 owl that exists. Treat them as observations, not as guarantees about a second
 unit built from the same parts.
+
+Revised on **2026-08-27** after a refactoring pass. That pass turned up a trap
+specific to retroactive specs, recorded in SPEC-010: a spec can describe the
+design as *intended* and be read as describing the code. SPEC-010 listed three
+telemetry fields the RPi never parsed and called its dataclasses frozen when
+they were mutable — and the closer a document is to right, the less likely
+anyone checks it. Where a claim here is now backed by a test, the spec says so;
+treat an unbacked claim as a description of intent.
 
 ## Why the "Falsified" sections matter most
 
@@ -61,6 +69,7 @@ commit messages.
 | [009](009-face-detection.spec) | On-device face detection | partial |
 | [010](010-serial-protocol.spec) | NDJSON contract between ESP32 and RPi | implemented |
 | [011](011-diagnostics.spec) | Diagnostic builds and host tools | implemented |
+| [012](012-rpi-brain.spec) | RPi brain internals: ownership, packaging, testing | implemented |
 
 ## Conventions used throughout
 
@@ -73,10 +82,6 @@ commit messages.
   stating because both were named before the convention was written down, and it
   was confirmed with the owner on 2026-08-27 that they agree. If the eyes ever
   look mirrored, `pio run -e dualtest -t upload` settles it in 30 seconds.
-* **"Left" and "right" always mean the OWL's own left and right**, as it would
-  describe them looking forward. Standing in front of the owl, its left side is
-  on your right. This holds for the eyes and the servos alike — confirmed
-  2026-08-27, because both were named before the convention was written down.
 * `esp32-s3-sense/include/config.h` is the authority for pins and timing
   constants. A spec that contradicts it is out of date; fix the spec.
 * Documentation and code comments are English. Scripts under

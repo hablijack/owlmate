@@ -113,7 +113,7 @@ taking the BNO055 calibration with it. Flash the pieces separately:
 ### RPi brain (`rpi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (104 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (174 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
@@ -307,13 +307,23 @@ threads (`Speech`, `WebUI`) and each is wrapped in try/except so a failure degra
 without it" rather than exiting. The idle callback runs `supervisor.check_stale()` and
 `check_auto_sleep()` on quiet iterations.
 
-- `serial_handler.py` — pyserial + NDJSON. Frozen dataclasses (`Telemetry`, `IMUData`, `GPSData`,
-  `FaceDetection`, `VibrationData`, `NavigationState`, `UpdateMode`) are the parsed telemetry shape;
-  command senders (`set_expression`, `set_servo`, `set_gaze`, `nav`, `wake`, `blink`, `heartbeat`)
-  are the outbound protocol. This is the contract with `handleCommand()`/`sendTelemetry()` in
-  `main.cpp` — a change on one side needs the matching change on the other.
-- `supervisor.py` — owns `self.last` (latest frame), `LocationsStore` and the `Navigation`
-  controller; logs state changes, cues state sounds, tracks `last_activity` for auto-sleep.
+- `serial_handler.py` — pyserial + NDJSON. Frozen dataclasses (`Telemetry`, `IMUData`,
+  `IMUCalibration`, `GPSData`, `FaceDetection`, `VibrationData`, `NavigationState`, `UpdateMode`)
+  are the parsed telemetry shape; command senders (`set_expression`, `set_servo`, `set_gaze`, `nav`,
+  `sleep`, `wake`, `blink`, `heartbeat`) are the outbound protocol. This is the contract with
+  `handleCommand()`/`sendTelemetry()` in `main.cpp` — a change on one side needs the matching change
+  on the other.
+  **Adding a telemetry field is one row in a `_*_FIELDS` table plus one dataclass field**, nothing
+  else. Do not hand-write `.get()` calls: that is how seven fields the firmware sends came to be
+  silently discarded until 2026-08-27 (`imu.cal.*`, `vibration.pulses`, `face.total` — all of them
+  diagnostics that exist to make an invisible failure visible). A bad or null field falls back to its
+  default and logs at debug; this runs on the foreground thread, so it must never raise. Frames are
+  frozen — derive with `dataclasses.replace`. See `specs/010-serial-protocol.spec` R-010.5.
+- `supervisor.py` — owns `self.last` (latest frame), `LocationsStore`, the `Navigation` controller
+  **and the audio amp**; logs state changes, cues state sounds, tracks `last_activity` for
+  auto-sleep. It is the only module that touches `Audio`: play sounds via `supervisor.play_sound()`,
+  never by lifting an `audio` handle off it. Ask it what state the owl is in via
+  `supervisor.current_state()` rather than rebuilding `last_state or last.state` at the call site.
 - `navigation.py` + `geo.py` + `locations.py` — all the "guide me home" math is here; the ESP32 only
   holds the angle it is told. `geo.aim_angle()`'s `sign` comes from `navigation.aim_sign` in
   config — **flip that config value** if the head points the wrong way on hardware (this is still
@@ -323,9 +333,13 @@ without it" rather than exiting. The idle callback runs `supervisor.check_stale(
   keyword clusters so "wie komme ich zum Zoo" isn't stolen by the `question` cluster. German
   keywords/clusters/reactions all live in `config.yaml`, not in code. Heavy imports are lazy so the
   brain starts on a machine with no mic.
-- `web_ui.py` — Flask, port 8080, disabled by default, **no authentication** (LAN only). The HTML is
-  a `render_template_string` literal in the same file. `/api/*` endpoints forward the same NDJSON
-  commands the supervisor uses.
+- `web_ui.py` — Flask, port 8080, disabled by default, **no authentication** (LAN only). The page
+  lives in `brain/templates/index.html` (~430 lines) and is read once at import; it is still
+  rendered with `render_template_string`, deliberately *not* Flask's `render_template` — see
+  `specs/012-rpi-brain.spec`. `/api/*` endpoints forward the same NDJSON commands the supervisor
+  uses. `EXPRESSIONS` is generated, not written here. The map picker loads Leaflet **and its tiles**
+  from two remote hosts and degrades to "type the lat/lon" offline; do not "fix" that by vendoring
+  leaflet.js — the comment above the CDN tags explains why it would not help.
 - `audio.py` — plays WAVs from `assets/sounds/` (or synthesizes tones) through `aplay` on the Pi's
   I2S MAX98357A amp. No-ops with a log line when the amp/I2S is absent. **All audio is on the Pi;
   the ESP32 has no audio pins.**
@@ -339,7 +353,7 @@ same way. `config.yaml`'s comments are the reference documentation for each key.
 `specs/` holds the decision record: what this machine is meant to do, why each
 choice was made, the measurements that justify it, and — most valuable — the
 **hypotheses that turned out to be wrong**. Written retroactively on 2026-08-26,
-after the subsystems worked.
+after the subsystems worked; revised 2026-08-27 after a refactoring pass.
 
 Read `specs/000-index.spec` first; it explains the format and indexes the rest.
 Before re-diagnosing anything, read that subsystem's **Falsified** section.
@@ -350,6 +364,15 @@ where you will trip over it.
 Requirements are numbered `R-NNN.n` and can be cited from code comments.
 If a spec contradicts `esp32-s3-sense/include/config.h`, the header wins — fix
 the spec.
+
+**A retroactive spec can describe intent and read as description.** SPEC-010
+listed three telemetry fields the RPi never parsed, and called its dataclasses
+frozen while they were mutable — and the closer a document is to right, the less
+likely anyone checks. Where a claim is backed by a test the spec now says so;
+treat an unbacked claim as intent. Two specs are especially worth reading before
+touching the RPi: `010-serial-protocol` (the wire contract, R-010.5 "every field
+sent must be parsed") and `012-rpi-brain` (which module owns what, and why a
+regression test is assumed broken until it has been seen to fail).
 
 ## Docs in this repo
 
@@ -397,7 +420,11 @@ shapes — fall out for free; a row-by-row rasteriser could not do it.
 a mismatch is a build error rather than a silently wrong eye. `NAMES[]` is the single source for the
 protocol strings — `Eyes::nameOf()`/`parseName()` back both telemetry's `eye` field and the
 `expression` command. `main.cpp` used to keep a second hand-maintained list; it doesn't any more.
-The RPi mirrors of this list live in `web_ui.py` `EXPRESSIONS` and `config.yaml` `expressions:`.
+The RPi copy is **generated** from `NAMES[]` by `rpi-brain/tools/gen_expressions.py` into
+`rpi-brain/brain/expressions.py` — never hand-edit it, and regenerate after adding a mood
+(`cd rpi-brain && python3 tools/gen_expressions.py`). `tests/test_expressions.py` fails if the two
+diverge. Two hand-kept mirrors existed until 2026-08-27 and had already drifted (26 / 23 / 24 names);
+`config.yaml`'s `expressions:` block turned out to be read by nothing and is gone.
 
 **Preview without flashing**: `python3 esp32-s3-sense/tools/preview_eyes.py && open /tmp/eyes.html`
 parses `SHAPES[]` straight out of the C++ and re-implements the identical maths, so the contact sheet
@@ -411,6 +438,17 @@ including cable colours — is in `WIRING.md`, corrected against `config.h` on 2
 
 All three I2C devices work (verified: live BNO055 Euler angles, 43 NMEA sentences in 6 s from the
 PA1010D, a PCA9685 servo ramp). Telemetry runs at ~535 ms.
+
+**Refactoring pass, 2026-08-27** (10 commits, all seven PlatformIO envs build, RPi suite 104 → 174
+tests): dead code removed across the eyes/driver/sensors; five real defects fixed (an ack log line
+with a format-placeholder mismatch, a doubled UPDATE-mode announcement, a read loop that died on any
+callback exception, `angleToUs` ignoring `SERVO_MAX_US`, and a `powerprobe` env that built the whole
+firmware); the seven dropped telemetry fields now parsed and surfaced in the web UI; the expression
+list generated from `NAMES[]`; `WIRING.md` corrected (it had the two eye CS lines swapped and the
+vibration sensor on the right eye's DC). See `BACKLOG.md` for what the pass deliberately left alone —
+in particular **`src/main.cpp` is still 883 lines and its split is parked at lowest priority** until
+the sporadic-detection bug is diagnosed, because it would alter loop structure while loop timing is
+the leading suspect.
 
 The BNO055 was calibrated on hardware 2026-08-26 and the offsets persist in NVS, so a boot logs
 `IMU: restored calibration offsets from flash` and comes up with a live heading. Re-run

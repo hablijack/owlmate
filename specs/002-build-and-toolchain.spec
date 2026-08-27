@@ -18,6 +18,9 @@ over while probing hardware, must not pay that price.
 * **R-002.3** The octal PSRAM must initialise. It carries the LCD framebuffers
   and the camera buffers; without it neither works.
 * **R-002.4** Flashing must never destroy stored calibration data.
+* **R-002.5** A diagnostic env must build only the source it is diagnosing. An
+  image that links the whole firmware cannot answer a question about the whole
+  firmware's load.
 
 ## Decisions
 
@@ -92,6 +95,25 @@ Four hard requirements discovered by hitting them:
 * **"Switching to espidf mode risks the PSRAM configuration."** It was the main
   worry before trying, and it turned out backwards: PSRAM comes up more reliably
   in espidf mode, with far better diagnostics than Arduino mode ever printed.
+* **"`extends` inherits `build_flags`."** It does not — a `build_flags` in the
+  child *replaces* the parent's rather than appending. Every env therefore
+  re-lists the same `-DARDUINO_USB_*` and `-DFACE_DETECTION_ENABLED` flags, and
+  `[env:xiao_esp32s3]` silently loses the `-DBOARD_HAS_PSRAM` that
+  `[arduino_base]` sets. Harmless here only because in espidf mode `sdkconfig`
+  owns PSRAM, not that flag — but it is an accident, not a decision. The
+  consequence to watch for is that **the value of a flag depends on which env you
+  are reading**: `FACE_DETECTION_ENABLED` is `0` in `[arduino_base]` and `1` in
+  the firmware env, and `AGENTS.md` stated the `0` as though it were global.
+  Use `${arduino_base.build_flags}` if this is ever tidied.
+* **"A compile-time flag is enough to make a minimal image."** `powerprobe` was a
+  `#if POWER_PROBE` branch inside `main.cpp`'s `setup()`/`loop()`, and its env had
+  no `build_src_filter` — so it built the entire firmware, constructed every
+  peripheral object, and skipped the work at runtime with an early `return`. Its
+  only question is "does the 3.3 V rail hold under a LIGHT load?", which that
+  image cannot answer, because the load was never light. Split into
+  `src/powerprobe.cpp` on 2026-08-27: 297 KB flash / 22.5 KB RAM, against the
+  firmware's 3.28 MB. Hence R-002.5. See also SPEC-011, where the same mistake is
+  recorded as a diagnostics failure — it is both.
 
 ## Acceptance
 
