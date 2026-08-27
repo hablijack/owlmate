@@ -35,7 +35,7 @@ Arduino-only path (SPEC-002).
 | `imuaxis` | IMU mounting | prints gravity in the **raw sensor frame**, deliberately no axis remap |
 | `vibtest` | vibration sensor | pull-up/pull-down test, sink impedance, edge scan over **all 11 header pins** |
 | `camtest` | camera | 8-bit **and** 16-bit ID reads, plus mean brightness to catch "initialises but returns black" |
-| `powerprobe` | supply rail | minimal image, rolling VCC reading |
+| `powerprobe` | supply rail | a **genuinely** minimal image — its own `src/powerprobe.cpp`, no PSRAM/LCD/camera/I2C/servos — plus a rolling 5 V-input reading |
 
 **Host tools are separate from firmware diagnostics**, live in
 `esp32-s3-sense/tools/`, and are run by the user so that timing is in their
@@ -89,6 +89,15 @@ Diagnostics that changed a conclusion, and what they cost:
   enabled says nothing about what is attached. Twice this was read as "the device
   is connected" (the vibration pin, then the camera's SCCB lines). The pull-*down*
   variant is the one that discriminates.
+* **"A compile-time flag is enough to make a minimal image."** `powerprobe`
+  existed as a `#if POWER_PROBE` branch in `main.cpp`'s `setup()`/`loop()`, and
+  its env carried no `build_src_filter` — so it built the **entire** firmware,
+  constructed every peripheral object, and only skipped the work at runtime with
+  an early `return`. Its whole purpose is to answer "does the rail hold under a
+  LIGHT load?", which that image cannot answer: the load was never light. Split
+  into `src/powerprobe.cpp` with a filter on 2026-08-27; the image went from the
+  full firmware to 292 KB flash / 22.5 KB RAM. A diagnostic's *build* has to be
+  as isolated as its claim (R-011.2 again, one level down).
 
 ## Acceptance
 

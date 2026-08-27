@@ -538,8 +538,8 @@ class WebUI:
 
         @app.route("/api/blink", methods=["POST"])
         def api_blink():
-            speed = request.get_json(silent=True) or {}
-            speed = int(speed.get("speed", 3))
+            body = request.get_json(silent=True) or {}
+            speed = int(body.get("speed", 3))
             ok = self.serial.blink(speed)
             return jsonify({"ok": ok})
 
@@ -581,7 +581,8 @@ class WebUI:
         @app.route("/api/sound", methods=["POST"])
         def api_sound():
             value = (request.get_json(silent=True) or {}).get("value", "beep")
-            # Play locally on the RPi (amp) and tell the ESP32 as well.
+            # RPi-only: the MAX98357A amp is on the Pi's I2S bus and the ESP32
+            # has no audio pins at all, so there is nothing to forward.
             ok = self.supervisor.play_sound(value)
             return jsonify({"ok": ok, "sound": value})
 

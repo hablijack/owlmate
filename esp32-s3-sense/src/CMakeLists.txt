@@ -5,9 +5,10 @@
 # uebergeben, was CMake mit einem Fehler quittiert.
 #
 # Alle Diagnose-Sketche in src/ (dualtest, i2ctest, imuaxis, vibtest, camtest,
-# und der POWER_PROBE-Zweig in main.cpp) sind per #if auf ihr jeweiliges Flag
-# geschuetzt und kompilieren im Firmware-Build zu nichts - sie duerfen also
-# mitgeglobt werden.
+# powerprobe) sind per #if auf ihr jeweiliges *_ACTIVE-Flag geschuetzt und
+# kompilieren im Firmware-Build zu nichts - sie duerfen also mitgeglobt werden.
+# Neue Diagnose-Quellen MUESSEN diesem Muster folgen, sonst kollidieren ihre
+# setup()/loop() mit denen aus main.cpp.
 FILE(GLOB_RECURSE app_sources
      ${CMAKE_CURRENT_SOURCE_DIR}/*.c
      ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)

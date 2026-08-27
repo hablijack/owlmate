@@ -752,19 +752,6 @@ void setup() {
     Serial.begin(SERIAL_BAUD);
     delay(100);
 
-#if POWER_PROBE
-    // Lightest possible boot: ONLY serial. No PSRAM, no LCD, no camera, no
-    // I2C, no servos. If the board holds here (no RTC_SW_SYS_RST loop) but
-    // loops with the full firmware, the 3.3 V rail is fine under light load
-    // and is being dragged down by a peripheral (backlights / I2C bus).
-    Serial.println(F("POWER-PROBE: up (no PSRAM/LCD/camera/I2C/servo)"));
-    // XIAO ESP32-S3: the 5 V INPUT is sensed on D4 = GPIO5 = ADC1_CH4 through
-    // a 2:1 divider (D2/D3 are the other ADC pins; GPIO7 is NOT ADC-capable,
-    // which is why the old analogRead(7) always read 0).
-    Serial.println(F("POWER-PROBE: 5Vin sense on D4=GPIO5=ADC1_CH4, 2:1 divider"));
-    return;
-#endif
-
 #if HARDWARE_CHECK
     // I2C-only probe, run FIRST (before PSRAM/LCD/camera) so it needs minimal
     // current and can boot even on a marginal supply. Tells us which devices
@@ -849,19 +836,6 @@ void setup() {
 // Main loop
 // ============================================================================
 void loop() {
-#if POWER_PROBE
-    // Rolling VCC readout, 1 Hz. D4=GPIO5=ADC1_CH4 senses the 5 V INPUT through
-    // a 2:1 divider, so a healthy 5 V supply reads ~2500 mV here. Watch for a
-    // sag below ~2.0-2.2 V (=> <4-4.4 V input) at any point, especially in the
-    // first second after boot. (Reading the non-ADC GPIO7 previously gave 0.)
-    int raw = analogRead(5);
-    int vccMv = (int)((raw * 3300L) / (4095L / 2));
-    Serial.printf("t=%lu  5Vin~%d mV  (raw %d)\n",
-                  (unsigned long)millis(), vccMv, raw);
-    delay(1000);
-    return;
-#endif
-
     // Vibration auswerten: genau einmal pro Runde, VOR allen Lesern. Der
     // Interrupt zaehlt Flanken, diese Funktion macht daraus Zustand und
     // Klopfzaehler. Wuerde stattdessen jeder Leser selbst abholen, nehmen sich

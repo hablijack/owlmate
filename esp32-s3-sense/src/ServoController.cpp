@@ -84,6 +84,15 @@ void ServoController::writeMicroseconds(uint8_t channel, uint16_t us) {
 }
 
 float ServoController::angleToUs(float angle) {
-    // Map angle (-45 to 45) to microseconds (1000 to 2000)
-    return SERVO_CENTER_US + (angle / SERVO_MAX_ANGLE) * (SERVO_CENTER_US - SERVO_MIN_US);
+    // Map the angle range onto the pulse range, each half derived from its own
+    // endpoint. The previous form computed the upper half as
+    // CENTER + (CENTER - MIN), i.e. it silently ASSUMED the travel is symmetric
+    // about center and ignored SERVO_MAX_US entirely -- so a servo with an
+    // off-center pulse range (1000/2400 is common) would have been driven wrong
+    // no matter what config.h said. Identical output for the symmetric
+    // 1000/1500/2000 values currently configured.
+    if (angle >= 0.0f) {
+        return SERVO_CENTER_US + (angle / SERVO_MAX_ANGLE) * (SERVO_MAX_US - SERVO_CENTER_US);
+    }
+    return SERVO_CENTER_US - (angle / SERVO_MIN_ANGLE) * (SERVO_CENTER_US - SERVO_MIN_US);
 }

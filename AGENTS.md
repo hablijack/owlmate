@@ -44,9 +44,10 @@ pio run -t monitor           # serial monitor, 115200 baud
 pio run -e dualtest -t upload  # flash a diagnostic env instead
 ```
 
-Four diagnostic envs, each selected with `-e` and each compiling exactly one source file via
-`build_src_filter`. All guard their `setup()`/`loop()` behind a `#if defined(...)` flag so they
-compile to nothing in the main build — keep that pattern for new sources in `src/`.
+Six diagnostic envs, each selected with `-e` and each compiling exactly one source file via
+`build_src_filter`. All guard their `setup()`/`loop()` behind a `#if defined(..._ACTIVE)` flag so
+they compile to nothing in the main build — keep that pattern for new sources in `src/`, otherwise
+their `setup()`/`loop()` collide with `main.cpp`'s.
 
 | env | what it does |
 |---|---|
@@ -55,7 +56,7 @@ compile to nothing in the main build — keep that pattern for new sources in `s
 | `imuaxis` | prints the gravity vector in the sensor's raw frame (to derive the BNO055 axis remap) **and** live calibration counters (to guide the figure-8 dance) |
 | `vibtest` | SW-420: pull test (connected? actively driven?), sink impedance, analog level, then an edge scan across **all 11 header pins** |
 | `camtest` | camera: SCCB probe with the sensor ID read both 8- and 16-bit, driver init, frame capture, and a mean-brightness readout that catches "initialises but returns black" |
-| `powerprobe` | rolling VCC reading from a minimal image |
+| `powerprobe` | rolling 5 V-input reading from a genuinely minimal image (no PSRAM/LCD/camera/I2C/servos), to tell "rail dragged down by a peripheral" from "rail dead". Was a `#if POWER_PROBE` branch inside `main.cpp` until 2026-08-27, which linked the whole firmware and so measured nothing useful |
 
 The main env sets `-DCORE_DEBUG_LEVEL=0`: this USB CDC port carries the NDJSON protocol the RPi
 parses, so core log lines are protocol garbage. The diagnostic envs override `build_flags` and
@@ -66,8 +67,9 @@ therefore keep full logging.
 `{"type":"hardware_check",...}` line (its `i2c_found` array lists every responding address), then
 idles.
 
-`FACE_DETECTION_ENABLED` is currently `0` in `platformio.ini` build_flags (it overrides the
-`config.h` default of `1`) — the esp-dl MSR01 model header is absent from the tree.
+`FACE_DETECTION_ENABLED` is `1` for the main env: `[env:xiao_esp32s3]` replaces `build_flags`
+wholesale and sets it there. `[arduino_base]` still sets `0`, which is what the diagnostic envs
+inherit — so the value you get depends on the env, and reading only `arduino_base` is misleading.
 
 ### Flashing (USB-JTAG only — the one real host dependency)
 

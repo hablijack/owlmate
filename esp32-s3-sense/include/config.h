@@ -328,13 +328,8 @@
 #define HARDWARE_CHECK 0
 #endif
 
-// Power-rail probe. When 1, the firmware does the absolute minimum at boot:
-// no PSRAM init, no LCD, no camera, no I2C, no servos. It only opens serial
-// and prints a rolling VCC reading (5 V input sense on ADC1_CH7) + uptime once
-// per second. Purpose: if the board brownout-loops with the full firmware but
-// boots clean with this, the 3.3 V rail is being dragged down by a peripheral
-// load (backlights / I2C) rather than being fundamentally dead.
-// Build with: pio run --project-option="build_flags=-DPOWER_PROBE=1 -DHARDWARE_CHECK=0"
-#ifndef POWER_PROBE
-#define POWER_PROBE 0
-#endif
+// The power-rail probe is no longer a flag on this firmware: it lives in its
+// own minimal sketch, src/powerprobe.cpp, built by `pio run -e powerprobe`.
+// As a `#if POWER_PROBE` branch inside main.cpp it still linked the entire
+// firmware and only skipped it at runtime, which made it useless as the
+// light-load comparison it exists to be.

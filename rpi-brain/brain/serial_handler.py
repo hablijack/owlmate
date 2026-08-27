@@ -284,20 +284,18 @@ class SerialHandler:
                     callback(telemetry)
         elif msg_type == "boot":
             logger.info("Owl booted: %s", data.get("msg", "ready"))
-        elif msg_type == "update_mode":
-            logger.info(
-                "Owl entered UPDATE mode: join WiFi '%s' (password '%s') "
-                "and open %s to flash firmware. Tap the owl once to exit.",
-                data.get("ssid", ""),
-                data.get("password", ""),
-                data.get("url", ""),
-            )
-        elif msg_type == "update_mode_end":
-            logger.info("Owl exited UPDATE mode; normal operation resumed.")
+        elif msg_type in ("update_mode", "update_mode_end"):
+            # Transport-level: just note that the event line arrived. The
+            # OPERATOR-facing announcement (with the SSID/password/URL) is the
+            # supervisor's job -- it is edge-triggered on the telemetry `update`
+            # field in Supervisor.on_telemetry. Both used to log the same
+            # paragraph verbatim, so every entry into update mode was announced
+            # twice.
+            logger.debug("Owl %s: %s", msg_type, data)
         elif msg_type == "error":
             logger.error("Owl reported error: %s", data.get("msg", "unknown"))
         elif msg_type and msg_type.endswith("_ack"):
-            logger.debug("Owl ack: %s %s", data)
+            logger.debug("Owl ack: %s %s", msg_type, data)
         else:
             logger.debug("Owl message (unhandled): %s", data)
 
@@ -335,8 +333,18 @@ class SerialHandler:
                     if not line:
                         continue
 
-                    # Dispatch by message type (telemetry + acks/boot/update)
-                    self._handle_message(line, callback)
+                    # Dispatch by message type (telemetry + acks/boot/update).
+                    # A failure in here is almost always a bug in the telemetry
+                    # CALLBACK (supervisor / navigation / speech), not a serial
+                    # fault. This loop runs on the foreground thread, so letting
+                    # it escape would take the whole brain down over one bad
+                    # frame -- log it and keep reading instead.
+                    try:
+                        self._handle_message(line, callback)
+                    except Exception:
+                        logger.exception(
+                            "Error handling message, continuing: %.200s", line
+                        )
 
             except serial.SerialException as e:
                 logger.error(f"Serial read error: {e}")
