@@ -5,41 +5,23 @@ serial:
   baudrate: 115200
   timeout: 1
 
-# The ESP32 owns behavior timing (see esp32-s3-sense/include/config.h).
-# The RPi supervisor only sends these expression names as temporary overrides,
-# and each override lasts 3 s (EXPRESSION_OVERRIDE_MS) before the firmware's own
-# state machine takes the eyes back -- re-send faster than that to hold a mood.
+# NOTE: there is deliberately no `expressions:` list here any more.
 #
-# The full set the firmware can draw is NAMES[] in
-# esp32-s3-sense/lib/Eyes/Eyes.cpp. An unknown name silently renders as
-# "neutral", so a typo looks like an eye that refuses to change.
-expressions:
-  neutral: "neutral"
-  # reference-sheet moods
-  happy: "happy"
-  glee: "glee"
-  sad_down: "sad_down"
-  sad_up: "sad_up"
-  worried: "worried"
-  focused: "focused"
-  annoyed: "annoyed"
-  surprised: "surprised"
-  skeptic: "skeptic"
-  bored: "bored"
-  unimpressed: "unimpressed"
-  sleepy: "sleepy"
-  suspicious: "suspicious"
-  squint: "squint"
-  angry: "angry"
-  furious: "furious"
-  scared: "scared"
-  awe: "awe"
-  blink_high: "blink_high"
-  blink_low: "blink_low"
-  # owl states rather than moods
-  searching: "searching"
-  detecting: "detecting"
-  sleeping: "sleeping"
+# There used to be a 42-line name -> name mapping at this point. NOTHING read
+# it: the RPi's expression list lives in brain/expressions.py, which is
+# GENERATED from NAMES[] in esp32-s3-sense/lib/Eyes/Eyes.cpp
+# (tools/gen_expressions.py). The dead block was also a third copy of that
+# vocabulary and had already drifted from the firmware.
+#
+# The expression names that ARE configurable are the ones inside
+# speech.reactions below; the test suite validates them against the firmware
+# list, because an unknown name is not rejected -- the firmware silently
+# renders "neutral", so a typo looks like an eye that refuses to change.
+#
+# The ESP32 owns behavior timing (see esp32-s3-sense/include/config.h). The RPi
+# only sends expressions as temporary overrides, and each lasts 3 s
+# (EXPRESSION_OVERRIDE_MS) before the firmware's state machine takes the eyes
+# back -- re-send faster than that to hold a mood.
 
 # Autonomous sleep (Phase 4): the owl falls asleep BY ITSELF when the
 # environment goes quiet, and wakes on a real interaction. There is deliberately

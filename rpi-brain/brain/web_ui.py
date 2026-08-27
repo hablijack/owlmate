@@ -15,6 +15,7 @@ import threading
 
 from flask import Flask, jsonify, render_template_string, request
 
+from brain import expressions
 from brain.serial_handler import SerialHandler, Telemetry
 from brain.supervisor import Supervisor
 
@@ -61,17 +62,12 @@ WING_UP = -40
 WING_DOWN = 40
 CENTER = 0
 
-# Expressions offered in the UI (subset of the firmware's EyeExpression names).
-# Every expression the firmware can draw, in the order of the reference sheet
-# the eye shapes are based on. Must match NAMES[] in
-# esp32-s3-sense/lib/Eyes/Eyes.cpp -- the firmware falls back to "neutral" for
-# a name it does not know, so a typo here shows up as an eye that will not change.
-EXPRESSIONS = [
-    "neutral", "blink_high", "happy", "glee", "blink_low", "sad_down", "sad_up",
-    "worried", "focused", "annoyed", "surprised", "skeptic", "bored",
-    "unimpressed", "sleepy", "suspicious", "squint", "angry", "furious",
-    "scared", "awe", "searching", "detecting",
-]
+# Expressions offered in the UI. GENERATED from NAMES[] in
+# esp32-s3-sense/lib/Eyes/Eyes.cpp -- see brain/expressions.py and
+# tools/gen_expressions.py. This used to be a hand-maintained list here and had
+# drifted from the firmware by three names; the firmware silently renders an
+# unknown name as "neutral", so drift looks like an eye that refuses to change.
+EXPRESSIONS = list(expressions.SELECTABLE)
 
 # Sound effects the RPi can play through the MAX98357A amp (see brain/audio.py).
 # The owl-call voices (detecting/interacting/happy/sleeping/waking/alert) play a
