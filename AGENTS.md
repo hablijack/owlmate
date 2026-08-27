@@ -161,8 +161,9 @@ and don't trust one.
 
 Drawing calls only touch the PSRAM framebuffer — `GC9D01::flush()` is what actually transmits, and
 `Eyes::renderEye()` ends with it. `Eyes::render()` skips the whole redraw when nothing visible has
-changed; `setExpression()`/`setGaze()` mark the frame dirty themselves, so `markDirty()` is only
-needed when state changes by some other route.
+changed; `setExpression()`/`setGaze()` mark the frame dirty themselves. (There was a public
+`markDirty()` for changes arriving by some other route; nothing ever called it, so it was removed on
+2026-08-27. Re-add it if a caller genuinely appears.)
 
 `LCD_SPI_FREQ` is 16 MHz — ~61 ms per full 160×160 frame per eye. It was 6 MHz on the theory that
 27 MHz was "too fast for jumper wiring"; that was a misdiagnosis of the chip-select bug, so the

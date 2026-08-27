@@ -79,7 +79,6 @@ private:
     // Pegel selbst wird NICHT ausgewertet - der SW-420 prellt mit ~1 kHz.
     bool _vibState;            // true solange das letzte Buendel noch "haelt"
     uint32_t _vibLastPulse;    // millis() der letzten gezaehlten Flanke
-    uint32_t _vibBurstStart;   // millis() des Beginns des aktuellen Buendels
     uint32_t _vibLastEvent;    // millis() des letzten bestaetigten Klopfers
     uint16_t _vibCount;        // Anzahl bestaetigter Klopfer
     uint8_t _rapidTapCount;    // Klopfer in der laufenden Schnellfolge

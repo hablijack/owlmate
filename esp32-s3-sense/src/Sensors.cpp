@@ -91,8 +91,6 @@ bool Sensors::begin() {
     // Give BNO055 time to initialize
     delay(100);
 
-    sensor_t sensor;
-    bno.getSensor(&sensor);
     _imuReady = true;
 
     // Der Ruhepegel des Moduls ist nicht zuverlaessig festgelegt (gemessen
@@ -103,7 +101,6 @@ bool Sensors::begin() {
     attachInterrupt(digitalPinToInterrupt(VIBRATION_PIN), vibrationIsr, CHANGE);
     _vibState = false;
     _vibLastPulse = 0;
-    _vibBurstStart = 0;
     _vibLastEvent = 0;
     _vibCount = 0;
     _rapidTapCount = 0;
@@ -155,21 +152,19 @@ ImuData Sensors::getImu() {
     data.isCalibrated = (gyro >= 3 && mag >= 3);
     data.calRestored = _calRestored;
 
-    // First time we reach a full calibration, persist the offsets so the next
-    // boot starts calibrated. Cheap: the guard makes this a no-op afterwards.
-    // First time we reach a full calibration, persist the offsets so the next
-    // boot starts calibrated.
+    // (2) "Are these offsets worth writing to flash?" -- a stricter, one-shot
+    // question, and all four must read 3. That is also exactly what Adafruit's
+    // getSensorOffsets() enforces internally before it will hand them over.
     //
-    // Two subtleties:
-    //  * The isCalibrated gate is REQUIRED, not just conservative:
+    // The first time we reach a full calibration we persist the offsets, so the
+    // next boot starts calibrated. Cheap: the guard makes this a no-op
+    // afterwards. Two subtleties:
+    //  * The all-four gate below is REQUIRED, not just conservative:
     //    Adafruit's getSensorOffsets() returns false unless isFullyCalibrated().
     //  * Skip this entirely if we restored offsets at boot. Writing them back
     //    would be a flash write on every single boot for no gain, because
     //    setSensorOffsets() makes the chip report 3/3/3/3 immediately, so this
     //    branch would otherwise fire on every run.
-    // (2) "Are these offsets worth writing to flash?" -- a stricter, one-shot
-    // question, and all four must read 3. That is also exactly what Adafruit's
-    // getSensorOffsets() enforces internally before it will hand them over.
     const bool offsetsWorthSaving = (sys >= 3 && gyro >= 3 && accel >= 3 && mag >= 3);
     if (!_calSaved && !_calRestored && offsetsWorthSaving) {
         adafruit_bno055_offsets_t off;
@@ -246,7 +241,6 @@ void Sensors::updateVibration() {
         // Buendels alle ~16 ms mit - der Abstand bleibt also klein und ein
         // durchprellendes Buendel wird nicht mehrfach gezaehlt.
         if (_vibLastPulse == 0 || now - _vibLastPulse > VIBRATION_BURST_GAP_MS) {
-            _vibBurstStart = now;
             _vibCount++;
 
             // Schnellfolge fuer den 4-Tipp-Einstieg in den Update-Modus.

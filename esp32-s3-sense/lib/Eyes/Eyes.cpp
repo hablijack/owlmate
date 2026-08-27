@@ -306,29 +306,4 @@ void Eyes::drawErrorX(GC9D01& lcd) {
     }
 }
 
-// Scanline triangle fill: for each row, intersect it with all three edges and
-// span between the outermost hits.
-void Eyes::fillTriangle(GC9D01& lcd, int x0, int y0, int x1, int y1,
-                        int x2, int y2, uint16_t color) {
-    const int xs[3] = {x0, x1, x2};
-    const int ys[3] = {y0, y1, y2};
 
-    int minY = min(y0, min(y1, y2));
-    int maxY = max(y0, max(y1, y2));
-    minY = max(minY, 0);
-    maxY = min(maxY, LCD_HEIGHT - 1);
-
-    for (int y = minY; y <= maxY; y++) {
-        int lo = INT16_MAX, hi = INT16_MIN;
-        for (int e = 0; e < 3; e++) {
-            const int ax = xs[e], ay = ys[e];
-            const int bx = xs[(e + 1) % 3], by = ys[(e + 1) % 3];
-            if (ay == by) continue;
-            if (y < min(ay, by) || y > max(ay, by)) continue;
-            const int x = ax + (int)((long)(bx - ax) * (y - ay) / (by - ay));
-            lo = min(lo, x);
-            hi = max(hi, x);
-        }
-        if (hi >= lo) lcd.drawFastHLine(lo, y, hi - lo + 1, color);
-    }
-}

@@ -5,10 +5,18 @@
 // and OTA updates can be verified). Bump the minor on behavior changes, the
 // patch on fixes.
 // ============================================================================
+// FW_VERSION is DERIVED from the three numbers, never written out by hand: it
+// used to be a fourth #define carrying a second copy of the same string, which
+// only had to be kept in sync manually.
 #define FW_VERSION_MAJOR 1
 #define FW_VERSION_MINOR 2
 #define FW_VERSION_PATCH 0
-#define FW_VERSION "1.2.0"
+
+#define FW_VERSION_STR_(x) #x
+#define FW_VERSION_STR(x) FW_VERSION_STR_(x)
+#define FW_VERSION FW_VERSION_STR(FW_VERSION_MAJOR) "." \
+                   FW_VERSION_STR(FW_VERSION_MINOR) "." \
+                   FW_VERSION_STR(FW_VERSION_PATCH)
 
 // ============================================================================
 // SIDE CONVENTION -- applies to EVERYTHING in this file
@@ -55,7 +63,6 @@
 // the right eye's CS/DC pair and vice versa. Both panels still lit up, so the
 // only symptom was the two eyes being mirrored. Confirmed and corrected.
 // ============================================================================
-#define LCD_SPI_HOST SPI2_HOST
 #define LCD_SCK 5
 #define LCD_MOSI 7
 #define LCD_RST 43

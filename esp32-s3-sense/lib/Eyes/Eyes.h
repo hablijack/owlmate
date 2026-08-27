@@ -41,11 +41,6 @@ public:
     void setGaze(float x, float y); // -1.0 to 1.0
     void blink(uint8_t speed = 3); // 1=fast, 5=slow
     void render();
-    // Force the next render() to redraw and push a frame. render() skips the
-    // whole redraw when nothing visible has changed. setExpression() and
-    // setGaze() already mark the frame dirty themselves, so this is only needed
-    // when state is changed by some other route.
-    void markDirty() { _dirty = true; }
 
     EyeExpression getCurrentExpression() const { return _expr; }
 
@@ -68,8 +63,6 @@ private:
     void drawSpinner(GC9D01& lcd);
     void drawErrorX(GC9D01& lcd);
     void drawClosed(GC9D01& lcd);
-    void fillTriangle(GC9D01& lcd, int x0, int y0, int x1, int y1,
-                      int x2, int y2, uint16_t color);
     float currentOpenness() const;
 
     GC9D01& _left;

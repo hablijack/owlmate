@@ -106,8 +106,6 @@ class SerialHandler:
         self.timeout = timeout
         self.serial: Optional[serial.Serial] = None
         self._buffer = ""
-        self._telemetry_callback: Optional[Callable[[Telemetry], None]] = None
-        self._heartbeat_callback: Optional[Callable[[], None]] = None
 
     def connect(self) -> bool:
         """Connect to ESP32 via serial"""
@@ -311,8 +309,6 @@ class SerialHandler:
         idle_callback: invoked on iterations where no data arrived (used to
         run periodic checks such as telemetry-staleness detection).
         """
-        self._telemetry_callback = callback
-
         if not self.serial or not self.serial.is_open:
             logger.error("Serial not connected")
             return
