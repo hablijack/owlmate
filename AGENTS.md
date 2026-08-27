@@ -113,7 +113,7 @@ taking the BNO055 calibration with it. Flash the pieces separately:
 ### RPi brain (`rpi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (174 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (175 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
@@ -374,16 +374,63 @@ touching the RPi: `010-serial-protocol` (the wire contract, R-010.5 "every field
 sent must be parsed") and `012-rpi-brain` (which module owns what, and why a
 regression test is assumed broken until it has been seen to fail).
 
-## Docs in this repo
+## Definition of done — the docs are part of the change
 
-`README.md` (hardware tables, protocol reference, numbered "Software Decisions" with rationale,
-first-run checklist), `WIRING.md` (solder links, the SD-MODE-to-3.3V gotcha, the XIAO→Pi native USB
-link), `BACKLOG.md` (**start here for what to do next** — its top section is a phased, dependency-ordered
-plan; below that, per-subsystem history newest-first),
-`NAVIGATION_PLAN.md` and `SPEECH_RECOGNITION_PLAN.md` (full designs; the navigation plan's §10 and
-§13 are referenced from code comments).
+**A change is not finished until the docs that describe it are true again.** This
+is not politeness; it is the single biggest source of lost time in this project.
+Every doc defect found on 2026-08-27 was sitting in a file that declared itself
+authoritative — including this one, which claimed the IMU calibration was present
+in NVS while two other documents correctly said it had been erased. An agent
+trusting that would have read navigation's correct refusal to aim as a bug.
 
-**`BACKLOG.md`'s top section is the priority order, and the order is the point.** Phases 0–5 need
+So it is enforced, not requested:
+
+```bash
+python3 tools/check_docs.py        # or just run the RPi suite, which includes it
+```
+
+172 checks: specs indexed both ways, every spec keeps its skeleton, every
+`Step N` reference resolves, every path named in a steering doc exists, numbers
+quoted in docs match `config.h`, **every `**D<n>**` row in `WIRING.md` matches
+the firmware pin map**, and quoted expression/test counts are real.
+
+Before finishing any change, ask:
+
+| If you changed… | then update… |
+|---|---|
+| a constant in `config.h` | every doc quoting it — the checker names them |
+| a pin | `WIRING.md` (both tables) — the checker diffs them against `config.h` |
+| the telemetry format | the `_*_FIELDS` table **and** `specs/010`; R-010.5 says every field sent must be parsed |
+| `NAMES[]` | run `rpi-brain/tools/gen_expressions.py`; never hand-edit the generated list |
+| a design decision, or falsified a belief | the owning spec — **especially its `Falsified` section**, which is the most valuable part of `specs/` |
+| what is left to do | `BACKLOG.md`, and only there |
+| anything with a test count in a doc | the number, or phrase it as historical |
+
+Two rules that matter more than the table:
+
+1. **If a fact lives in two places, one of them is a bug.** Fix the duplication;
+   do not update both. That is how the expression list came to exist in three
+   versions with three different lengths.
+2. **A guard you have not seen fail is not a guard.** Run a new check against the
+   defect it claims to catch, and watch it fail, before keeping it. Three
+   attempts at one small check were written on 2026-08-27 and two of them passed
+   against the live bug (SPEC-012 R-012.5).
+
+## Docs in this repo — four files, one job each
+
+Restructured 2026-08-27 so that no fact has two homes. If you find the same claim in two places,
+one of them is a bug; fix it rather than updating both.
+
+| File | Owns | Does NOT contain |
+|---|---|---|
+| `BACKLOG.md` | **What to do next.** The only place open work lives. Top section is the dependency-ordered Step list; below it, per-subsystem history newest-first | rationale (that is `specs/`) |
+| `specs/*.spec` | **Why.** Every decision, the measurement behind it, and the **Falsified** hypotheses. The decision record | task lists, status prose |
+| `README.md` | **What this is,** for a human meeting the project: hardware tables, protocol reference, project layout, first-run checklist | open work, or duplicated rationale — it links to specs instead |
+| `WIRING.md` | **The harness as physically built**, read at the bench with a soldering iron | anything not about wiring |
+
+`config.h` is authoritative over all four for pins and timing. A doc that contradicts it is the bug.
+
+**`BACKLOG.md`'s top section is the priority order, and the order is the point.** Steps 0–5 need
 the owl, Step 6 needs only a laptop. Two dependencies there are easy to get wrong and expensive:
 head-opening work (the camera extension) comes **before** any IMU calibration, because the BNO055
 lives in the same head and disturbing it invalidates both the calibration and

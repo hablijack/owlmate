@@ -18,7 +18,7 @@ rainy-day list.
 
 > **"Step" here, "Phase" elsewhere — they are different things.** These Steps are
 > this session's task order. The `Phase 1..4` you will see in `rpi-brain/brain/`
-> comments and in `SPEECH_RECOGNITION_PLAN.md` are the *speech feature's*
+> comments and in `specs/014-speech.spec` are the *speech feature's*
 > implementation phases (VAD → ASR → reactions → auto-sleep) and have nothing to
 > do with the list below. Do not renumber either to match the other.
 
@@ -27,7 +27,7 @@ rainy-day list.
 ### Step 0 — Get the refactored firmware onto the owl  `[ ]`
 
 **Gate for everything else.** The 2026-08-27 refactoring pass builds clean (all
-seven envs) and the RPi suite is green at 174 tests, but **none of it has run on
+seven envs) and the RPi suite is green at 175 tests, but **none of it has run on
 hardware**. Flash before trusting any of it.
 
     cd esp32-s3-sense && pio run && pio run -t upload
@@ -184,7 +184,7 @@ wrong; run the lot only after mechanical work.
 | firmware | flash `xiao_esp32s3`, watch telemetry | no LCD errors, ~535 ms cadence, `idle` at rest |
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
-| RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 174 tests pass |
+| RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 175 tests pass |
 | firmware/RPi drift | `cd rpi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
@@ -206,7 +206,7 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` blocked
 
 The 2026-08-26 tree was committed and then refactored. Eight commits, no
 behaviour change intended anywhere; all seven PlatformIO envs build and the RPi
-suite went from 104 to 168 tests.
+suite went from 104 to 175 tests.
 
 **Dead code removed:** `Eyes::fillTriangle`, `Eyes::markDirty`,
 `GC9D01::drawRect`, `GC9D01::drawCircle`, `Sensors::_vibBurstStart`, a discarded
@@ -764,7 +764,7 @@ waiting on it. Out of scope for the eyes session.
 Step 1 (skeleton), Step 2 (mic + VAD + ASR), Step 3 ("last heard" in web
 UI) and Step 4 (autonomous sleep + wake-on-speech) code is **done and
 unit-tested on the Mac** (38 tests, stubbed serial/supervisor/mic/Whisper).
-See `SPEECH_RECOGNITION_PLAN.md`. The RPi `Speech` class captures a USB mic,
+See `specs/014-speech.spec`. The RPi `Speech` class captures a USB mic,
 runs an energy VAD, and on a gated utterance transcribes with **faster-whisper**
 (`tiny`, int8 on CPU — the CTranslate2 engine, no torch, ~4× faster than
 openai-whisper) and drives a *temporary* reaction (expression/gaze/audio) via
@@ -801,7 +801,7 @@ unattended installs.
   existing `wake` command when it hears the user while the owl is asleep. All RPi-brain:
   `supervisor.py` (inactivity timer → `sleep`), `speech.py` (wake-exception gate → `wake`),
   `config.yaml` (`auto_sleep.*`). **Code done + 13 unit tests** drive the real
-  `Supervisor`/`Speech` against stubs (see `SPEECH_RECOGNITION_PLAN.md` §Step 4 for the
+  `Supervisor`/`Speech` against stubs (see `specs/014-speech.spec` for the
   full design + the conservative wake-gate decision). Hardware check folded into the
   "Verify on hardware" item above (add: leave the owl alone → it sleeps on its own after
   `after_s`; say the wake keyword → it wakes).
@@ -811,7 +811,7 @@ unattended installs.
 The owl points its head at a **named destination** and keeps re-aiming from live
 GPS + IMU heading — a live compass. All the math is on the RPi (it already parses
 the GPS fix + IMU yaw); the ESP32 just holds the head at the angle it's sent.
-Full design + math + open questions: `NAVIGATION_PLAN.md`.
+Full design + math + open questions: `specs/013-navigation.spec`.
 
 **Implemented + tested on the Mac (no hardware):**
 - [x] **RPi core** — `brain/geo.py` (bearing/haversine/wrap/aim, pure),
@@ -831,7 +831,7 @@ Full design + math + open questions: `NAVIGATION_PLAN.md`.
 - [x] **Tests** — 104 pass (geo math, controller state machine incl. the four
   exit paths, speech start/stop precedence, web UI endpoints).
 - [x] **Docs** — `README.md` (8-state table + a Navigation section) and this
-  entry; `NAVIGATION_PLAN.md` checklist marked done.
+  entry; the design is now `specs/013-navigation.spec`.
 
 **On-hardware (needs the Pi/ESP32) — the test procedure:**
   0. [x] **RESOLVED 2026-08-24 — the "brownout loop" was a corrupt flash, not a
@@ -902,7 +902,7 @@ Full design + math + open questions: `NAVIGATION_PLAN.md`.
    web UI Stop, arrival (within `arrive_m`), and the 5 s no-refresh timeout —
    and confirm each recenters the head cleanly.
  6. [ ] **Confirm yaw ≈ compass heading** and that the ~3–10 m GPS accuracy is
-   acceptable for the 15 m `arrive_m` threshold (see `NAVIGATION_PLAN.md` §10).
+   acceptable for the 15 m `arrive_m` threshold (see `specs/013-navigation.spec` Open).
 
 ## Hardware
 

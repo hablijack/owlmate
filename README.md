@@ -129,12 +129,13 @@ the angle the RPi sends.
 - The head only turns ±45°; a destination behind the owl is clamped to the
   nearest edge (the web UI says it's behind you).
 
-Full design, math, and open questions: `NAVIGATION_PLAN.md`.
+Full design, math and open questions: `specs/013-navigation.spec`.
 
 ### Eye Renderer
 - Two 160×160 LCDs with PSRAM framebuffers (2×51.2 KB each)
 - Procedural eye drawing: sclera → iris → pupil → eyelids
-- 8 expressions controlling iris position, pupil size, eyelid openness
+- 26 expressions (24 user-selectable), all from ONE parametric routine driven by the `SHAPES[]` table
+- Deliberately **two colours only**, black on white: no iris, no pupil, no sclera, no grey lids. The panels are 160 px behind small openings and that detail turned to mush — it was removed on purpose, see `specs/004-eye-expressions.spec`
 - Auto-blink every 2–5 seconds
 - Gaze tracking: iris/pupil offset based on face position or remote command
 
@@ -182,99 +183,35 @@ While in **UPDATE** state the owl is on an isolated SoftAP (`RobotOwl-Update`); 
 
 ## Software Decisions
 
-### 1. Arduino Framework over ESP-IDF
-**Decision:** Use Arduino core 2.0.17 (ESP-IDF 4.4.x) via PlatformIO (espressif32 platform 7.0.1).
+Every decision, the measurement behind it, and — most valuable — the hypotheses
+that turned out to be **wrong** live in `specs/`. They are not repeated here:
+this section used to carry ~95 lines of parallel rationale and had drifted (it
+still claimed Arduino core 2.0.17 / ESP-IDF 4.4 long after the move to
+pioarduino 3.3.11 / IDF 5.5).
 
-**Rationale:**
-- All peripheral drivers (GC9D01, Eyes, BNO055, PCA9685) already implemented in Arduino style
-- `ArduinoJson` v7.4.3 for clean JSON serialization
-- USB CDC (`ARDUINO_USB_CDC_ON_BOOT=1`) works out of the box
-- ESP-DL (face detection) is an ESP-IDF component — switching frameworks would require rewriting all drivers
+**Read `specs/000-index.spec` first.** Before re-diagnosing anything, read that
+subsystem's **Falsified** section — nearly all the time lost on this project
+went into believing a measurement that could not mean what it appeared to mean.
 
-**Trade-off:** On-device face detection uses esp-dl, which is **not** in the prebuilt Arduino libraries of core 3.x (it was in 2.0.x). It comes in as a *managed ESP-IDF component* instead, which is why the main env builds as `framework = arduino, espidf` — see the framework decision below. Enabled with `FACE_DETECTION_ENABLED=1`, which the main env sets.
+| Decision | Spec |
+|---|---|
+| One behaviour state machine, on the ESP32; the RPi supervises | [001](specs/001-system-architecture.spec) |
+| `framework = arduino, espidf`, octal PSRAM, partitions, flashing | [002](specs/002-build-and-toolchain.spec) |
+| Two LCDs on one SPI bus, software chip-select, custom GC9D01 driver | [003](specs/003-display-bus.spec) |
+| Two colours, one parametric shape routine for all 26 moods | [004](specs/004-eye-expressions.spec) |
+| I2C bus and its three devices | [005](specs/005-i2c-bus.spec) |
+| IMU axes, mounting, calibration, true-north heading | [006](specs/006-imu-orientation.spec) |
+| Vibration as a pulse source; the 4-tap OTA entry | [007](specs/007-vibration-and-ota.spec) |
+| Camera module, mounting, `CAM_VFLIP`, OV3660 identification | [008](specs/008-camera.spec) |
+| On-device face detection with esp-dl v3 | [009](specs/009-face-detection.spec) |
+| The NDJSON wire contract | [010](specs/010-serial-protocol.spec) |
+| Diagnostic builds and host tools | [011](specs/011-diagnostics.spec) |
+| RPi internals: ownership, packaging, testing discipline | [012](specs/012-rpi-brain.spec) |
+| Navigation — the owl as a compass | [013](specs/013-navigation.spec) |
+| Speech — hearing the user and reacting | [014](specs/014-speech.spec) |
 
-### 2. Custom GC9D01 SPI Driver
-**Decision:** Write custom driver instead of using TFT_eSPI or Adafruit_ST7789.
-
-**Rationale:**
-- GC9D01 is a round LCD with unique init sequence (not ST7789-compatible)
-- TFT_eSPI PR #3783 has the correct init but adds significant bloat
-- Need PSRAM framebuffers for smooth rendering at 60 Hz
-- Full control over SPI transfer size (25.6 KB per framebuffer)
-
-**Implementation:** Direct SPI register writes, PSRAM allocation via `heap_caps_calloc()`, DMA-enabled transfers.
-
-### 3. Shared SPI Bus for Both LCDs
-**Decision:** Both eyes share SCK/MOSI/RST lines, each with independent CS and DC pins, and **CS is
-driven in software** by the driver rather than by the SPI peripheral's hardware SS.
-
-> The hardware-SS shortcut works with one panel and silently fails with two — the shared bus is
-> begun with `SS = -1`, so no chip-select is ever asserted and both panels ignore everything. That
-> single omission was the cause of the long "the eyes don't work" saga; see `BACKLOG.md`.
-
-**Rationale:**
-- ESP32-S3 has limited GPIO (only ~20 usable pins available)
-- Sharing bus saves 2 pins (SCK, MOSI, RST)
-- Independent CS allows sequential rendering without pin conflicts
-
-### 4. USB CDC for Serial Communication
-**Decision:** Use native USB CDC (`Serial`) instead of UART pins (GPIO43/44).
-
-**Rationale:**
-- GPIO43 (D6) is repurposed as the shared LCD reset pin
-- UART pins stay free for other use; native USB CDC works via `ARDUINO_USB_CDC_ON_BOOT=1` on the XIAO ESP32-S3
-- No external USB-to-serial adapter needed
-- For a compact build the ESP32's native USB D+/D− pads can be soldered straight to the Raspberry Pi 4's USB pads (see `WIRING.md`)
-
-### 5. PSRAM Framebuffers
-**Decision:** Allocate LCD framebuffers in PSRAM (2 × 51.2 KB = 102.4 KB total).
-
-**Rationale:**
-- 160×160×2 bytes = 51.2 KB per eye — too large for internal RAM
-- Internal RAM: 320 KB, only 7.2% used by firmware (23.5 KB)
-- PSRAM: 8 MB available, minimal impact on other allocations
-
-### 6. NDJSON over Binary Protocol
-**Decision:** Use newline-delimited JSON instead of binary protocol.
-
-**Rationale:**
-- Human-readable for debugging (`screen`/`minicom`)
-- `ArduinoJson` handles serialization natively
-- Easy to integrate with Python on RPi side
-- ~200 bytes per telemetry frame at 115200 baud = ~2 ms transmission time
-
-### 7. Behavior State Machine on ESP32 (not RPi)
-**Decision:** High-level behavior (idle/detecting/interacting transitions) runs on the ESP32. The RPi is a supervisor that logs telemetry, monitors health, and sends policy commands (sleep/wake) plus temporary overrides (expression/gaze). It does not run its own state machine.
-
-**Rationale:**
-- Face detection already runs on the ESP32 (Decision #8), so the state transitions that depend on it must live there to avoid a high-latency serial round trip
-- Vibration wake is a local ESP32 sensor, so the full behavior loop (vibration + face + timeouts) runs autonomously on-device
-- Clean separation: ESP32 = "brain + eyes + sensors" (owns behavior), RPi = "supervisor" (logging, health, policy, OTA)
-- Eliminates the previous duplicate state machine that existed on both sides and fought over expressions/gaze
-
-### 8. Face Detection Placement
-**Decision:** Face detection runs on the ESP32-S3 using **esp-dl v3** (`HumanFaceDetect`,
-model `MSRMNP_S8_V1`), which requires the firmware to build as
-**`framework = arduino, espidf`** — Arduino compiled as an ESP-IDF component.
-
-**Why that framework:** esp-dl shipped prebuilt with Arduino core 2.0.x, but was removed from the
-prebuilt libraries in core 3.x. It is still available as a *managed IDF component*, and only the
-espidf build mode can pull those in (`src/idf_component.yml`). Downgrading the core is not an option:
-only the newer versions bring up this board's octal PSRAM, which now feeds the LCD framebuffers and
-the camera.
-
-**Measured on hardware (2026-08-26):** 48 ms inference, ~21 frames/s, detection scores 0.58-1.00.
-
-**Two things that are load-bearing:**
-- `CAM_VFLIP 1` in `config.h`. The camera is mounted vertically flipped in the owl's head, and these
-  models only find *upright* faces — without the flip, detection can never succeed at any threshold
-  or lighting. Measured across all four orientations: normal 0 hits, vflip 57, hmirror 2, 180° 10.
-- `CONFIG_LIBC_NEWLIB=y` and `CONFIG_FREERTOS_HZ=1000` in `sdkconfig.defaults`; the build fails
-  without either.
-
-**Trade-off:** the firmware env's build time goes from ~4 s to minutes, and all `board_build.*`
-options move into `sdkconfig.defaults`. The diagnostic envs stay on plain Arduino via the
-`[arduino_base]` section and keep their ~1.5 s builds.
+Requirements are numbered `R-NNN.n` and cited from code comments. If a spec
+contradicts `esp32-s3-sense/include/config.h`, **the header wins** — fix the spec.
 
 ## Project Structure
 
@@ -291,7 +228,7 @@ esp32-s3-sense/                    # ESP32 firmware
 │   │   ├── GC9D01.h/.cpp          # Init, framebuffer, flush, pixel drawing
 │   │   └── common.h               # Display constants
 │   ├── Eyes/                      # Eye renderer class
-│   │   ├── Eyes.h/.cpp            # Sclera, iris, pupil, eyelids, 8 expressions
+│   │   ├── Eyes.h/.cpp            # SHAPES[] table + drawBlob(): 26 expressions, lids, blink
 │   │   └── common.h               # Eye geometry, colors
 │   └── FaceDetector/              # Face detection module (esp-dl v3)
 │       ├── FaceDetector.h/.cpp    # OV3660 + HumanFaceDetect (v3 API) integration
@@ -310,7 +247,7 @@ rpi-brain/                         # Raspberry Pi brain (Python)
 ├── assets/sounds/                 # Owl-call WAVs played through the I2S amp
 ├── tools/
 │   └── gen_expressions.py         # GENERATES brain/expressions.py from the firmware's NAMES[]
-├── tests/                         # 174 tests; run on a plain Mac, no Pi or audio stack needed
+├── tests/                         # 175 tests; run on a plain Mac, no Pi or audio stack needed
 │   ├── run_tests.py               # unittest discovery
 │   ├── stubs.py                   # fakes third-party modules ONLY when not importable
 │   ├── test_protocol.py           # the ESP32<->RPi wire contract (39 tests)
@@ -517,29 +454,32 @@ python main.py [config.yaml]   # Default config path
 | **PCA9685 Servo Ctrl** | ✅ Complete | 5 channels, smooth interpolation (2°/iteration) |
 | **State Machine** | ✅ Complete | 8 states on ESP32 (owns behavior): BOOT/IDLE/DETECTING/INTERACTING/SLEEPING/NAVIGATING/UPDATE/ERROR |
 | **NDJSON Protocol** | ✅ Complete | Telemetry (500ms) + commands (expression/servo/gaze/nav/wake/blink/heartbeat) |
-| **Navigation "guide me home"** | ✅ Implemented | RPi computes the compass bearing to a named destination and streams the head aim; ESP32 holds it in the NAVIGATING state (live compass). Start via voice ("Bring mich nach Home") or web UI; exit via spoken keyword, web UI, arrival, or timeout. See `NAVIGATION_PLAN.md`. On-hardware `aim_sign` verification pending |
+| **Navigation "guide me home"** | ✅ Implemented | RPi computes the compass bearing to a named destination and streams the head aim; ESP32 holds it in the NAVIGATING state (live compass). Start via voice ("Bring mich nach Home") or web UI; exit via spoken keyword, web UI, arrival, or timeout. See `specs/013-navigation.spec`. On-hardware `aim_sign` verification pending (BACKLOG Step 5) |
 | **Face Detection (ESP32)** | ✅ Complete | esp-dl **v3** `HumanFaceDetect` (managed IDF component, *not* the old `HumanFaceDetectMSR01`), OV3660 QVGA RGB565BE, `set_vflip(1)` mandatory, 48 ms inference (~21 fps), gaze offsets + state transitions on-device. Detection is currently more sporadic in the firmware than in the isolated `facelab/` project — see `BACKLOG.md` |
 | **OTA Update Mode** | ✅ Complete | 4-tap vibration → SoftAP `RobotOwl-Update` + `/update` HTTP page (HTTPUpdateServer); one tap exits; dual-bank ota_0/ota_1; standalone boot (5s USB wait) |
 | **Face Detection (RPi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
 | **Web UI (RPi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and BNO055 calibration counters, and a map place-picker for navigation. Page lives in `brain/templates/index.html` |
-| **Speech (RPi)** | ✅ Implemented | German. Mic → RMS VAD gate → faster-whisper (CTranslate2, not torch) → keyword clusters / navigation triggers. Gated on awake + face + energy so the owl does not react to the TV. Disabled by default. See `SPEECH_RECOGNITION_PLAN.md` |
-| **RPi test suite** | ✅ 174 tests | Runs on a plain dev machine with no Pi, mic, PortAudio, faster-whisper, Flask, Jinja2 or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔RPi wire contract (39) and firmware-vs-RPi drift guards (11) |
+| **Speech (RPi)** | ✅ Implemented | German. Mic → RMS VAD gate → faster-whisper (CTranslate2, not torch) → keyword clusters / navigation triggers. Gated on awake + face + energy so the owl does not react to the TV. Disabled by default. See `specs/014-speech.spec` |
+| **RPi test suite** | ✅ 175 tests | Runs on a plain dev machine with no Pi, mic, PortAudio, faster-whisper, Flask, Jinja2 or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔RPi wire contract (39) and firmware-vs-RPi drift guards (11) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
 
 ---
 
-## Known Issues & TODO
+## What's next
 
-- [x] **First-run wiring check** — build with `HARDWARE_CHECK=1` (in `include/config.h` or `-DHARDWARE_CHECK=1` in `build_flags`) to boot into a self-test that probes every peripheral (both LCDs, PCA9685 servo driver, PA1010D GPS, BNO055 IMU, SW420 vibration, OV3660 camera) and prints one `{"type":"hardware_check",...}` JSON line + shows a happy/red-X face on the eyes. The `i2c_found` field lists every I2C address that answers, so a mis-wired or missing device is obvious. Flip the flag back to `0` and re-flash for normal operation. This is `BACKLOG.md` Step 2 — run it after any mechanical work, before investing in calibration, because it catches a disturbed connector in seconds.
-- [ ] **Face detection on ESP32:** implemented with esp-dl **v3** (`HumanFaceDetect`). The old v1 knobs do *not* exist in v3 — there is no `resize_scale` and no `top_k`, the model does its own preprocessing. Thresholds are **not** the lever either: 0.5 is the library default and measured right (real detections score 0.58–1.00). The open question is why detection is more sporadic in the firmware than in `facelab/` — `BACKLOG.md` Step 4, and **measure the loop period first**
-- [x] **RPi face detection fallback:** Resolved — detection is fully on-device; an OpenCV/MediaPipe fallback on the RPi is only needed if ESP32 detection is later disabled
-- [x] **OTA updates:** Implemented — 4-tap vibration enters update mode (SoftAP `RobotOwl-Update` + `/update` HTTP page), one tap exits. Dual-bank (ota_0/ota_1) partitions; owl boots standalone without the RPi. RPi supervisor surfaces the AP credentials. Hardware-validated end to end (entry, SoftAP, web page, exit). Remaining: RPi-side push tooling
-- [ ] **Mechanical assembly:** 3D printing/enclosure, servo attachment for ears/head/wings, LCD bezels
-- [ ] **Detection is too sporadic (open bug — `BACKLOG.md` Step 4):** 6 hits in 25 s in the firmware versus near-every-frame in the isolated `facelab/` project — same model, same camera, same thresholds, so it is the integration. Leading suspect is the main loop exceeding `FACE_DETECT_INTERVAL_MS` (eye rendering alone is ~61 ms). **Measure the actual loop period first.** `facelab/` is kept precisely as the A/B control
-- [ ] **`navigation.aim_sign` unverified on hardware (`BACKLOG.md` Step 5):** flip it in `rpi-brain/config.yaml` if the head turns the wrong way on the first nav test
-- [ ] **`src/main.cpp` split (883 lines):** deliberately parked — last item of `BACKLOG.md` Step 6, explicitly not to be started before Step 4 is diagnosed, since it would alter loop structure while loop timing is the leading suspect. Seams are written down there
+**There is exactly one backlog: [`BACKLOG.md`](BACKLOG.md).** Open work is not
+tracked here — this section used to duplicate it, with eight items that drifted
+out of step with the real list.
 
----
+Its top section is a dependency-ordered Step list, and the order matters: Steps
+0–5 need the owl (flash → mechanical → validate → calibrate → the detection bug
+→ navigation), Step 6 needs only a laptop. Two orderings there are easy to get
+wrong and expensive — head-opening work before any IMU calibration, and the
+camera extension before any detection tuning.
+
+The one genuinely open bug: **detection is more sporadic in the firmware than in
+the isolated `facelab/` project** — same model, same camera, same thresholds, so
+it is the integration. `BACKLOG.md` Step 4; measure the loop period first.
 
 ## References
 

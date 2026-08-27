@@ -168,19 +168,26 @@ The old `gpsSerial.begin(..., 1, 2)` on the I2C pins has been removed, so GPIO 1
 
 ## 🔢 Complete Pin Reference (XIAO ESP32-S3 Board Pads)
 
+> This is a **second** view of the same pin map as the soldering table above,
+> which is why it drifted: on 2026-08-27 the first table was corrected by hand
+> and this one was missed, leaving five wrong rows — vibration on D3 (which is
+> the right eye's DC), the left DC on an unused pin, and both CS lines swapped
+> again. `tools/check_docs.py` now parses **every** `**D<n>**` row in this file
+> against `config.h`, so the two cannot disagree again. Run it after editing.
+
 | Board Pad | GPIO | Used? | Function |
 |:---------:|:----:|:-----:|----------|
 | D0 | 1 | ✅ | I2C SDA |
 | D1 | 2 | ✅ | I2C SCL |
-| D2 | 3 | ⬜ | Free |
-| **D3** | **4** | ✅ | Vibration sensor (SW420) |
+| **D2** | **3** | ✅ | Vibration sensor (SW420) |
+| **D3** | **4** | ✅ | LCD DC — Right |
 | **D4** | **5** | ✅ | LCD SPI SCK (shared) |
-| **D5** | **6** | ✅ | LCD DC — Left |
+| D5 | 6 | ⬜ | Free — the firmware does not use this pin |
 | **D6** | **43** | ✅ | LCD RST (shared) — silkscreen `TX`, repurposed as GPIO |
-| **D7** | **44** | ✅ | LCD CS — Right — silkscreen `RX`, repurposed as GPIO |
+| **D7** | **44** | ✅ | LCD CS — Left — silkscreen `RX`, repurposed as GPIO |
 | **D8** | **7** | ✅ | LCD SPI MOSI (shared) |
-| **D9** | **8** | ✅ | LCD CS — Left |
-| **D10** | **9** | ✅ | LCD DC — Right |
+| **D9** | **8** | ✅ | LCD CS — Right |
+| **D10** | **9** | ✅ | LCD DC — Left |
 | — | 10 | ✅ | Camera XCLK (Sense B2B, not a D pad) |
 | D11 | 42 | ⬜ | Free |
 | D12 | 41 | ⬜ | Free |

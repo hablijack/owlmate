@@ -55,7 +55,7 @@ web:
 # named destination. You teach it places (name + lat/lon) in the web UI's
 # "Places" card, then say "Bring mich nach <name>" (or press Start in the web
 # UI) and its head continuously turns to point at the destination.
-# pattern: see NAVIGATION_PLAN.md.
+# pattern: see specs/013-navigation.spec.
 #
 #   enabled          - run the navigation controller (disabled by default so
 #                      existing deployments are unaffected)
@@ -135,7 +135,7 @@ speech:
   # locations, e.g. "bring mich nach hotel" -> name "hotel". In feed() these
   # triggers are checked BEFORE the keyword clusters, so a nav sentence is not
   # stolen by a single question word ("wie komm ich zu ..."). See
-  # NAVIGATION_PLAN.md §5.5 / §13.
+  # specs/013-navigation.spec ("four ways out", and the nav-specific stop word).
   nav_triggers: ["bring mich nach", "bringe mich nach", "zeig mir den weg nach",
                  "wie komme ich nach", "wie komme ich zum", "wie komme ich zu"]
   # Phrases that STOP navigation (see plan §13). Kept specific to navigation so

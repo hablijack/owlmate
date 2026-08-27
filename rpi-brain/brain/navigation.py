@@ -15,7 +15,7 @@ Driving model
   there is no active navigation, or no GPS fix / uncalibrated heading, so a
   stale or missing sensor never makes the head flail.
 
-Exit (see NAVIGATION_PLAN.md "Exiting navigation mode") -- any of these ends it:
+Exit (see specs/013-navigation.spec, "four ways out") -- any of these ends it:
   * a spoken stop keyword (Speech calls stop()),
   * the web UI Stop button (supervisor calls stop()),
   * arrival (distance < arrive_m),

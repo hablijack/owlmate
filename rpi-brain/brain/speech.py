@@ -6,7 +6,7 @@ The owl hears the user's voice and reacts: a short utterance is transcribed
 owl-call on the MAX98357A amp). This is the RPi-side "behavior pipeline" from
 the speech spec: cooldown -> keyword cluster -> action.
 
-Design (see SPEECH_RECOGNITION_PLAN.md):
+Design (see specs/014-speech.spec):
   * ASR runs on the RPi (a USB mic) -- the ESP32 has no mic / no ASR headroom.
   * Reactions drive the owl through the EXISTING temporary overrides
     (expression / gaze) + local amp audio. The ESP32 firmware and its own
@@ -87,7 +87,7 @@ class Speech:
         # Navigation ("guide me home"): phrases that START guiding toward a
         # place (the words after the trigger are the place name, fuzzy-matched
         # against the saved locations) and phrases that STOP it. See
-        # NAVIGATION_PLAN.md §5.5 / §13. Longest trigger first so a short
+        # specs/013-navigation.spec. Longest trigger first so a short
         # trigger can't shadow a longer one.
         self.nav_triggers = [str(t).lower() for t in (cfg.get("nav_triggers") or [])]
         self.nav_stop_keywords = [str(k).lower() for k in (cfg.get("nav_stop_keywords") or [])]
@@ -140,7 +140,7 @@ class Speech:
         # portaudio when the feature is actually on. faster-whisper (not the
         # torch openai-whisper) is used because it runs on the RPi's ARM CPU
         # without a heavy torch dependency and is several times faster -- see
-        # SPEECH_RECOGNITION_PLAN.md "ASR engine".
+        # specs/014-speech.spec, "faster-whisper (CTranslate2)".
         import numpy as np  # noqa: F401  (ensures numpy is present early)
         import sounddevice as sd
         from faster_whisper import WhisperModel

@@ -70,6 +70,8 @@ commit messages.
 | [010](010-serial-protocol.spec) | NDJSON contract between ESP32 and RPi | implemented |
 | [011](011-diagnostics.spec) | Diagnostic builds and host tools | implemented |
 | [012](012-rpi-brain.spec) | RPi brain internals: ownership, packaging, testing | implemented |
+| [013](013-navigation.spec) | Navigation — the owl as a compass | partial |
+| [014](014-speech.spec) | Speech — hearing the user and reacting | partial |
 
 ## Conventions used throughout
 
