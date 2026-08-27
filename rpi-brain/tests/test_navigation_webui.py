@@ -11,6 +11,7 @@ hardware is needed. The locations store is pointed at a temp file.
 """
 
 import os
+import re
 import sys
 import tempfile
 import types
@@ -233,6 +234,81 @@ class TestWebUINavEndpoints(unittest.TestCase):
         self.assertEqual(d["gps"]["satellites"], 8)
         self.assertEqual(d["vibration"]["pulses"], 3252)
         self.assertEqual(d["face"]["total"], 57)
+
+
+class TestMapPickerDegradesOffline(unittest.TestCase):
+    """The place picker must stay usable with no internet.
+
+    Leaflet and its tiles are fetched by the BROWSER from two remote hosts
+    (unpkg.com for the library, tile.openstreetmap.org for the tiles). The owl is
+    a mobile, battery-powered device, so "no internet on the viewing phone" is a
+    normal condition, not an edge case -- and saving destinations is how
+    navigation gets anywhere.
+
+    These are template assertions, not DOM tests: the project has no JS test
+    harness, and a cheap check that the guard exists is worth more than none.
+    """
+
+    def test_template_guards_on_leaflet_being_absent(self):
+        from brain.web_ui import TEMPLATE
+        self.assertIn("typeof L === 'undefined'", TEMPLATE)
+
+    def test_offline_message_names_the_manual_path(self):
+        from brain.web_ui import TEMPLATE
+        self.assertIn("Map unavailable", TEMPLATE)
+        # It must tell the user what to do instead, not just that it failed.
+        self.assertIn("type the lat/lon", TEMPLATE)
+
+    def test_manual_lat_lon_inputs_exist_independently_of_the_map(self):
+        # The fallback is only real if these fields are always present.
+        from brain.web_ui import TEMPLATE
+        self.assertIn('id="place-lat"', TEMPLATE)
+        self.assertIn('id="place-lon"', TEMPLATE)
+
+    def test_offline_message_contains_no_html_entity(self):
+        """textContent does not decode entities -- one there renders literally.
+
+        The offline message used to read "... (offline?) &mdash; type the ...",
+        putting those eight characters on screen at the exact moment the user was
+        already wondering why the map was missing.
+
+        Deliberately narrow: it checks THIS string, not every textContent
+        assignment in the template. A general version needs a JS statement
+        parser to be correct -- two attempts here were wrong in instructive
+        ways. The first scanned line by line, but the property and its string
+        literal sit on separate lines, so it never saw them together and passed
+        against the live bug. The second treated any ";" as the statement end --
+        and "&mdash;" contains one, so the match stopped inside the entity and
+        the captured text no longer held a complete entity to find. The third
+        anchored on end-of-line semicolons and then over-captured across
+        statements into a neighbouring innerHTML call. Entities are legitimate
+        in markup and in innerHTML, so distinguishing them properly is a real
+        parsing job, and not one worth doing in this test.
+        """
+        from brain.web_ui import TEMPLATE
+        line = next(l for l in TEMPLATE.splitlines()
+                    if "Map unavailable (offline?)" in l)
+        self.assertIsNone(
+            re.search(r"&[a-zA-Z]+;|&#\d+;", line),
+            "HTML entity in a textContent string; it will render literally:\n"
+            f"{line.strip()}")
+        # And it must still contain the dash it is meant to have.
+        self.assertIn("\\u2014", line)
+
+    def test_cdn_tags_pin_integrity_hashes(self):
+        # The library is third-party code executing in the operator's browser on
+        # a page with no authentication. SRI is what stops a compromised CDN
+        # substituting it. Matched per TAG, not per line: these tags wrap, so the
+        # integrity attribute sits on the continuation line.
+        from brain.web_ui import TEMPLATE
+        tags = re.findall(r"<(?:script|link)\b[^>]*>", TEMPLATE, re.S)
+        remote = [t for t in tags if "//" in t and "unpkg.com" in t]
+        self.assertTrue(remote, "expected the Leaflet CDN tags to be present")
+        for tag in remote:
+            self.assertIn("integrity=", tag,
+                          f"unpinned CDN asset:\n{tag}")
+            self.assertIn("crossorigin", tag,
+                          f"SRI needs crossorigin to be enforced:\n{tag}")
 
 
 if __name__ == "__main__":

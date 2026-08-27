@@ -130,9 +130,18 @@ TEMPLATE = r"""<!doctype html>
   }
 </style>
 <!-- Leaflet (OpenStreetMap) for the "Pick on map" place picker. Loaded by the
-     BROWSER (not the RPi): the RPi needs no internet / no API key. If this
-     fails (airgapped viewer), the map is simply unavailable and you type the
-     lat/lon instead. -->
+     BROWSER (not the RPi): the RPi needs no internet and no API key. SRI
+     integrity hashes are pinned, so a compromised CDN cannot substitute code.
+     With no internet the picker degrades to "type the lat/lon" (see openMap()).
+
+     DO NOT "fix" this by vendoring leaflet.js into the repo. It would not help:
+     the tiles come from a SECOND remote host (tile.openstreetmap.org, in
+     openMap() below), so a locally-bundled Leaflet renders a fully working map
+     widget full of blank grey squares -- which is worse than the current honest
+     "Map unavailable" message, because it looks broken instead of explained.
+     Real offline maps need a region tile pack (tens of MB, plus a refresh
+     policy) or a tile server on the Pi. That is a feature with a real cost, not
+     a dependency cleanup. Typing coordinates off a phone takes seconds. -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCJo9tDMHisX+PMd0x6BXM9M=" crossorigin="">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -279,8 +288,10 @@ TEMPLATE = r"""<!doctype html>
       var ov = document.getElementById('map-overlay');
       ov.style.display = 'flex';
       if (typeof L === 'undefined') {
+        // textContent does NOT decode HTML entities: this line used to contain
+        // "&mdash;" and rendered those eight characters on screen.
         document.getElementById('map-coords').textContent =
-          "Map unavailable (offline?) &mdash; type the lat/lon and press 'Use this location'.";
+          "Map unavailable (offline?) \u2014 type the lat/lon and press 'Use this location'.";
         return;
       }
       if (!map) {
