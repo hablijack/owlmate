@@ -373,7 +373,7 @@ anything later, edit `/opt/robot-owl/rpi-brain/config.yaml` (or re-run
 
 ## First Run Checklist
 
-> ⚠️ **Re-wire required before first run with the Sense camera:** GPIO 10 is now reserved for the camera's XCLK. The right eye's CS line must be moved from **GPIO 10 → D7 (GPIO 44)** (`LCD_CS_R` in `config.h`). See `WIRING.md`.
+> ⚠️ **GPIO 10 belongs to the camera.** It is the Sense camera's XCLK, so no LCD line may use it. As wired and verified on 2026-08-26 neither eye does: the **left** eye's CS is D7/GPIO 44 (`LCD_CS_L`) and the **right** eye's is D9/GPIO 8 (`LCD_CS_R`). Earlier revisions of this note named the wrong eye — `config.h` is authoritative, and `WIRING.md` has the full harness including cable colours.
 
 ### 0. Flash firmware — use USB-C first, not the Pi
 

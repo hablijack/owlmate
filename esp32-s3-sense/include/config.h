@@ -129,8 +129,10 @@
 
 // ============================================================================
 // Vibration Sensor (SW420)
-// Wired to D2 = GPIO3. (The LEFT eye's DC was moved to D3 = GPIO4, so the
-// vibration sensor lives on the adjacent free pin D2 to avoid a conflict.)
+// Wired to D2 = GPIO3. (The RIGHT eye's DC sits on D3 = GPIO4 -- see LCD_DC_R
+// above -- so the vibration sensor lives on the adjacent free pin D2 to avoid
+// a conflict. WIRING.md used to list it on D3 itself, which would have shorted
+// it to that DC line.)
 // ============================================================================
 #define VIBRATION_PIN 3
 

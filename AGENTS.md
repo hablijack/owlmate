@@ -292,8 +292,12 @@ good if the camera ever goes quiet again.
 config.h to D-numbers and broke everything. `config.h` is authoritative and its LCD pins were
 verified against the physical harness on 2026-08-26 by colouring each panel differently:
 shared CLK=D4/GPIO5, DIN=D8/GPIO7, RST=D6/GPIO43; left CS=D7/GPIO44 DC=D10/GPIO9; right
-CS=D9/GPIO8 DC=D3/GPIO4. (They had been swapped left-for-right.) The pin table in `README.md`
-is stale.
+CS=D9/GPIO8 DC=D3/GPIO4. (They had been swapped left-for-right.)
+
+`README.md`'s hardware table and `WIRING.md` both agree with `config.h` as of 2026-08-27.
+`WIRING.md` was the dangerous one until then: it had the two CS lines swapped, put the left DC on an
+unused pin, and listed the vibration sensor on **D3 — the right eye's DC**. It is the document you
+follow with a soldering iron, so check it against `config.h` whenever pins move.
 
 ## RPi brain architecture
 
@@ -401,10 +405,9 @@ cannot drift from the firmware.
 
 ## Current state
 
-Both eyes work on the shared bus and render independently. The working tree has substantial
-uncommitted work across the eye bring-up (`GC9D01.*`, `Eyes.*`, `main.cpp`, `config.h`,
-`common.h`, `Sensors.cpp`, `platformio.ini`). `prompt.md` is the brief from that session and gives
-the wiring as physically built in `D#` labels; it matches `config.h` as of 2026-08-26.
+Both eyes work on the shared bus and render independently. The wiring as physically built —
+including cable colours — is in `WIRING.md`, corrected against `config.h` on 2026-08-27.
+`config.h` remains authoritative if the two ever disagree.
 
 All three I2C devices work (verified: live BNO055 Euler angles, 43 NMEA sentences in 6 s from the
 PA1010D, a PCA9685 servo ramp). Telemetry runs at ~535 ms.

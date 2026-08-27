@@ -4,25 +4,46 @@ Complete **XIAO ESP32-S3** wiring guide, matching the firmware pin assignments i
 
 > ⚠️ **Silkscreen caution**: On the XIAO ESP32-S3, D4/D5 are printed with their *default* I2C function (`SDA`/`SCL`). That is only the default — the firmware remaps I2C onto D0/D1 and uses D4/D5 as plain GPIO/SPI via the ESP32-S3 GPIO matrix. Wire them to the LCDs as listed below, not to I2C devices.
 
+> ⚠️ **`config.h` is authoritative, not this file.** If the two ever disagree,
+> `esp32-s3-sense/include/config.h` wins and this table is the bug. The table
+> below was corrected against it on 2026-08-27; before that it had the two eyes'
+> CS lines swapped, listed the left DC on an unused pin, and put the vibration
+> sensor on **D3 — which is the right eye's DC**. Soldering to the old table
+> would have shorted the two together.
+
+> **Side convention**: "left" and "right" are the **owl's own** left and right,
+> as it would describe them looking forward. Standing in front of the owl, its
+> left eye is the one on your right. Same convention as `config.h`.
+
 ---
 
 ## 🔌 All Pins You Need to Solder
 
-| Board PAD | GPIO | Purpose | Connect To |
-|:---------:|:----:|---------|------------|
-| **D0** | GPIO 1 | I2C SDA | BNO055 IMU + PA1010D GPS + PCA9685 Servo Driver |
-| **D1** | GPIO 2 | I2C SCL | BNO055 IMU + PA1010D GPS + PCA9685 Servo Driver |
-| **D3** | GPIO 4 | Vibration sensor (SW420) | SW420 signal pin |
-| **D4** | GPIO 5 | LCD SPI SCK (shared) | Both LCDs: SCK |
-| **D5** | GPIO 6 | LCD DC — Left eye | Left LCD: DC |
-| **D6** | GPIO 43 | LCD RST (shared) | Both LCDs: RST |
-| **D7** | GPIO 44 | LCD CS — Right eye | Right LCD: CS |
-| **D8** | GPIO 7 | LCD SPI MOSI (shared) | Both LCDs: MOSI |
-| **D9** | GPIO 8 | LCD CS — Left eye | Left LCD: CS |
-| **D10** | GPIO 9 | LCD DC — Right eye | Right LCD: DC |
-| **GP10** | GPIO 10 | Camera XCLK | Sense expansion camera (back B2B pad) |
+Cable colours are the harness as physically built, so an existing loom can be
+traced without a continuity check.
 
-> **GPIO 10** is the camera's XCLK on the XIAO ESP32-S3 **Sense** — it must **not** be used for the LCDs. The right eye's CS was moved to **D7 (GPIO 44)** to free GPIO 10 for the camera.
+| Board PAD | GPIO | Purpose | Cable | Connect To |
+|:---------:|:----:|---------|:-----:|------------|
+| **D0** | GPIO 1 | I2C SDA | — | BNO055 IMU + PA1010D GPS + PCA9685 Servo Driver |
+| **D1** | GPIO 2 | I2C SCL | — | BNO055 IMU + PA1010D GPS + PCA9685 Servo Driver |
+| **D2** | GPIO 3 | Vibration sensor (SW420) | — | SW420 signal pin (DO) |
+| **D4** | GPIO 5 | LCD SPI SCK (shared) | yellow | Both LCDs: CLK |
+| **D8** | GPIO 7 | LCD SPI MOSI (shared) | white | Both LCDs: DIN |
+| **D6** | GPIO 43 | LCD RST (shared) | blue | Both LCDs: RST |
+| **D7** | GPIO 44 | LCD CS — **Left** eye | orange | Left LCD: CS |
+| **D10** | GPIO 9 | LCD DC — **Left** eye | green | Left LCD: DC |
+| **D9** | GPIO 8 | LCD CS — **Right** eye | orange | Right LCD: CS |
+| **D3** | GPIO 4 | LCD DC — **Right** eye | green | Right LCD: DC |
+| **GP10** | GPIO 10 | Camera XCLK | — | Sense expansion camera (back B2B pad) |
+
+Both panels also take **VCC (red) → 3.3 V**, **GND (black) → GND** and
+**BL (purple) → the same 3.3 V as VCC** — the backlights are always on.
+
+> **GPIO 10** is the camera's XCLK on the XIAO ESP32-S3 **Sense** — it must **not** be used for the LCDs. Neither eye's CS uses it.
+
+> The eye pin assignments were verified on hardware on 2026-08-26 by driving
+> each panel a different colour and noting which eye lit up. To re-settle it in
+> 30 seconds: `pio run -e dualtest -t upload` drives one eye red, the other blue.
 
 ---
 
