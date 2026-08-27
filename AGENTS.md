@@ -450,10 +450,28 @@ in particular **`src/main.cpp` is still 883 lines and its split is parked at low
 the sporadic-detection bug is diagnosed, because it would alter loop structure while loop timing is
 the leading suspect.
 
-The BNO055 was calibrated on hardware 2026-08-26 and the offsets persist in NVS, so a boot logs
-`IMU: restored calibration offsets from flash` and comes up with a live heading. Re-run
-`esp32-s3-sense/tools/kalibrieren.py` (guided, German) only if the sensor is replaced/remounted or
-NVS is erased.
+**The IMU calibration is GONE and must be redone. Do it before trusting any heading.** It was
+written to NVS on 2026-08-26 and then wiped later the same session by flashing
+`firmware.factory.bin` at 0x0, which spans past 0x9000 and erases the NVS partition. (This is the
+one flashing mistake the repo warns about in three places; it still happened. Flash
+bootloader/partitions/boot_app0/firmware separately — see the offsets table above.)
+
+    ~/.platformio/penv/bin/python esp32-s3-sense/tools/kalibrieren.py
+
+**Order matters**: the figure-8 for `mag` comes BEFORE the static poses for `accel`, never after —
+sustained motion resets the `accel` counter to 0. Done when all four counters read 3/3 and the log
+says `IMU: calibration complete - offsets saved to flash`; a reboot must then log
+`IMU: restored calibration offsets from flash`.
+
+Until that is done, `imu.calibrated` stays false and `navigation.py` correctly refuses to aim, so
+"guide me home" will look broken when it is in fact working as specified. This is BACKLOG item 1 and
+`specs/006-imu-orientation.spec` is `Status: partial` for the same reason.
+
+**Checking it no longer needs a serial log.** Telemetry carries `imu.cal.{sys,gyro,accel,mag,restored}`
+and the web UI displays all of them, including a `from flash` marker for `restored`. That only became
+true on 2026-08-27 — the RPi had been discarding those five fields, so "is my calibration still
+there?" was unanswerable from the Pi side, which is a fair part of why this drifted out of date here.
+Re-run the tool whenever the sensor is replaced or remounted, or NVS is erased again.
 
 `IMU_HEADING_OFFSET_DEG` is 75.4, measured on hardware: 70.8° of mounting rotation plus **+4.594° of
 magnetic declination**. That second term is required, not cosmetic — the BNO055 reports a *magnetic*

@@ -428,7 +428,8 @@ If it prints `ERROR: Left LCD failed` / `ERROR: Right LCD failed` / `ERROR: Sens
 | Field | Expected on first run |
 |---|---|
 | `state` | `boot` → `idle` after ~3 s |
-| `imu.calibrated` | eventually `true` (rotate/yaw the owl to calibrate the magnetometer) |
+| `imu.calibrated` | `false` until the BNO055 is calibrated — **the stored calibration was erased and has not been redone** (BACKLOG item 1). It is `gyro >= 3 && mag >= 3`, and `mag` only rises during a figure-8. Run `esp32-s3-sense/tools/kalibrieren.py`; figure-8 for `mag` BEFORE the static poses for `accel`, never after. Watch `imu.cal.{gyro,mag}` climb to 3/3 in the web UI |
+| `imu.cal.restored` | `true` once calibration has been saved and the owl rebooted — this is how you tell "calibration survived the last flash" from "it was wiped again" |
 | `gps.valid` | `true` only with a sky-view fix; `gps.satellites` > 0 |
 | `vibration.count` | `0` — increments when the SW420 is tapped |
 | `face.detected` | `false` (true when a face is in frame) |

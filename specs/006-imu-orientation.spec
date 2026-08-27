@@ -100,7 +100,14 @@ Measured 2026-08-26, owl standing level on a flat surface:
 1. `pio run -e imuaxis -t upload`, owl level: roll and pitch near 0.
 2. Run `tools/kalibrieren.py` — all four counters reach 3/3 and it reports
    offsets saved.
-3. Reboot: log shows offsets restored, `cal.restored: true`, `calibrated: true`
+3. Reboot: log shows offsets restored, `cal.restored: true`, `calibrated: true`.
+   Since 2026-08-27 this no longer needs a serial log — telemetry carries all
+   five `imu.cal.*` fields and the web UI displays them, `restored` included.
+   The RPi had been discarding them (SPEC-010), so for a while the question
+   "did my calibration survive that flash?" had no answer on the Pi side at all,
+   and `AGENTS.md` drifted into claiming the offsets were still present while
+   this spec and `BACKLOG.md` both said they had been wiped. Corrected
+   2026-08-27; a fact worth checking is worth making observable.
    in essentially every frame.
 4. Point the beak at a known bearing; `imu.yaw` matches within ~10°.
 
