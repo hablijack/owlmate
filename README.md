@@ -191,7 +191,7 @@ While in **UPDATE** state the owl is on an isolated SoftAP (`RobotOwl-Update`); 
 - USB CDC (`ARDUINO_USB_CDC_ON_BOOT=1`) works out of the box
 - ESP-DL (face detection) is an ESP-IDF component — switching frameworks would require rewriting all drivers
 
-**Trade-off:** On-device face detection uses esp-dl, whose prebuilt libraries (`libhuman_face_detect.a`, `libdl.a`) and headers ship inside the Arduino SDK and are linked by the framework build scripts by default (see `platformio-build-esp32s3.py`). Enabled with `FACE_DETECTION_ENABLED=1`.
+**Trade-off:** On-device face detection uses esp-dl, which is **not** in the prebuilt Arduino libraries of core 3.x (it was in 2.0.x). It comes in as a *managed ESP-IDF component* instead, which is why the main env builds as `framework = arduino, espidf` — see the framework decision below. Enabled with `FACE_DETECTION_ENABLED=1`, which the main env sets.
 
 ### 2. Custom GC9D01 SPI Driver
 **Decision:** Write custom driver instead of using TFT_eSPI or Adafruit_ST7789.
@@ -293,8 +293,8 @@ esp32-s3-sense/                    # ESP32 firmware
 │   ├── Eyes/                      # Eye renderer class
 │   │   ├── Eyes.h/.cpp            # Sclera, iris, pupil, eyelids, 8 expressions
 │   │   └── common.h               # Eye geometry, colors
-│   └── FaceDetector/              # Face detection module (esp-dl MSR01)
-│       ├── FaceDetector.h/.cpp    # OV3660 + HumanFaceDetectMSR01 integration
+│   └── FaceDetector/              # Face detection module (esp-dl v3)
+│       ├── FaceDetector.h/.cpp    # OV3660 + HumanFaceDetect (v3 API) integration
 │                                    # Enabled with FACE_DETECTION_ENABLED=1
 ├── src/
 │   ├── main.cpp                   # State machine, protocol, telemetry, main loop
@@ -495,7 +495,7 @@ python main.py [config.yaml]   # Default config path
 | **State Machine** | ✅ Complete | 8 states on ESP32 (owns behavior): BOOT/IDLE/DETECTING/INTERACTING/SLEEPING/NAVIGATING/UPDATE/ERROR |
 | **NDJSON Protocol** | ✅ Complete | Telemetry (500ms) + commands (expression/servo/gaze/nav/wake/blink/heartbeat) |
 | **Navigation "guide me home"** | ✅ Implemented | RPi computes the compass bearing to a named destination and streams the head aim; ESP32 holds it in the NAVIGATING state (live compass). Start via voice ("Bring mich nach Home") or web UI; exit via spoken keyword, web UI, arrival, or timeout. See `NAVIGATION_PLAN.md`. On-hardware `aim_sign` verification pending |
-| **Face Detection (ESP32)** | ✅ Complete | esp-dl `HumanFaceDetectMSR01`, OV3660 QVGA RGB565, gaze offsets + state transitions on-device |
+| **Face Detection (ESP32)** | ✅ Complete | esp-dl **v3** `HumanFaceDetect` (managed IDF component, *not* the old `HumanFaceDetectMSR01`), OV3660 QVGA RGB565BE, `set_vflip(1)` mandatory, 48 ms inference (~21 fps), gaze offsets + state transitions on-device. Detection is currently more sporadic in the firmware than in the isolated `facelab/` project — see `BACKLOG.md` |
 | **OTA Update Mode** | ✅ Complete | 4-tap vibration → SoftAP `RobotOwl-Update` + `/update` HTTP page (HTTPUpdateServer); one tap exits; dual-bank ota_0/ota_1; standalone boot (5s USB wait) |
 | **Face Detection (RPi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
@@ -505,7 +505,7 @@ python main.py [config.yaml]   # Default config path
 ## Known Issues & TODO
 
 - [x] **First-run wiring check** — build with `HARDWARE_CHECK=1` (in `include/config.h` or `-DHARDWARE_CHECK=1` in `build_flags`) to boot into a self-test that probes every peripheral (both LCDs, PCA9685 servo driver, PA1010D GPS, BNO055 IMU, SW420 vibration, OV3660 camera) and prints one `{"type":"hardware_check",...}` JSON line + shows a happy/red-X face on the eyes. The `i2c_found` field lists every I2C address that answers, so a mis-wired or missing device is obvious. Flip the flag back to `0` and re-flash for normal operation. See `BACKLOG.md` (Navigation → on-hardware step 1).
-- [ ] **Face detection on ESP32:** Use esp-dl `HumanFaceDetectMSR01` (implemented). Tune score threshold / resize scale for speed vs accuracy; test indoors with good lighting
+- [ ] **Face detection on ESP32:** implemented with esp-dl **v3** (`HumanFaceDetect`). The old v1 knobs do *not* exist in v3 — there is no `resize_scale` and no `top_k`, the model does its own preprocessing. Thresholds are **not** the lever either: 0.5 is the library default and measured right (real detections score 0.58–1.00). The open question is why detection is more sporadic in the firmware than in `facelab/` — see `BACKLOG.md`
 - [x] **RPi face detection fallback:** Resolved — detection is fully on-device; an OpenCV/MediaPipe fallback on the RPi is only needed if ESP32 detection is later disabled
 - [x] **OTA updates:** Implemented — 4-tap vibration enters update mode (SoftAP `RobotOwl-Update` + `/update` HTTP page), one tap exits. Dual-bank (ota_0/ota_1) partitions; owl boots standalone without the RPi. RPi supervisor surfaces the AP credentials. Hardware-validated end to end (entry, SoftAP, web page, exit). Remaining: RPi-side push tooling
 - [ ] **Mechanical assembly:** 3D printing/enclosure, servo attachment for ears/head/wings, LCD bezels

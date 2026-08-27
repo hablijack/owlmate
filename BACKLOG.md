@@ -81,9 +81,11 @@ NVS and with it the IMU calibration. Flash `bootloader.bin` @0x0,
 
 * `navigation.aim_sign` in the RPi `config.yaml` has never been verified against
   hardware — flip it if the head turns the wrong way on the first nav test.
-* Nothing from the 2026-08-26 session is committed. The tree holds the whole
-  day's work: eye library, GC9D01 driver, sensor rework, esp-dl migration, five
-  diagnostic envs and four tools.
+* ~~Nothing from the 2026-08-26 session is committed.~~ **Done 2026-08-27** —
+  the whole tree was committed (eye library, GC9D01 driver, sensor rework,
+  esp-dl migration, six diagnostic envs, four tools), followed by a refactoring
+  pass. See "Refactoring pass — 2026-08-27" below for what changed and what it
+  deliberately left alone.
 
 # Robot Owl — Backlog
 
@@ -91,6 +93,84 @@ Cross-session working backlog. Update the status as items get done so any
 session can pick up where the last one left off.
 
 Status legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` blocked
+
+---
+
+## Refactoring pass — 2026-08-27
+
+The 2026-08-26 tree was committed and then refactored. Eight commits, no
+behaviour change intended anywhere; all seven PlatformIO envs build and the RPi
+suite went from 104 to 168 tests.
+
+**Dead code removed:** `Eyes::fillTriangle`, `Eyes::markDirty`,
+`GC9D01::drawRect`, `GC9D01::drawCircle`, `Sensors::_vibBurstStart`, a discarded
+`bno.getSensor()` call, two unused `SerialHandler` callback fields,
+`LCD_SPI_HOST`. `FW_VERSION` is derived from the MAJOR/MINOR/PATCH triplet
+instead of being a hand-synced fourth copy of the string.
+
+**Bugs fixed:** an ack log line with two format placeholders and one argument
+(raised a logging error on every ack at debug level); the UPDATE-mode
+announcement logged twice from two layers; `read_loop` taking the whole brain
+down when a telemetry callback raised; `angleToUs` ignoring `SERVO_MAX_US` and
+assuming symmetric servo travel; the `powerprobe` env compiling the *entire*
+firmware (297 KB now, was 3.28 MB) which made it useless as the light-load
+comparison it exists to be.
+
+**Protocol single-sourced:** seven fields the firmware had always sent were
+never parsed on the RPi — `imu.cal.{sys,gyro,accel,mag,restored}`,
+`vibration.pulses`, `face.total`. All of them exist to make an invisible failure
+visible, and all were dropped. Now parsed, and shown in the web UI along with
+heading and GPS fix (neither of which the page exposed at all). Field
+transcription is a table, so a new firmware field is one row plus one dataclass
+field. Frames are frozen.
+
+**Expression list generated** from `NAMES[]` in `lib/Eyes/Eyes.cpp` via
+`rpi-brain/tools/gen_expressions.py`. The two hand-kept mirrors had drifted
+(26 / 23 / 24 names), and `config.yaml`'s 36-line `expressions:` block turned out
+to be read by *nothing*. Drift is now a test failure.
+
+**`WIRING.md` was actively wrong** and is the document you follow with a
+soldering iron: two CS lines swapped, the left DC on an unused pin, and the
+vibration sensor listed on **D3 — the right eye's DC**. Corrected against
+`config.h`, which is authoritative. Nothing was ever built from the bad table.
+
+### Deliberately NOT done
+
+* **`src/main.cpp` is still 883 lines — LOWEST PRIORITY, do not start this
+  yet.** The seams are clean and known: `runHardwareCheck()` (164 lines) wants
+  its own file behind its flag like every other diagnostic,
+  `handleCommand()`/`sendTelemetry()`/`parseSerialCommands()` want a
+  `protocol.cpp`, the state machine wants a `behavior.cpp`, which would leave
+  `main.cpp` at ~120 lines of wiring. Also inside it: the ack
+  serialize-and-println boilerplate repeats **7×** and the I2C scan loop appears
+  **twice in the same file** (a third copy is in `i2ctest.cpp`).
+  **Why it is parked:** it is the largest change, it touches the production
+  image, it needs a flash to verify, and it would alter loop structure while
+  "detection is too sporadic" is open with **loop timing as the leading
+  suspect**. Splitting files under an active timing investigation muddies the
+  diagnosis. Do the detection work first.
+* **`facelab/` kept.** It is the known-good control for the sporadic-detection
+  bug: same model, same camera, same thresholds, near-every-frame detection.
+  Deleting it would destroy the A/B reference for an open investigation. (It does
+  carry ~1.2 GB of gitignored build output on disk if you want the space.)
+* **Leaflet not vendored.** The tiles come from a second remote host, so a
+  locally-bundled Leaflet renders a working map widget full of blank grey
+  squares — worse than the current honest "Map unavailable" message. Real offline
+  maps need a region tile pack or a tile server on the Pi: a feature with a real
+  cost, not a dependency cleanup. Rationale is in the code above the CDN tags.
+
+### Open follow-ups from the pass
+
+* `[ ]` **Three supervisor test doubles** — `tests/stubs.py` `FakeSupervisor`
+  plus a local `StubSupervisor` in each of `test_navigation.py` and
+  `test_navigation_webui.py`. Every new supervisor method has to be added in all
+  three; that is how it was noticed. Consolidate into one.
+* `[ ]` **The new diagnostic panel has never seen real hardware.** The parsing
+  is well covered by tests, but the web UI rendering of the calibration
+  counters, GPS fix and pulse/hit totals has only ever been fed synthetic
+  frames. Eyeball it on the first run with a live owl — the calibration display
+  is meant to make the figure-8 dance easier, which is the point of the whole
+  change.
 
 ---
 
@@ -241,13 +321,20 @@ main project's seven working envs — including the hard-won PSRAM config — mu
 not be exposed to that. Build times also differ by two orders of magnitude
 (~280 s cold, ~8 s incremental, versus ~4 s for the Arduino-only envs).
 
-### Still to do
+### Still to do — DONE, this section is history
+
+> **Superseded.** The port happened later the same day: the main env runs
+> `framework = arduino, espidf`, `FaceDetector.cpp` is written against the v3
+> API, and `FACE_DETECTION_ENABLED` is **1**. See "Face detection PORTED into the
+> real firmware" above, which is the current state. The stale README claims about
+> the Arduino SDK shipping esp-dl were fixed on 2026-08-27.
+>
+> Kept because the reasoning below explains *why* the espidf migration was
+> needed at all.
 
 Port this into the real firmware. That means migrating the main env to
 `framework = arduino, espidf` and rewriting `lib/FaceDetector/FaceDetector.cpp`
 against the v3 API. `FACE_DETECTION_ENABLED` stays 0 until then.
-Also: README "Decision #8" still claims the Arduino SDK ships esp-dl and quotes
-`HumanFaceDetectMSR01` — both stale.
 
 ## Camera brought up 2026-08-26 — and it is an OV3660, not an OV2640
 
@@ -287,7 +374,14 @@ Two diagnostic traps recorded so we do not fall in again:
 
 Also removed: `CAMERA_ENABLED` in config.h, which was defined but never read.
 
-### Face detection is still blocked
+### Face detection is still blocked — RESOLVED, this section is history
+
+> **Superseded 2026-08-26.** esp-dl *is* available, just not in the prebuilt
+> Arduino libraries: pulling it in as a managed IDF component
+> (`src/idf_component.yml` + `framework = arduino, espidf`) was the answer, and
+> the v3 API replaced `HumanFaceDetectMSR01` entirely. Detection now runs at
+> 48 ms / ~21 fps. Kept because "the library is simply gone" was the wrong
+> conclusion and the next person may reach for it again.
 
 `FaceDetector.cpp` needs `human_face_detect_msr01.hpp` from esp-dl. **esp-dl is
 not present in Arduino core 3.x** (verified: nothing matching `*human_face*` or
