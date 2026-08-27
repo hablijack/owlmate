@@ -32,8 +32,17 @@ def _ear_wing_angle(direction: str, up: float, down: float) -> float:
 
 
 # Servo channel indices (must match esp32-s3-sense/include/config.h).
-CH_LEFT_EAR = 0
-CH_RIGHT_EAR = 1
+# PCA9685 channel numbers. MUST match the CH_* defines in
+# esp32-s3-sense/include/config.h — this is a mirror, not the source of truth.
+#
+# "left"/"right" are the OWL's own left and right: standing in front of it, its
+# left ear is the one on YOUR right.
+#
+# The ears are on 15 and 14, not 0 and 1 — moved 2026-08-27 because the servo
+# cables were too short to reach the low channels. The numbers are sparse on
+# purpose; do not assume they are contiguous.
+CH_LEFT_EAR = 15
+CH_RIGHT_EAR = 14
 CH_HEAD = 2
 CH_LEFT_WING = 3
 CH_RIGHT_WING = 4

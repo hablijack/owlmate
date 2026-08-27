@@ -11,6 +11,22 @@
 #define FW_VERSION "1.2.0"
 
 // ============================================================================
+// SIDE CONVENTION -- applies to EVERYTHING in this file
+//
+// "left" and "right" always mean the OWL's own left and right, as it would
+// describe them looking forward. Standing in front of the owl, its left side is
+// the one on YOUR right.
+//
+// This holds for the eyes (LCD_*_L / LCD_*_R) and for the servos
+// (CH_LEFT_* / CH_RIGHT_*) alike. Confirmed with the owner 2026-08-27; the two
+// subsystems were named before the convention was written down, so it was worth
+// checking that they agreed. They do.
+//
+// If the eyes ever look mirrored, this is settled empirically in 30 seconds:
+// `pio run -e dualtest -t upload` drives one eye red and the other blue.
+// ============================================================================
+
+// ============================================================================
 // Board & System
 // ============================================================================
 #define SERIAL_BAUD 115200
@@ -24,6 +40,9 @@
 // These are ACTUAL GPIO NUMBERS, not the XIAO "D#" silkscreen labels. The two
 // differ on this board and confusing them has broken this project before:
 //   D0=1  D1=2  D2=3  D3=4  D4=5  D5=6  D6=43  D7=44  D8=7  D9=8  D10=9
+//
+// LEFT/RIGHT here follow the side convention at the top of this file: the owl's
+// own left and right, not the viewer's.
 //
 // Verified against the harness as physically built (2026-08-26), by driving
 // each panel a different colour and confirming which eye lit up:
@@ -182,13 +201,31 @@
 
 // ============================================================================
 // Servo Channels (PCA9685)
+//
+// Sides follow the convention at the top of this file: the owl's own left and
+// right, not the viewer's.
+//
+// The ears are NOT on channels 0 and 1. They were moved to 15 and 14 on
+// 2026-08-27 because the servo cables were too short to reach the low channels.
+// The numbers are therefore SPARSE - see the note on array sizing below, this
+// is not merely cosmetic.
 // ============================================================================
-#define CH_LEFT_EAR 0
-#define CH_RIGHT_EAR 1
+#define CH_LEFT_EAR 15
+#define CH_RIGHT_EAR 14
 #define CH_HEAD 2
 #define CH_LEFT_WING 3
 #define CH_RIGHT_WING 4
-#define NUM_SERVO_CHANNELS 5
+
+// Number of servos actually fitted. Used for the telemetry "servos" array and
+// for iterating the populated channels.
+#define NUM_SERVOS 5
+
+// Channel count of the PCA9685 itself. This - NOT NUM_SERVOS - is what bounds
+// checks and per-channel arrays must use, because the channel numbers above are
+// sparse. The two used to be the same constant (NUM_SERVO_CHANNELS = 5), which
+// would have made setAngle(15, ...) fail the `channel >= 5` guard and return
+// silently: the ear would simply never move, with no error anywhere.
+#define PCA9685_NUM_CHANNELS 16
 
 // Servo center positions (pulse width in microseconds, 50Hz)
 #define SERVO_CENTER_US 1500

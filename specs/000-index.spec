@@ -67,6 +67,16 @@ commit messages.
 * **Pin numbers are real GPIO numbers, never XIAO `D#` silkscreen labels.** The
   two differ on this board and confusing them has broken this project before:
   D0=1 D1=2 D2=3 D3=4 D4=5 D5=6 D6=43 D7=44 D8=7 D9=8 D10=9.
+* **"Left" and "right" always mean the owl's own left and right**, as it would
+  describe them looking forward. Standing in front of the owl, its left side is
+  the one on your right. This holds for the eyes and the servos alike — worth
+  stating because both were named before the convention was written down, and it
+  was confirmed with the owner on 2026-08-27 that they agree. If the eyes ever
+  look mirrored, `pio run -e dualtest -t upload` settles it in 30 seconds.
+* **"Left" and "right" always mean the OWL's own left and right**, as it would
+  describe them looking forward. Standing in front of the owl, its left side is
+  on your right. This holds for the eyes and the servos alike — confirmed
+  2026-08-27, because both were named before the convention was written down.
 * `esp32-s3-sense/include/config.h` is the authority for pins and timing
   constants. A spec that contradicts it is out of date; fix the spec.
 * Documentation and code comments are English. Scripts under

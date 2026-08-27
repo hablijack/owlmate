@@ -27,6 +27,22 @@ into a presence indicator for free.
 
 **Every peripheral read loop is bounded.** No exceptions. See Falsified.
 
+**Servo channel numbers are sparse, and that is load-bearing.** The ears sit on
+PCA9685 channels **15 and 14**, not 0 and 1 — moved 2026-08-27 because the servo
+cables were too short. Head and wings remain on 2, 3, 4.
+
+Consequence: per-channel arrays and bounds checks are sized by
+`PCA9685_NUM_CHANNELS` (16), never by `NUM_SERVOS` (5). Those were one constant
+before the move, which would have made `setAngle(15, …)` fail a `channel >= 5`
+guard and **return silently** — an ear that never moves and reports no error.
+`ServoController::setCenter()` and `update()` iterate only populated channels, so
+nothing writes PWM to an empty one.
+
+"left"/"right" throughout mean the **owl's own** left and right: standing in
+front of the owl, its left ear is on your right. The channel numbers are
+duplicated in `rpi-brain/brain/web_ui.py`, which is a mirror — `config.h` is the
+source of truth.
+
 ## Verified facts
 
 Measured 2026-08-26 with `pio run -e vibtest`-style probing and `-e i2ctest`:

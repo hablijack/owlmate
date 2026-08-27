@@ -55,7 +55,7 @@ Bring-up order, encoded in `bringUpDisplays()` in `main.cpp`:
   both at the earlier 6 MHz. A full frame is 51,200 bytes, so frame time is
   roughly 820 kbit / clock.
 * Pin map, verified on hardware by driving each panel a different colour and
-  asking which eye lit up: shared CLK=D4/GPIO5, DIN=D8/GPIO7, RST=D6/GPIO43;
+  asking which eye lit up. **"left"/"right" are the owl's own**, per SPEC-000: shared CLK=D4/GPIO5, DIN=D8/GPIO7, RST=D6/GPIO43;
   **left** CS=D7/GPIO44 DC=D10/GPIO9; **right** CS=D9/GPIO8 DC=D3/GPIO4.
 * The panel connector is **8 pins** — VCC, GND, DIN, CLK, CS, DC, RST, BL.
   There is no SDO/MISO. Nothing can be read back from these panels, ever.

@@ -10,7 +10,6 @@ public:
     bool begin();
 
     void setAngle(uint8_t channel, float angle);
-    void setAngles(const float* angles, uint8_t count);
     void setCenter();
     void update();
 
@@ -22,7 +21,10 @@ private:
 
     Adafruit_PWMServoDriver _pca;
     bool _pcaReady;
-    float _currentAngles[NUM_SERVO_CHANNELS];
-    float _targetAngles[NUM_SERVO_CHANNELS];
-    bool _dirty[NUM_SERVO_CHANNELS];
+    // Indexed by PHYSICAL PCA9685 channel, so these must be sized by the chip's
+    // channel count, not by how many servos are fitted - the channel numbers in
+    // config.h are sparse (the ears sit on 14 and 15).
+    float _currentAngles[PCA9685_NUM_CHANNELS];
+    float _targetAngles[PCA9685_NUM_CHANNELS];
+    bool _dirty[PCA9685_NUM_CHANNELS];
 };

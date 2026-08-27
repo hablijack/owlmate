@@ -21,13 +21,29 @@ A robotic owl companion with expressive LCD eyes, face detection, IMU, GPS, and 
 | **Audio Amp** | MAX98357A (Adafruit) | I2S — **on the Raspberry Pi**, not the ESP32 | BCLK=GPIO18, LRCLK=GPIO19, DIN=GPIO21 (Pi 40-pin header) | Sound effects / voice |
 
 ### Servo Channels (PCA9685)
+
+Throughout this document and in `config.h`, `left`/`right` mean the **owl's own**
+left and right — standing in front of it, its left side is the one on *your*
+right. This applies to the eyes as well as the servos.
+
 | Channel | Function | Range |
 |---|---|---|
-| CH0 | Left ear | -45° to +45° |
-| CH1 | Right ear | -45° to +45° |
+| CH15 | Left ear | -45° to +45° |
+| CH14 | Right ear | -45° to +45° |
 | CH2 | Head tilt | -45° to +45° |
 | CH3 | Left wing | -45° to +45° |
 | CH4 | Right wing | -45° to +45° |
+
+> ⚠️ The ear channels are **15 and 14, not 0 and 1** — moved 2026-08-27 because
+> the servo cables were too short to reach the low channels. The numbering is
+> therefore **sparse**, which matters in code: per-channel arrays and bounds
+> checks must be sized by the PCA9685's 16 channels (`PCA9685_NUM_CHANNELS`),
+> not by the 5 servos fitted (`NUM_SERVOS`). Those used to be one constant, and
+> with it `setAngle(15, …)` would have failed a `channel >= 5` guard and returned
+> silently — the ear simply never moving, with no error anywhere.
+>
+> The telemetry `servos` array keeps its documented order regardless of physical
+> channel: `[left_ear, right_ear, head, left_wing, right_wing]`.
 
 ### I2C Bus (GPIO1/2)
 All three I2C devices share the same bus: BNO055 @ 0x28, PA1010D @ 0x10, PCA9685 @ 0x40. Clock: 400 kHz.
