@@ -378,12 +378,19 @@ regression test is assumed broken until it has been seen to fail).
 
 `README.md` (hardware tables, protocol reference, numbered "Software Decisions" with rationale,
 first-run checklist), `WIRING.md` (solder links, the SD-MODE-to-3.3V gotcha, the XIAO→Pi native USB
-link), `BACKLOG.md` (open work per subsystem + a "Recently completed" section for session context),
+link), `BACKLOG.md` (**start here for what to do next** — its top section is a phased, dependency-ordered
+plan; below that, per-subsystem history newest-first),
 `NAVIGATION_PLAN.md` and `SPEECH_RECOGNITION_PLAN.md` (full designs; the navigation plan's §10 and
 §13 are referenced from code comments).
 
-`BACKLOG.md`'s top section records how the shared-SPI eye bug was actually resolved (four separate
-firmware bugs, no hardware fault) — worth reading before touching the eyes or the driver.
+**`BACKLOG.md`'s top section is the priority order, and the order is the point.** Phases 0–5 need
+the owl, Step 6 needs only a laptop. Two dependencies there are easy to get wrong and expensive:
+head-opening work (the camera extension) comes **before** any IMU calibration, because the BNO055
+lives in the same head and disturbing it invalidates both the calibration and
+`IMU_HEADING_OFFSET_DEG`; and the camera extension comes **before** any detection tuning, because
+remounting can change `CAM_VFLIP`. Further down, `## Eyes / shared SPI bus — RESOLVED 2026-08-26`
+records how that saga actually ended (four separate firmware bugs, no hardware fault) — worth reading
+before touching the eyes or the driver.
 
 ## Eye rendering
 
@@ -464,8 +471,9 @@ says `IMU: calibration complete - offsets saved to flash`; a reboot must then lo
 `IMU: restored calibration offsets from flash`.
 
 Until that is done, `imu.calibrated` stays false and `navigation.py` correctly refuses to aim, so
-"guide me home" will look broken when it is in fact working as specified. This is BACKLOG item 1 and
-`specs/006-imu-orientation.spec` is `Status: partial` for the same reason.
+"guide me home" will look broken when it is in fact working as specified. This is `BACKLOG.md` Step 3 — after the
+head-opening work in Step 1, not before it — and `specs/006-imu-orientation.spec` is
+`Status: partial` for the same reason.
 
 **Checking it no longer needs a serial log.** Telemetry carries `imu.cal.{sys,gyro,accel,mag,restored}`
 and the web UI displays all of them, including a `from flash` marker for `restored`. That only became

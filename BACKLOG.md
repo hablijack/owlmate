@@ -1,91 +1,197 @@
-## >>> NEXT SESSION (planned 2026-08-27) <<<
+## >>> NEXT SESSION — priority order <<<
 
-Four items, in dependency order. Note this is NOT the order they were listed in:
-the camera extension has to go in **before** the detection tuning, because
-remounting the camera changes the framing and may change the required
-`CAM_VFLIP` — tuning detection against a camera that is about to move is wasted
-work.
+Everything below is ordered by **dependency**, not by size. The order is the
+useful part of this list: three of these tasks invalidate the work of another if
+done in the wrong sequence.
 
-### 1. Re-calibrate the BNO055  (~2 min, do it first, it is quick)
+**Why this order.** Any work that opens the owl's head comes before any
+calibration, because the BNO055 *and* the camera both live in there — disturbing
+the IMU invalidates both its calibration and `IMU_HEADING_OFFSET_DEG` (75.4°,
+which encodes 70.8° of measured mounting rotation). Calibrating first and then
+opening the head means calibrating twice. Likewise the camera extension goes in
+before any detection tuning: remounting changes the framing and may change
+`CAM_VFLIP`, so tuning against a camera that is about to move is wasted effort.
+Navigation cannot be verified until the heading is trustworthy.
 
-The calibration was wiped during the 2026-08-26 session by flashing
-`firmware.factory.bin` at 0x0, which reaches past 0x9000 and erases NVS.
+Steps 0–5 need the owl. Step 6 needs nothing but a laptop — it is the
+rainy-day list.
+
+> **"Step" here, "Phase" elsewhere — they are different things.** These Steps are
+> this session's task order. The `Phase 1..4` you will see in `rpi-brain/brain/`
+> comments and in `SPEECH_RECOGNITION_PLAN.md` are the *speech feature's*
+> implementation phases (VAD → ASR → reactions → auto-sleep) and have nothing to
+> do with the list below. Do not renumber either to match the other.
+
+---
+
+### Step 0 — Get the refactored firmware onto the owl  `[ ]`
+
+**Gate for everything else.** The 2026-08-27 refactoring pass builds clean (all
+seven envs) and the RPi suite is green at 174 tests, but **none of it has run on
+hardware**. Flash before trusting any of it.
+
+    cd esp32-s3-sense && pio run && pio run -t upload
+
+**NEVER `firmware.factory.bin` at 0x0** — it spans past 0x9000 and erases NVS.
+That is how the IMU calibration was lost on 2026-08-26. Flash the pieces:
+`bootloader.bin` @0x0, `partitions.bin` @0x8000, `boot_app0.bin` @0xf000,
+`firmware.bin` @0x20000. `partitions.csv` was not touched by the refactor, so a
+correct flash preserves NVS and Step 3 only has to be done once.
+
+**Done when**: eyes render, telemetry arrives at ~535 ms, state settles to
+`idle`, no LCD error at boot.
+
+**While you are here, 30 seconds**: bring up the web UI (`web.enabled: true`) and
+look at the new diagnostics line — heading, GPS fix, `imu.cal` counters,
+pulse/hit totals. Those seven fields were parsed for the first time on
+2026-08-27 and have **only ever been fed synthetic frames**. This is the first
+time anyone sees them against a real owl.
+
+### Step 1 — Fit the camera extension cable  `[ ]`
+
+All head-opening work happens here, before anything is calibrated.
+
+Parts ordered: 24-pin 0.5 mm **type A** FFC cable (50 mm) plus a 24-pin 0.5 mm
+female-to-female coupler. Chain: camera tail → coupler → extension → Sense
+socket. Adds ~7 cm.
+
+**Done when**: `pio run -e camtest -t upload` still reports `0x3C antwortet`,
+ID `0x3660`, ~110 mean brightness with a clear drop when the lens is covered.
+
+**If the image degrades** (torn frames, low contrast, ID read failing): the extra
+~7 cm plus two connector transitions are marginal for a 20 MHz DVP bus. Drop
+`CAM_XCLK_FREQ_HZ` in `config.h` from 20 to 10 MHz — halves the data rate and is
+far more tolerant of length.
+
+**If the camera moved at all, RE-MEASURE the mounting orientation.** The models
+only find upright faces and `CAM_VFLIP` was determined empirically
+(normal 0 hits / vflip 57 / hmirror 2 / 180° 10). Getting this wrong makes
+detection impossible at any threshold — see SPEC-008.
+
+**Note whether the BNO055 shifted.** If it did, Step 3 also needs
+`IMU_HEADING_OFFSET_DEG` re-measured, not just the calibration redone.
+
+### Step 2 — Validate the reassembly  `[ ]`
+
+Do this *before* investing in calibration: it catches a connector disturbed in
+Step 1 in seconds, rather than after twenty minutes of figure-eights.
+
+    # build_flags: -DHARDWARE_CHECK=1, flash, read one JSON line, flash back
+    pio run -e xiao_esp32s3 -t upload
+
+One `{"type":"hardware_check",...}` line reports both LCDs, PCA9685, GPS,
+BNO055, vibration and camera; `i2c_found` lists every address that answered
+(expect `0x10`, `0x28`, `0x40`). Set the flag back to `0` and re-flash.
+
+### Step 3 — Re-calibrate the BNO055  (~2 min once the hardware stops moving)  `[ ]`
+
+**The stored calibration is GONE** — wiped on 2026-08-26 by flashing
+`firmware.factory.bin` at 0x0. Until this is done `imu.calibrated` stays false,
+`navigation.py` correctly refuses to aim, and "guide me home" looks broken while
+in fact behaving exactly as specified.
 
     ~/.platformio/penv/bin/python esp32-s3-sense/tools/kalibrieren.py
 
 **Order matters**: the figure-8 for `mag` comes BEFORE the static poses for
-`accel`, never after — sustained motion resets the accel counter to 0.
-**Done when**: the tool reports all four counters at 3/3 and prints
+`accel`, never after — sustained motion resets the `accel` counter to 0.
+
+**Done when**: all four counters read 3/3 and the log says
 `IMU: calibration complete - offsets saved to flash`. A reboot must then log
-`IMU: restored calibration offsets from flash` with `cal.restored: true`.
+`IMU: restored calibration offsets from flash`. You can now watch all of this in
+the web UI instead of a serial log (`imu.cal.*`, including `restored`).
 
-### 2. Fit the camera extension cable
+**If the sensor was disturbed in Step 1**, also re-derive
+`IMU_HEADING_OFFSET_DEG`: aim the beak at a known magnetic bearing and set the
+constant to `(true bearing − reported yaw) mod 360`, remembering that it folds in
++4.594° of magnetic declination. See SPEC-006.
 
-Parts ordered: 24-pin 0.5 mm **type A** FFC cable (50 mm) plus a 24-pin 0.5 mm
-female-to-female coupler. Chain: camera tail -> coupler -> extension -> Sense
-socket. Adds ~7 cm.
+### Step 4 — Detection is too sporadic — the one real open bug  `[ ]`
 
-**Done when**: `pio run -e camtest -t upload` (or a reset with camtest flashed)
-still reports `0x3C antwortet`, ID `0x3660`, ~110 mean brightness with a clear
-drop when the lens is covered.
-**If the image degrades** (torn frames, low contrast, ID read failing): the
-extra ~7 cm plus two connector transitions are marginal for a 20 MHz DVP bus.
-Drop `CAM_XCLK_FREQ_HZ` in `config.h` from 20 to 10 MHz — halves the data rate
-and is much more tolerant of length.
-**Then RE-MEASURE the mounting orientation** if the camera moved at all: the
-detection models only find upright faces, and `CAM_VFLIP` was determined
-empirically (normal 0 hits / vflip 57 / hmirror 2 / 180° 10).
+Measured 2026-08-26: **6 detections in 25 s** in the firmware, versus
+near-every-frame in the isolated `facelab/` project. Same model, same camera,
+same thresholds — so it is the *integration*, not the detector. `facelab/` is
+kept precisely as the A/B control; do not delete it.
 
-### 3. Detection is too sporadic — investigate
+**Measure the actual loop period first.** A `millis()` delta print in `loop()`
+costs nothing and decides everything that follows. Eye rendering alone is ~61 ms
+for both panels at 16 MHz, against a `FACE_DETECT_INTERVAL_MS` of 100 — if the
+loop is slower than the interval, fewer attempts happen than intended and no
+amount of tuning will help.
 
-Measured 2026-08-26: 6 detections in 25 s in the firmware, versus near
-every-frame in the isolated `facelab/` project. Same model, same camera, same
-thresholds — so it is the integration, not the detector.
+Two leads, in order of suspicion:
+1. **Loop slower than the detection interval.** If confirmed: raise
+   `LCD_SPI_FREQ` (16 MHz has margin), redraw only the changed band instead of
+   the whole 160×160, or decouple detection from the render cadence.
+2. **Stale camera frame** under `CAMERA_GRAB_WHEN_EMPTY` with infrequent grabs.
 
-Two concrete leads, in order of suspicion:
-* **The main loop is slower than `FACE_DETECT_INTERVAL_MS` (100 ms).** Eye
-  rendering alone costs ~61 ms for both panels at 16 MHz, plus servos and
-  telemetry. Fewer attempts happen than intended. Measure the actual loop period
-  first (a `millis()` delta print in `loop()`), then decide: raise
-  `LCD_SPI_FREQ`, redraw only the changed band instead of the whole 160x160
-  frame, or run detection on the second core.
-* **Stale camera frames.** With `CAMERA_GRAB_WHEN_EMPTY` and `fb_count = 2`,
-  grabbing only every 100 ms may return an old buffer. Try
-  `CAMERA_GRAB_LATEST`, and compare hit rate.
+**Thresholds are NOT the lever** — 0.5 is the library default and measured right
+(real detections score 0.58–1.00). The v1 knobs (`resize_scale`, `top_k`) do not
+exist in esp-dl v3. Reaching for either is the documented false lead (SPEC-009).
 
-Use `face.total` in telemetry as the metric — it is cumulative and therefore
-immune to the 2 Hz sampling problem that made this look like a total failure at
-first (39 of 39 frames said `detected: false` while the owl was demonstrably in
-INTERACTING).
+### Step 5 — Verify navigation on hardware  `[ ]`
 
-### 4. Full hardware check — everything still works
+Needs Step 3 done (a trustworthy heading) and a sky-view GPS fix.
 
-Run last, as the gate. Tools all exist:
+`navigation.aim_sign` in `rpi-brain/config.yaml` has **never** been verified
+against hardware. Start a navigation to a saved place; if the head turns the
+wrong way, flip the sign. That is the one value the geodesy cannot derive on its
+own — it encodes which way the head servo turns for a positive angle and whether
+IMU yaw increases clockwise.
+
+### Step 6 — Software backlog (no owl required)  `[ ]`
+
+In this order:
+
+1. **Consolidate the three supervisor test doubles.** `tests/stubs.py`
+   `FakeSupervisor` plus a local `StubSupervisor` in each of
+   `test_navigation.py` and `test_navigation_webui.py`. Every new supervisor
+   method must be added in all three — that is how it was noticed. This is a
+   duplication defect in the test suite itself (SPEC-012 R-012.2).
+2. **`render_template` instead of `render_template_string`** in `web_ui.py`,
+   *only* on a machine that actually has Flask installed. The split was done on
+   one that does not, so the template-folder path has never been executed. The
+   Jinja syntax in `brain/templates/index.html` is already compatible.
+3. **`src/main.cpp` split — LAST. Do not start it before Step 4 is
+   diagnosed.** 883 lines, and the seams are already known:
+   `runHardwareCheck()` (164 lines) wants its own file behind its flag like every
+   other diagnostic; `handleCommand()` / `sendTelemetry()` /
+   `parseSerialCommands()` want a `protocol.cpp`; the state machine wants a
+   `behavior.cpp` — leaving `main.cpp` at ~120 lines of wiring. Also in there:
+   the ack serialize-and-println boilerplate repeats **7×**, and the I2C scan
+   loop appears **twice in the same file** (a third copy is in `i2ctest.cpp`).
+   **Why it waits**: it touches the production image and alters loop structure,
+   while loop timing is the leading suspect in Step 4. Splitting files under an
+   active timing investigation muddies the diagnosis.
+4. **Mechanical assembly** — enclosure, servo attachment for ears/head/wings,
+   LCD bezels. Not blocked by anything here.
+
+---
+
+### Reference: per-subsystem verification
+
+Not a phase — the lookup table for "is this subsystem still good?". Every tool
+already exists. Reach for the specific one when a phase above says something is
+wrong; run the lot only after mechanical work.
 
 | what | how | expected |
 |---|---|---|
 | eyes | `pio run -e dualtest -t upload` | both panels, distinct colours, they swap |
 | I2C bus | `pio run -e i2ctest -t upload` | 0x10, 0x28, 0x40 all answer |
-| IMU | `pio run -e imuaxis -t upload` | level owl -> roll/pitch near 0; counters 3/3 |
+| IMU | `pio run -e imuaxis -t upload` | level owl → roll/pitch near 0; counters 3/3 |
 | vibration | `tools/klopftest.py` | quiet = 0 edges; 4 taps enter OTA mode |
 | camera | `pio run -e camtest -t upload` | OV3660 at 0x3C, brightness responds |
+| supply rail | `pio run -e powerprobe -t upload` | ~2500 mV steady; watch for a sag under 2000 |
 | firmware | flash `xiao_esp32s3`, watch telemetry | no LCD errors, ~535 ms cadence, `idle` at rest |
-| face | hold a face in front | `face.total` climbing, state -> `interacting`, eyes `happy` |
-| eyes design | `tools/preview_eyes.py` | all 21 expressions render |
+| face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
+| eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
+| RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 174 tests pass |
+| firmware/RPi drift | `cd rpi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
-**Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes
-NVS and with it the IMU calibration. Flash `bootloader.bin` @0x0,
-`partitions.bin` @0x8000, `boot_app0.bin` @0xf000, `firmware.bin` @0x20000.
+**Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
+and with it the IMU calibration. `bootloader.bin` @0x0, `partitions.bin` @0x8000,
+`boot_app0.bin` @0xf000, `firmware.bin` @0x20000.
 
-### Also still open (not for tomorrow unless there is time)
-
-* `navigation.aim_sign` in the RPi `config.yaml` has never been verified against
-  hardware — flip it if the head turns the wrong way on the first nav test.
-* ~~Nothing from the 2026-08-26 session is committed.~~ **Done 2026-08-27** —
-  the whole tree was committed (eye library, GC9D01 driver, sensor rework,
-  esp-dl migration, six diagnostic envs, four tools), followed by a refactoring
-  pass. See "Refactoring pass — 2026-08-27" below for what changed and what it
-  deliberately left alone.
+---
 
 # Robot Owl — Backlog
 
@@ -655,8 +761,8 @@ waiting on it. Out of scope for the eyes session.
 
 ## Speech recognition (RPi-side)
 
-Phase 1 (skeleton), Phase 2 (mic + VAD + ASR), Phase 3 ("last heard" in web
-UI) and Phase 4 (autonomous sleep + wake-on-speech) code is **done and
+Step 1 (skeleton), Step 2 (mic + VAD + ASR), Step 3 ("last heard" in web
+UI) and Step 4 (autonomous sleep + wake-on-speech) code is **done and
 unit-tested on the Mac** (38 tests, stubbed serial/supervisor/mic/Whisper).
 See `SPEECH_RECOGNITION_PLAN.md`. The RPi `Speech` class captures a USB mic,
 runs an energy VAD, and on a gated utterance transcribes with **faster-whisper**
@@ -670,23 +776,23 @@ accept) and pre-downloads the Whisper model, so the first live transcription is
 instant. `sudo ./setup.sh --non-interactive` keeps the bundled defaults for
 unattended installs.
 
-- [~] **Verify Phase 2 + 3 + 4 on hardware** — enable `speech.enabled: true` (+
+- [~] **Verify Step 2 + 3 + 4 on hardware** — enable `speech.enabled: true` (+
   `web.enabled: true` for the "last heard" line, + `supervisor.auto_sleep.enabled: true`
   to test autonomous sleep), plug the USB mic, and confirm:
-  - Phase 2/3: speak "toll" / "wer bist du" / "lass das" with a face in frame → correct
+  - Step 2/3: speak "toll" / "wer bist du" / "lass das" with a face in frame → correct
     eyes + owl call and the web UI's Live status card shows the transcript + "Ns ago"; the
     4.5 s cooldown is respected; 10 min of TV/room noise with no face → zero reactions;
     `journalctl -u robot-owl-brain` shows no serial stall. Tune `speech.vad_threshold`
     against the real mic's noise floor (default 0.02) and `speech.window_s`.
-  - Phase 4: leave the owl alone (no face / no taps / no speech) → after
+  - Step 4: leave the owl alone (no face / no taps / no speech) → after
     `supervisor.auto_sleep.after_s` it goes to sleep on its own; then tap it or show a
     face → it wakes immediately; say the wake keyword → it wakes.
-- [x] **Phase 3 — "last heard" in web UI** — `Speech` records `last_heard_at`;
+- [x] **Step 3 — "last heard" in web UI** — `Speech` records `last_heard_at`;
   `WebUI` takes an optional `speech=` and `/api/telemetry` exposes
   `last_heard: {text, at}` (omitted when speech is off, so the payload is
   unchanged otherwise). The page renders a "heard *…* (Ns ago)" line. 4 unit
   tests cover the seam; all 25 tests pass. (Hardware check folded into the item above.)
-- [x] **Phase 4 (revised) — autonomous sleep on inactivity + wake on speech** —
+- [x] **Step 4 (revised) — autonomous sleep on inactivity + wake on speech** —
   *No command forces sleep; no firmware change.* The RPi watches the existing
   telemetry (face / vibration) + its own speech events; after `supervisor.auto_sleep.after_s`
   with **no** interaction trigger it sends the **existing** `sleep` command (disabled by
@@ -695,7 +801,7 @@ unattended installs.
   existing `wake` command when it hears the user while the owl is asleep. All RPi-brain:
   `supervisor.py` (inactivity timer → `sleep`), `speech.py` (wake-exception gate → `wake`),
   `config.yaml` (`auto_sleep.*`). **Code done + 13 unit tests** drive the real
-  `Supervisor`/`Speech` against stubs (see `SPEECH_RECOGNITION_PLAN.md` §Phase 4 for the
+  `Supervisor`/`Speech` against stubs (see `SPEECH_RECOGNITION_PLAN.md` §Step 4 for the
   full design + the conservative wake-gate decision). Hardware check folded into the
   "Verify on hardware" item above (add: leave the owl alone → it sleeps on its own after
   `after_s`; say the wake keyword → it wakes).
