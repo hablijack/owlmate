@@ -40,7 +40,30 @@
 #define SERIAL_BAUD 115200
 #define I2C_SDA 1
 #define I2C_SCL 2
+// Ueberschreibbar per Build-Flag, damit Diagnose-Envs den Bustakt variieren
+// koennen, ohne diese Datei anzufassen. Der BNO055 verletzt beim
+// Clock-Stretching die Setup-Zeit zwischen SDA-HIGH und SCL-HIGH und gilt mit
+// ESP32/ESP32-S3 als unzuverlaessig (Adafruit: "Troublesome Chips"); der
+// dokumentierte Ausweg ist ein deutlich niedrigerer Takt.
+#ifndef I2C_FREQ
 #define I2C_FREQ 400000
+#endif
+// Wie lange der Master auf einen Slave wartet, bevor er die Uebertragung
+// abbricht. Die Arduino-Voreinstellung (50 ms) ist zu kurz fuer den BNO055:
+// er dehnt den Takt lange, der Controller gibt auf, bricht MITTEN in der
+// Uebertragung ab - und laesst den Bus liegen. Danach ist nicht nur der IMU
+// weg, sondern auch GPS und Servotreiber, weil beide Leitungen unten bleiben.
+//
+// Auf Hardware gemessen 2026-08-28: mit 50 ms war der Bus nach dem ZWEITEN
+// Zugriff tot (jeder Bustakt, jede Bibliothek), mit 1000 ms ueberstand er 12
+// Lesezugriffe in Folge unbeschadet. Der Wert zaehlt ZEIT, nicht Takte -
+// deshalb half es auch nichts, den Bustakt zu senken.
+// 250 ms statt der 1000 ms des ersten Versuchs: der BNO055 dehnt den Takt um
+// hoechstens ~600 us, das ist immer noch das Vierhundertfache an Reserve. Der
+// Wert wird bei JEDEM fehlgeschlagenen Zugriff voll bezahlt, und mit 1000 ms
+// brauchte ein Telemetrieframe mit stummem GPS so lange, dass die Hauptschleife
+// stehenblieb (gemessen: gar keine Telemetrie mehr).
+#define I2C_TIMEOUT_MS 250
 
 // ============================================================================
 // LCD Eyes (GC9D01, SPI) -- shared bus, per-panel CS/DC
@@ -79,13 +102,21 @@
 // fixed the clock is a pure speed/margin trade-off.
 //
 // A full frame is 160*160*2 = 51,200 bytes per eye, and both eyes flush back to
-// back, so frame time is ~820 kbit / LCD_SPI_FREQ. Measured on hardware:
-//   6 MHz  -> 161 ms for both eyes (~6 fps, visibly choppy blinks)
-//   16 MHz -> ~61 ms  (~16 fps)
-// 16 MHz keeps comfortable margin on hand-wired jumper runs. The GC9D01 itself
-// is good for far more; if the wiring is tidied up (short leads, ground return
-// alongside the clock) this can go higher -- watch for torn or speckled pixels,
-// which is what an over-clocked panel looks like.
+// back. The obvious model -- frame time = ~820 kbit / LCD_SPI_FREQ -- is WRONG,
+// and an earlier version of this comment claimed "16 MHz -> ~61 ms" on its
+// strength. Measured on hardware 2026-08-28 with both eyes flushing:
+//   16 MHz -> 149.9 ms
+//   40 MHz -> 149.9 ms   (identical, to 0.1 ms)
+// The transfer is not clock-bound. Also ruled out by measurement, same figure
+// every time: the PSRAM framebuffer (internal RAM is no faster) and the
+// byte swap in writePixels() (writeBytes() without it is no faster). What
+// remains is per-chunk overhead inside the bulk transfer itself, ~1.56 us per
+// BYTE, so the fix is DMA or a dirty-rectangle flush -- not this number.
+//
+// Raising this therefore buys nothing today; it is left at 16 MHz because that
+// keeps margin on hand-wired jumper runs. Watch for torn or speckled pixels if
+// it is ever raised -- that is what an over-clocked panel looks like.
+// See BACKLOG.md "Eye flush is the loop bottleneck" and SPEC-003.
 #define LCD_SPI_FREQ 16000000
 
 // ============================================================================

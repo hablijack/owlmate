@@ -57,6 +57,13 @@ static State currentState = State::BOOT;
 static uint32_t lastTelemetry = 0;
 static uint32_t lastFaceSeen = 0;
 static uint32_t lastFaceDetect = 0;
+// Schleifenzaehler fuer loop_hz. Die Hauptschleife rendert die Augen und
+// schlaeft 16 ms; beides drueckt ihre Rate, und mit ihr die Zahl der
+// Erkennungsdurchlaeufe. FACE_DETECT_INTERVAL_MS ist nur eine Obergrenze -
+// was tatsaechlich ankommt, ist ohne Messung nicht zu sehen.
+static uint32_t loopCount = 0;
+static uint32_t lastLoopMeasure = 0;
+static float loopHz = 0.0f;
 static uint32_t updateModeSince = 0;
 static uint32_t navSince = 0;
 static float navTargetAngle = 0.0f;
@@ -261,6 +268,7 @@ void sendTelemetry() {
     doc["type"] = "telemetry";
     doc["state"] = stateToString(currentState);
     doc["uptime"] = millis();
+    doc["loop_hz"] = loopHz;
     doc["fw"] = FW_VERSION;
 
     // IMU data
@@ -331,6 +339,7 @@ void sendTelemetry() {
     // Kumulativ (siehe FaceDetector.h): macht sporadische Erkennung sichtbar,
     // die ein Momentanwert von "detected" verschluckt.
     doc["face"]["total"] = faceResult.total;
+    doc["face"]["attempts"] = faceResult.attempts;
 
     // Eye expression (name comes from the same table parseExpression() uses)
     doc["eye"] = Eyes::nameOf(eyes.getCurrentExpression());
@@ -806,9 +815,16 @@ void setup() {
     }
 
     // Initialize sensors
+    // begin() faellt nur noch bei einem echten Busfehler durch. Ein nicht
+    // antwortender IMU meldet sich ueber isImuReady() und ist KEIN Grund, in
+    // ERROR zu gehen: der Bus traegt auch GPS und Servotreiber, und die Augen,
+    // die Kamera und die Gesichtserkennung haengen gar nicht daran. Bis
+    // 2026-08-28 riss ein stummer BNO055 die gesamte Eule mit in ERROR.
     if (!sensors.begin()) {
         Serial.println(F("ERROR: Sensors failed"));
         currentState = State::ERROR;
+    } else if (!sensors.isImuReady()) {
+        Serial.println(F("WARNING: running without IMU - navigation disabled"));
     }
 
     // Initialize servos
@@ -836,6 +852,18 @@ void setup() {
 // Main loop
 // ============================================================================
 void loop() {
+    // Gemessene Schleifenrate, Fenster = Telemetrieintervall.
+    loopCount++;
+    {
+        const uint32_t now = millis();
+        const uint32_t span = now - lastLoopMeasure;
+        if (span >= TELEMETRY_INTERVAL_MS) {
+            loopHz = (span > 0) ? (loopCount * 1000.0f / span) : 0.0f;
+            loopCount = 0;
+            lastLoopMeasure = now;
+        }
+    }
+
     // Vibration auswerten: genau einmal pro Runde, VOR allen Lesern. Der
     // Interrupt zaehlt Flanken, diese Funktion macht daraus Zustand und
     // Klopfzaehler. Wuerde stattdessen jeder Leser selbst abholen, nehmen sich

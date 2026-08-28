@@ -28,6 +28,33 @@ static const char* IMU_NVS_KEY = "bno-offsets";
 static Adafruit_BNO055 bno = Adafruit_BNO055(28, ADDR_BNO055);
 static Adafruit_GPS GPS(&Wire);
 
+// 9 Taktimpulse auf SCL, danach eine Stop-Bedingung: holt einen Slave aus einer
+// abgebrochenen Uebertragung zurueck und gibt den Bus wieder frei.
+//
+// Gebraucht, weil ein nicht antwortender BNO055 den Bus mit sich reisst. Ohne
+// diese Rettung faellt mit ihm auch GPS und Servotreiber aus - gemessen
+// 2026-08-28: nach fehlgeschlagenem IMU-Init meldete der PCA9685 "not found",
+// obwohl er nachweislich in Ordnung ist.
+static void i2cBusRecover() {
+    Wire.end();
+    pinMode(I2C_SDA, INPUT_PULLUP);
+    pinMode(I2C_SCL, OUTPUT);
+    for (int i = 0; i < 9; i++) {
+        digitalWrite(I2C_SCL, LOW);  delayMicroseconds(5);
+        digitalWrite(I2C_SCL, HIGH); delayMicroseconds(5);
+    }
+    pinMode(I2C_SDA, OUTPUT);        // Stop: SDA steigt waehrend SCL hoch ist
+    digitalWrite(I2C_SDA, LOW);  delayMicroseconds(5);
+    digitalWrite(I2C_SCL, HIGH); delayMicroseconds(5);
+    digitalWrite(I2C_SDA, HIGH); delayMicroseconds(5);
+    pinMode(I2C_SDA, INPUT_PULLUP);
+    pinMode(I2C_SCL, INPUT_PULLUP);
+    delay(5);
+    Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
+    Wire.setTimeOut(I2C_TIMEOUT_MS);
+    delay(5);
+}
+
 bool Sensors::begin() {
     _imuReady = false;
     _gpsReady = false;
@@ -36,17 +63,10 @@ bool Sensors::begin() {
 
     // Initialize I2C bus (BNO055 + PA1010D GPS + PCA9685 share D0/D1)
     Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
-
-    // Probe the GPS on the I2C bus (no UART pins used anymore)
-    Wire.beginTransmission(ADDR_GPS);
-    _gpsReady = (Wire.endTransmission() == 0);
-
-    // PA1010D GPS in native I2C mode
-    if (_gpsReady) {
-        GPS.begin(ADDR_GPS);
-        GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
-        GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);
-    }
+    // Grosszuegiger Timeout, sonst reisst ein taktdehnender Slave den GANZEN
+    // Bus mit sich (siehe I2C_TIMEOUT_MS in config.h). Muss nach begin()
+    // stehen - begin() setzt den Wert zurueck.
+    Wire.setTimeOut(I2C_TIMEOUT_MS);
 
     // BNO055 IMU.
     //
@@ -58,40 +78,68 @@ bool Sensors::begin() {
     // while it reboots. Every poll before the chip answers NACKs and logs.
     // A previous session read this noise as "the I2C bus is dead" -- it is not.
     if (!bno.begin()) {
-        return false;
-    }
-    // NDOF (accel + gyro + MAGNETOMETER), not IMUPLUS. IMUPLUS fuses only accel
-    // and gyro, which means (a) there is no absolute magnetic reference, so yaw
-    // is a drifting relative heading rather than a compass bearing, and (b) the
-    // magnetometer calibration counter stays at 0 forever, so the "calibrated"
-    // flag below can never become true. Navigation treats imu.yaw as a true
-    // compass heading (see rpi-brain/brain/geo.py aim_angle), so it needs NDOF.
-    bno.setMode(OPERATION_MODE_NDOF);
+        // NICHT fatal. Der IMU haengt am selben Bus wie GPS und Servotreiber;
+        // ihn zum Boot-Abbruch zu machen heisst, wegen eines fehlenden
+        // Kompasses auch Kamera, Gesichtserkennung, Servos und GPS aufzugeben.
+        // Ohne IMU faellt genau eine Faehigkeit aus: die Navigation - und die
+        // ist ohnehin blockiert, solange keine Kalibrierung vorliegt
+        // (navigation.py verweigert dann die Zielansage).
+        //
+        // Die Telemetrie laesst das Objekt "imu" dann weg, was auf der RPi-Seite
+        // bereits als "Geraet nicht vorhanden" gilt.
+        Serial.println(F("WARNING: BNO055 not responding - continuing without IMU"));
+        _imuReady = false;
+        // Den Bus freiraeumen, den der gescheiterte Init hinterlassen hat -
+        // sonst sind GPS und Servotreiber gleich mit verloren.
+        i2cBusRecover();
+    } else {
+        // NDOF (accel + gyro + MAGNETOMETER), not IMUPLUS. IMUPLUS fuses only accel
+        // and gyro, which means (a) there is no absolute magnetic reference, so yaw
+        // is a drifting relative heading rather than a compass bearing, and (b) the
+        // magnetometer calibration counter stays at 0 forever, so the "calibrated"
+        // flag below can never become true. Navigation treats imu.yaw as a true
+        // compass heading (see rpi-brain/brain/geo.py aim_angle), so it needs NDOF.
+        bno.setMode(OPERATION_MODE_NDOF);
 
-    // Tell the chip how it is physically mounted (bottom-PCB-up) so it fuses in
-    // the owl's frame rather than its own: roll/pitch then read ~0 when the owl
-    // is level, and yaw becomes a rotation about true vertical. See config.h.
-    bno.setAxisRemap((Adafruit_BNO055::adafruit_bno055_axis_remap_config_t)IMU_AXIS_REMAP_CONFIG);
-    bno.setAxisSign((Adafruit_BNO055::adafruit_bno055_axis_remap_sign_t)IMU_AXIS_REMAP_SIGN);
+        // Tell the chip how it is physically mounted (bottom-PCB-up) so it fuses in
+        // the owl's frame rather than its own: roll/pitch then read ~0 when the owl
+        // is level, and yaw becomes a rotation about true vertical. See config.h.
+        bno.setAxisRemap((Adafruit_BNO055::adafruit_bno055_axis_remap_config_t)IMU_AXIS_REMAP_CONFIG);
+        bno.setAxisSign((Adafruit_BNO055::adafruit_bno055_axis_remap_sign_t)IMU_AXIS_REMAP_SIGN);
 
-    // Restore calibration offsets saved by a previous run, if any.
-    {
-        adafruit_bno055_offsets_t off;
-        if (imuPrefs.begin(IMU_NVS_NS, /*readOnly=*/true)) {
-            if (imuPrefs.getBytesLength(IMU_NVS_KEY) == sizeof(off) &&
-                imuPrefs.getBytes(IMU_NVS_KEY, &off, sizeof(off)) == sizeof(off)) {
-                bno.setSensorOffsets(off);   // handles the CONFIG-mode switch
-                _calRestored = true;
-                Serial.println(F("IMU: restored calibration offsets from flash"));
+        // Restore calibration offsets saved by a previous run, if any.
+        {
+            adafruit_bno055_offsets_t off;
+            if (imuPrefs.begin(IMU_NVS_NS, /*readOnly=*/true)) {
+                if (imuPrefs.getBytesLength(IMU_NVS_KEY) == sizeof(off) &&
+                    imuPrefs.getBytes(IMU_NVS_KEY, &off, sizeof(off)) == sizeof(off)) {
+                    bno.setSensorOffsets(off);   // handles the CONFIG-mode switch
+                    _calRestored = true;
+                    Serial.println(F("IMU: restored calibration offsets from flash"));
+                }
+                imuPrefs.end();
             }
-            imuPrefs.end();
         }
+
+        // Give BNO055 time to initialize
+        delay(100);
+        _imuReady = true;
     }
 
-    // Give BNO055 time to initialize
-    delay(100);
+    // GPS ERST JETZT pruefen, nach dem IMU. Ein gescheiterter IMU-Init reisst
+    // den Bus kurzzeitig mit; wer vorher probt, merkt sich ein Ergebnis, das
+    // danach nicht mehr stimmt - und pollt dann bei jedem Telemetrieframe ein
+    // Geraet, das gar nicht antwortet. Das kostet pro Lesevorgang den vollen
+    // I2C_TIMEOUT_MS und legt die Hauptschleife lahm.
+    Wire.beginTransmission(ADDR_GPS);
+    _gpsReady = (Wire.endTransmission() == 0);
 
-    _imuReady = true;
+    // PA1010D GPS in native I2C mode
+    if (_gpsReady) {
+        GPS.begin(ADDR_GPS);
+        GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
+        GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);
+    }
 
     // Der Ruhepegel des Moduls ist nicht zuverlaessig festgelegt (gemessen
     // wurden je nach Poti-Stellung LOW und mittlere Spannungen), deshalb ein

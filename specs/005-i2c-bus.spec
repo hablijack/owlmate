@@ -57,6 +57,26 @@ Measured 2026-08-26 with `pio run -e vibtest`-style probing and `-e i2ctest`:
 
 ## Falsified
 
+* **"A dead I2C bus means broken wiring."** On 2026-08-28 every device vanished and the owl booted
+  into `ERROR`. Ruled out by measurement, in this order: wiring (a passive sketch that only reads the
+  two pins saw them HIGH for 27 s straight), continuity (SDA/SCL 0.0 Ω end to end, ground 0.1 Ω),
+  supply (3.27 V at all three boards), pull-ups (6.66 kΩ — two 3.3 kΩ networks in series), and the
+  microcontroller (`-e bushigh` on bare pads: pull-up, pull-down, drive-high and drive-low all pass).
+  The fault was a single slave holding the bus.
+* **"Lower the bus clock to survive a clock-stretching slave."** The master's timeout counts **time,
+  not clock cycles**. 400 kHz, 100 kHz and 30 kHz all failed at the *same* access. What fixed the
+  lockup was `Wire.setTimeOut()`, not the clock.
+* **"A stuck bus can be freed with nine clock pulses."** The standard recovery was tried three times
+  per attempt and never worked here, because the slave was holding **SCL**, not SDA — there is no
+  way to clock a device out of that.
+* **"A stronger pull-up fixes the ESP32/BNO055 timing violation."** A 2.2 kΩ was fitted on SDA
+  (verified in circuit: SDA 1.3 kΩ vs SCL 3.3 kΩ) and changed nothing. The documented setup-time
+  violation is real, but it was not this failure.
+* **"Bit-banging sidesteps a clock-stretching slave."** It sidesteps the *controller's* impatience —
+  `lib/SoftI2C` addresses all four devices cleanly where the hardware driver could not. It cannot
+  help when the slave never releases SCL at all: measured, the line stayed low for more than **two
+  seconds**, against a few hundred microseconds of legitimate stretch.
+
 * **"The I2C bus is dead."** The evidence was a burst of ~18
   `ESP_ERR_INVALID_STATE` (259) errors at every boot, spanning ~490 ms. In the
   IDF 5.x `i2c_master` driver that code is **how a plain slave NACK is
