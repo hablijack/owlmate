@@ -67,6 +67,17 @@ working.
   registers are **16-bit addressed** and its ID lives at `0x300A`/`0x300B`. An
   8-bit read, as an OV2640 needs, returns garbage — which makes a perfectly
   healthy sensor look absent. This is the concrete cost of the OV2640 mislabel.
+* **"The camera works, therefore detection can work."** On 2026-08-28 the
+  camera passed every `camtest` check — SCCB ACK, `0x3660`, driver init, 27 ms
+  frames, mean brightness 133 dropping to 29 under a hand and recovering — while
+  face detection scored **0 hits in 31.5 s** against a face held deliberately
+  still. The camera was aimed at the ceiling: the upper two-thirds of every
+  frame was blank plaster and the face was never in shot. Every brightness
+  number a mis-aimed camera produces is perfectly healthy, so **no brightness
+  measurement can detect this failure** — only looking at the image can. This
+  cost most of a session and sent the diagnosis toward thresholds and loop
+  timing, neither of which was the problem. Take a snapshot **before** reasoning
+  about detection rates. That is what `camsnap`/`schnappschuss.py` exist for.
 * **A separately bought "OV3660-75mm for ESP32-CAM" module does not work in this
   socket.** No SCCB ACK at all, while the Seeed original initialises first try —
   same socket, same firmware, minutes apart. Contact side and pitch of the two
@@ -88,6 +99,12 @@ fail, it takes the HAL down with a `LoadProhibited` panic.
 3. Ten frames captured at 320x240, mean brightness plausible with a wide min/max.
 4. Covering the lens drops the mean by tens of counts.
 
+Brightness alone is **not** sufficient acceptance — it cannot tell a camera aimed
+at a face from one aimed at the ceiling, and both look identical in every number
+`camtest` prints. `pio run -e camsnap -t upload` plus
+`tools/schnappschuss.py` returns the actual JPEG, in all four vflip/hmirror
+combinations. Look at the picture; see Falsified.
+
 ## Open
 
 * The original module's flex tail is too short to reach the mounting position.
@@ -95,4 +112,8 @@ fail, it takes the HAL down with a `LoadProhibited` panic.
   planned fix (~7 cm added). If the image degrades afterwards, drop
   `CAM_XCLK_FREQ_HZ` from 20 to 10 MHz — two extra connector transitions on a
   parallel DVP bus are the risk.
-* **Re-measure `CAM_VFLIP` if the camera is remounted.**
+* **Re-measure `CAM_VFLIP` if the camera is remounted.** Confirmed still `1`
+  (with `CAM_HMIRROR` `0`) on 2026-08-28 after the extension was fitted — the
+  extension did not change the vertical mounting.
+* **Aim is not recorded anywhere and nothing checks it.** It is currently set by
+  hand and verified only by looking at a snapshot.

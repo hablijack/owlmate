@@ -27,7 +27,7 @@ rainy-day list.
 ### Step 0 — Get the refactored firmware onto the owl  `[ ]`
 
 **Gate for everything else.** The 2026-08-27 refactoring pass builds clean (all
-seven envs) and the RPi suite is green at 175 tests, but **none of it has run on
+seven envs) and the RPi suite is green at 177 tests, but **none of it has run on
 hardware**. Flash before trusting any of it.
 
     cd esp32-s3-sense && pio run && pio run -t upload
@@ -47,7 +47,7 @@ pulse/hit totals. Those seven fields were parsed for the first time on
 2026-08-27 and have **only ever been fed synthetic frames**. This is the first
 time anyone sees them against a real owl.
 
-### Step 1 — Fit the camera extension cable  `[ ]`
+### Step 1 — Fit the camera extension cable  `[x]` DONE 2026-08-28
 
 All head-opening work happens here, before anything is calibrated.
 
@@ -57,6 +57,18 @@ socket. Adds ~7 cm.
 
 **Done when**: `pio run -e camtest -t upload` still reports `0x3C antwortet`,
 ID `0x3660`, ~110 mean brightness with a clear drop when the lens is covered.
+
+**Verified 2026-08-28**: `0x3C` answers, 16-bit `0x300A/B` → `0x3660`, driver
+init OK, 10 frames at 320×240 in ~27 ms each, mean 132–133 with min 59 / max 244.
+Covering the lens: 133 → 29, recovering to 134. No image degradation, so
+`CAM_XCLK_FREQ_HZ` stays at 20 MHz. `CAM_VFLIP=1`/`CAM_HMIRROR=0` re-confirmed
+from actual JPEGs (`camsnap`), unchanged by the remount.
+
+**The extension changed the AIM, and that cost the rest of the session.** The
+camera ended up pointing at the ceiling; detection scored 0 in 31.5 s while every
+number above looked perfect. Re-aiming fixed it. **Add "take a snapshot and look
+at it" to this step** — brightness cannot catch a mis-aimed camera. See Step 4
+and SPEC-008.
 
 **If the image degrades** (torn frames, low contrast, ID read failing): the extra
 ~7 cm plus two connector transitions are marginal for a 20 MHz DVP bus. Drop
@@ -70,6 +82,10 @@ detection impossible at any threshold — see SPEC-008.
 
 **Note whether the BNO055 shifted.** If it did, Step 3 also needs
 `IMU_HEADING_OFFSET_DEG` re-measured, not just the calibration redone.
+The head *was* opened on 2026-08-28, so treat `IMU_HEADING_OFFSET_DEG` (75.4) as
+suspect until re-measured. Telemetry that day read `imu.cal
+{sys:0 gyro:3 accel:1 mag:0}` with `restored:false`, consistent with the erased
+NVS — Step 3 is still outstanding and now needs the offset re-derived too.
 
 ### Step 2 — Validate the reassembly  `[ ]`
 
@@ -83,50 +99,89 @@ One `{"type":"hardware_check",...}` line reports both LCDs, PCA9685, GPS,
 BNO055, vibration and camera; `i2c_found` lists every address that answered
 (expect `0x10`, `0x28`, `0x40`). Set the flag back to `0` and re-flash.
 
-### Step 3 — Re-calibrate the BNO055  (~2 min once the hardware stops moving)  `[ ]`
+### Step 3 — The BNO055 holds SCL low and must be replaced  `[ ]`
 
-**The stored calibration is GONE** — wiped on 2026-08-26 by flashing
-`firmware.factory.bin` at 0x0. Until this is done `imu.calibrated` stays false,
-`navigation.py` correctly refuses to aim, and "guide me home" looks broken while
-in fact behaving exactly as specified.
+**BLOCKED on hardware. Diagnosed 2026-08-28; recalibration cannot start until the
+part is swapped.**
 
-    ~/.platformio/penv/bin/python esp32-s3-sense/tools/kalibrieren.py
+The chip ACKs its address after every power-up and then, on the first register
+access, **holds SCL low indefinitely** — measured at over **two seconds**, against
+a few hundred microseconds of legitimate clock stretching. While it is down it
+drags the whole bus with it, so GPS (`0x10`) and the PCA9685 (`0x40`) disappear
+too, and the owl used to boot straight into `ERROR`.
 
-**Order matters**: the figure-8 for `mag` comes BEFORE the static poses for
-`accel`, never after — sustained motion resets the `accel` counter to 0.
+Everything else on that bus was eliminated by measurement first — wiring, ground,
+supply, pull-ups, the XIAO's pins, our firmware, the bus clock, and the two other
+devices. See `specs/005-i2c-bus.spec` **Falsified**, which lists five hypotheses
+that each died to a measurement; do not re-run them.
 
-**Done when**: all four counters read 3/3 and the log says
-`IMU: calibration complete - offsets saved to flash`. A reboot must then log
-`IMU: restored calibration offsets from flash`. You can now watch all of this in
-the web UI instead of a serial log (`imu.cal.*`, including `restored`).
+**Mitigations already in the tree** (so the owl is usable meanwhile):
+* `I2C_TIMEOUT_MS` 250 ms — the master no longer abandons a frame at 50 ms and
+  strands the bus
+* A silent IMU is a warning, not a boot failure — camera, face detection and eyes
+  all work without it
+* `lib/SoftI2C` + `-e softimu` — bit-banged bus that addresses all four devices
+  cleanly. It cannot rescue a slave that never releases SCL, but it is the right
+  foundation if the replacement also proves marginal on ESP32-S3
 
-**If the sensor was disturbed in Step 1**, also re-derive
-`IMU_HEADING_OFFSET_DEG`: aim the beak at a known magnetic bearing and set the
-constant to `(true bearing − reported yaw) mod 360`, remembering that it folds in
-+4.594° of magnetic declination. See SPEC-006.
+**When the new part arrives**: `pio run -e softimu -t upload` first — it names the
+failing protocol step rather than just "not found". Then the calibration
+(`kalibrieren.py`, figure-8 for `mag` BEFORE the static poses for `accel`), and
+because the head has been open, `IMU_HEADING_OFFSET_DEG` (75.4) needs
+**re-deriving**, not just the calibration redone.
 
-### Step 4 — Detection is too sporadic — the one real open bug  `[ ]`
+### Step 4 — Detection rate: diagnosed, half fixed  `[~]`
 
-Measured 2026-08-26: **6 detections in 25 s** in the firmware, versus
-near-every-frame in the isolated `facelab/` project. Same model, same camera,
-same thresholds — so it is the *integration*, not the detector. `facelab/` is
-kept precisely as the A/B control; do not delete it.
+**Diagnosed on hardware 2026-08-28. The detector was never the problem, and
+neither was the integration lead the old text bet on.** Two separate causes, one
+fixed, one open.
 
-**Measure the actual loop period first.** A `millis()` delta print in `loop()`
-costs nothing and decides everything that follows. Eye rendering alone is ~61 ms
-for both panels at 16 MHz, against a `FACE_DETECT_INTERVAL_MS` of 100 — if the
-loop is slower than the interval, fewer attempts happen than intended and no
-amount of tuning will help.
+**Cause 1 — the camera was aimed at the ceiling. FIXED (mechanically).** The
+2026-08-26 baseline of "6 detections in 25 s" was taken without ever looking at a
+frame. On 2026-08-28 the same firmware scored **0 hits in 31.5 s** against a face
+held deliberately still, while passing every `camtest` check — brightness is
+blind to aim. After tilting the camera down: **39 hits in 28.8 s (1.35/s)**,
+confidence 0.69–1.00, `idle → detecting → interacting` and staying there.
+Treat every pre-2026-08-28 detection number as measuring the mounting.
+`CAM_VFLIP=1`/`CAM_HMIRROR=0` re-confirmed correct after the remount.
 
-Two leads, in order of suspicion:
-1. **Loop slower than the detection interval.** If confirmed: raise
-   `LCD_SPI_FREQ` (16 MHz has margin), redraw only the changed band instead of
-   the whole 160×160, or decouple detection from the render cadence.
-2. **Stale camera frame** under `CAMERA_GRAB_WHEN_EMPTY` with infrequent grabs.
+**Cause 2 — the eye flush caps the loop, and therefore the detection rate. OPEN.**
+`loop_hz` and `face.attempts` were added to telemetry to settle this:
+`FACE_DETECT_INTERVAL_MS` (100 ms → 10 attempts/s) is **entirely non-binding**.
+Detection runs on *every* loop iteration because the loop manages only 4.4 Hz.
+Of a ~227 ms iteration, **~160 ms is `eyes.render()`** and ~47 ms is inference.
+Detector accuracy is fine: **54 % of attempts hit**.
+
+Half of this is fixed: `setExpression()`/`setGaze()` marked the frame dirty
+unconditionally while `updateState()` calls them every iteration, so the skip in
+`render()` never fired. Gating on a real change lifts the loop to **40+ Hz when
+the eyes are static** — but while `interacting` the gaze tracks the face and the
+eyes blink, so redraws still dominate and **attempts stayed at ~4.4/s**. The
+measured detection rate did not improve.
+
+**What is left is the flush itself, and the obvious lever is a dead end.** Both
+eyes flush in 149.9 ms, *identical at 16 and 40 MHz* — not clock-bound. Also
+ruled out by measurement, all giving the same 149.9 ms: the PSRAM framebuffer
+(internal RAM is no faster) and the `writePixels()` byte swap (`writeBytes()`
+without it is no faster). What remains is per-chunk overhead in the bulk
+transfer, ~1.56 µs/byte. So:
+
+1. **Dirty-rectangle flush** — a blink only changes the lid band, not all
+   51,200 bytes per eye. Highest value, and it helps the tracking case too.
+2. **DMA transfer** for the full-frame path.
+3. Decouple detection from the render cadence (own task/core) — sidesteps rather
+   than fixes.
+
+Do **not** raise `LCD_SPI_FREQ` for this; it was tried and measured (SPEC-003).
+
+**Still untested:** stale frames under `CAMERA_GRAB_WHEN_EMPTY` (try
+`CAMERA_GRAB_LATEST`). It was lead 2 and lead 1 accounted for the whole gap.
 
 **Thresholds are NOT the lever** — 0.5 is the library default and measured right
-(real detections score 0.58–1.00). The v1 knobs (`resize_scale`, `top_k`) do not
-exist in esp-dl v3. Reaching for either is the documented false lead (SPEC-009).
+(real detections score 0.58–1.00, and 0.93–1.00 with good framing). The v1 knobs
+(`resize_scale`, `top_k`) do not exist in esp-dl v3. Reaching for either is the
+documented false lead (SPEC-009). `facelab/` is kept as the A/B control; do not
+delete it.
 
 ### Step 5 — Verify navigation on hardware  `[ ]`
 
@@ -184,7 +239,7 @@ wrong; run the lot only after mechanical work.
 | firmware | flash `xiao_esp32s3`, watch telemetry | no LCD errors, ~535 ms cadence, `idle` at rest |
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
-| RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 175 tests pass |
+| RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 177 tests pass |
 | firmware/RPi drift | `cd rpi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
@@ -206,7 +261,7 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` blocked
 
 The 2026-08-26 tree was committed and then refactored. Eight commits, no
 behaviour change intended anywhere; all seven PlatformIO envs build and the RPi
-suite went from 104 to 175 tests.
+suite went from 104 to 177 tests.
 
 **Dead code removed:** `Eyes::fillTriangle`, `Eyes::markDirty`,
 `GC9D01::drawRect`, `GC9D01::drawCircle`, `Sensors::_vibBurstStart`, a discarded

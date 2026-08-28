@@ -51,7 +51,7 @@ Both panels also take **VCC (red) → 3.3 V**, **GND (black) → GND** and
 
 | Rail | Devices to combine |
 |------|-------------------|
-| **3.3V** | BNO055 IMU, PCA9685 Servo Driver, both LCDs (logic + backlight) |
+| **3.3V** | BNO055 IMU, **PA1010D GPS**, PCA9685 Servo Driver, both LCDs (logic + backlight) |
 | **5V (optional)** | Servo motor supply (recommended: external 5V for servos, not the Pi rail) |
 | **GND** | Everything — all I2C devices, both LCDs, vibration sensor, servo driver, GPS |
 

@@ -157,11 +157,15 @@ Full design, math and open questions: `specs/013-navigation.spec`.
   "type": "telemetry",
   "state": "idle",
   "uptime": 12345,
-  "imu": { "pitch": -2.5, "roll": 0.8, "yaw": 180.3, "calibrated": true },
+  "loop_hz": 10.5,
+  "fw": "1.2.0",
+  "imu": { "pitch": -2.5, "roll": 0.8, "yaw": 180.3, "calibrated": true,
+           "cal": { "sys": 2, "gyro": 3, "accel": 1, "mag": 3, "restored": true } },
   "gps": { "valid": true, "latitude": 52.52, "longitude": 13.405, "altitude": 34.2, "satellites": 8 },
-  "vibration": { "detected": false, "count": 3 },
+  "vibration": { "detected": false, "count": 3, "pulses": 3252 },
   "servos": [0.0, 0.0, 5.2, -1.0, 1.5],
-  "face": { "detected": true, "x": 45, "y": 38, "w": 62, "h": 74, "confidence": 0.87, "gaze_x": -0.19, "gaze_y": -0.05 },
+  "face": { "detected": true, "x": 45, "y": 38, "w": 62, "h": 74, "confidence": 0.87,
+            "gaze_x": -0.19, "gaze_y": -0.05, "total": 57, "attempts": 233 },
   "eye": "detecting"
 }
 ```
@@ -176,6 +180,12 @@ Full design, math and open questions: `specs/013-navigation.spec`.
 | `gaze` | `{"type":"gaze","x":-0.5,"y":0.2}` | Temporary gaze override (3s) |
 | `blink` | `{"type":"blink","speed":3}` | Trigger blink animation |
 | `heartbeat` | `{"type":"heartbeat"}` | Request state ack |
+
+The counters are diagnostics, and each exists because an instantaneous flag sampled at 2 Hz hid a
+real failure: `vibration.pulses` (raw ISR edges since boot), `face.total` (cumulative hits), and
+`face.attempts` with `loop_hz` — the denominator that says whether a low hit count means a poor
+detector or a starved main loop. `imu.cal.*` carries the BNO055 calibration counters and whether
+they were restored from flash.
 
 While in **UPDATE** state the owl is on an isolated SoftAP (`RobotOwl-Update`); all commands except `heartbeat` are ignored, and telemetry carries the AP credentials under `update` (ssid / password / ip / url).
 
@@ -236,7 +246,15 @@ esp32-s3-sense/                    # ESP32 firmware
 ├── src/
 │   ├── main.cpp                   # State machine, protocol, telemetry, main loop
 │   ├── Sensors.cpp                # BNO055 IMU, PA1010D GPS, SW420 vibration
-│   └── ServoController.cpp        # PCA9685 smooth servo interpolation
+│   ├── ServoController.cpp        # PCA9685 smooth servo interpolation
+│   ├── camtest.cpp                # -e camtest: SCCB probe, capture, mean brightness
+│   ├── camsnap.cpp                # -e camsnap: returns the real JPEG, all 4 orientations
+│   └── (dualtest / i2ctest / imuaxis / vibtest / powerprobe).cpp
+├── tools/                         # Host-side helpers, run by you (German UI, see AGENTS.md)
+│   ├── kalibrieren.py             # Guided BNO055 calibration (figure-8 before static poses)
+│   ├── klopftest.py               # Live tap intervals against the OTA window
+│   ├── schnappschuss.py           # Decodes camsnap's JPEGs -- the camera-aim check
+│   └── preview_eyes.py            # Renders SHAPES[] to an HTML contact sheet, no flashing
 └── .pio/build/xiao_esp32s3/       # Build output (firmware.bin)
 
 rpi-brain/                         # Raspberry Pi brain (Python)
@@ -247,7 +265,7 @@ rpi-brain/                         # Raspberry Pi brain (Python)
 ├── assets/sounds/                 # Owl-call WAVs played through the I2S amp
 ├── tools/
 │   └── gen_expressions.py         # GENERATES brain/expressions.py from the firmware's NAMES[]
-├── tests/                         # 175 tests; run on a plain Mac, no Pi or audio stack needed
+├── tests/                         # 177 tests; run on a plain Mac, no Pi or audio stack needed
 │   ├── run_tests.py               # unittest discovery
 │   ├── stubs.py                   # fakes third-party modules ONLY when not importable
 │   ├── test_protocol.py           # the ESP32<->RPi wire contract (39 tests)
@@ -460,7 +478,7 @@ python main.py [config.yaml]   # Default config path
 | **Face Detection (RPi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
 | **Web UI (RPi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and BNO055 calibration counters, and a map place-picker for navigation. Page lives in `brain/templates/index.html` |
 | **Speech (RPi)** | ✅ Implemented | German. Mic → RMS VAD gate → faster-whisper (CTranslate2, not torch) → keyword clusters / navigation triggers. Gated on awake + face + energy so the owl does not react to the TV. Disabled by default. See `specs/014-speech.spec` |
-| **RPi test suite** | ✅ 175 tests | Runs on a plain dev machine with no Pi, mic, PortAudio, faster-whisper, Flask, Jinja2 or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔RPi wire contract (39) and firmware-vs-RPi drift guards (11) |
+| **RPi test suite** | ✅ 177 tests | Runs on a plain dev machine with no Pi, mic, PortAudio, faster-whisper, Flask, Jinja2 or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔RPi wire contract (39) and firmware-vs-RPi drift guards (11) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
 
 ---

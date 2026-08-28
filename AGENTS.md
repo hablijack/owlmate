@@ -44,7 +44,7 @@ pio run -t monitor           # serial monitor, 115200 baud
 pio run -e dualtest -t upload  # flash a diagnostic env instead
 ```
 
-Six diagnostic envs, each selected with `-e` and each compiling exactly one source file via
+Ten diagnostic envs, each selected with `-e` and each compiling exactly one source file via
 `build_src_filter`. All guard their `setup()`/`loop()` behind a `#if defined(..._ACTIVE)` flag so
 they compile to nothing in the main build — keep that pattern for new sources in `src/`, otherwise
 their `setup()`/`loop()` collide with `main.cpp`'s.
@@ -56,6 +56,10 @@ their `setup()`/`loop()` collide with `main.cpp`'s.
 | `imuaxis` | prints the gravity vector in the sensor's raw frame (to derive the BNO055 axis remap) **and** live calibration counters (to guide the figure-8 dance) |
 | `vibtest` | SW-420: pull test (connected? actively driven?), sink impedance, analog level, then an edge scan across **all 11 header pins** |
 | `camtest` | camera: SCCB probe with the sensor ID read both 8- and 16-bit, driver init, frame capture, and a mean-brightness readout that catches "initialises but returns black" |
+| `i2cmin` | the **smallest possible** I2C check: `Wire.begin()`, a probe, and the idle line levels — nothing else. `i2ctest` bit-bangs the same pins and fires recovery pulses, so it cannot arbitrate whether the bus itself is sound; this can. It also probes one address at a time, which is how the BNO055 was isolated |
+| `bushigh` | drives SDA/SCL high and tests a **bare pin** four ways (pull-up, pull-down, driven high, driven low) against `D5` as a known-good control. Use with the wires desoldered to tell a dead pin from a dead wire |
+| `softimu` | talks to the BNO055 over `lib/SoftI2C` (bit-banged), reporting **which protocol step** fails. Exists because the ESP32's I2C controller cannot be shared with a clock-stretching slave |
+| `camsnap` | returns the **actual JPEG** over serial (Base64), one per vflip/hmirror combination, decoded by `tools/schnappschuss.py`. The only check that catches a camera aimed at the wrong place — brightness looks perfect on a ceiling. Added 2026-08-28 after exactly that cost a session |
 | `powerprobe` | rolling 5 V-input reading from a genuinely minimal image (no PSRAM/LCD/camera/I2C/servos), to tell "rail dragged down by a peripheral" from "rail dead". Was a `#if POWER_PROBE` branch inside `main.cpp` until 2026-08-27, which linked the whole firmware and so measured nothing useful |
 
 The main env sets `-DCORE_DEBUG_LEVEL=0`: this USB CDC port carries the NDJSON protocol the RPi
@@ -113,7 +117,7 @@ taking the BNO055 calibration with it. Flash the pieces separately:
 ### RPi brain (`rpi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (175 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (177 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
@@ -163,15 +167,39 @@ and don't trust one.
 
 Drawing calls only touch the PSRAM framebuffer — `GC9D01::flush()` is what actually transmits, and
 `Eyes::renderEye()` ends with it. `Eyes::render()` skips the whole redraw when nothing visible has
-changed; `setExpression()`/`setGaze()` mark the frame dirty themselves. (There was a public
-`markDirty()` for changes arriving by some other route; nothing ever called it, so it was removed on
-2026-08-27. Re-add it if a caller genuinely appears.)
+changed. (There was a public `markDirty()` for changes arriving by some other route; nothing ever
+called it, so it was removed on 2026-08-27. Re-add it if a caller genuinely appears.)
 
-`LCD_SPI_FREQ` is 16 MHz — ~61 ms per full 160×160 frame per eye. It was 6 MHz on the theory that
-27 MHz was "too fast for jumper wiring"; that was a misdiagnosis of the chip-select bug, so the
-clock is now purely a speed/margin trade-off and can likely go higher.
+**`setExpression()`/`setGaze()` mark the frame dirty only on an actual change**, and that is
+load-bearing rather than a micro-optimisation. `updateState()` calls both every loop iteration,
+almost always with an unchanged value, so an unconditional `_dirty = true` defeated the skip
+entirely and forced a full redraw every single iteration — measured 2026-08-28 at 4.4 Hz, against
+40+ Hz once the skip works. It is safe because `render()` re-checks the visible state itself
+(`_expr`, `_sleeping`, iris position, `_blinkProgress`) and `_dirty` starts `true`, so the first
+frame always draws.
+
+**The flush is the loop's bottleneck, and `LCD_SPI_FREQ` is not the lever.** It is 16 MHz. Both
+eyes flush in **149.9 ms**, and that number is *identical* at `LCD_SPI_FREQ` 16 MHz and 40 MHz — it
+is not clock-bound. Moving the
+framebuffer to internal RAM and dropping the `writePixels()` byte swap each changed nothing either.
+What is left is per-chunk overhead in the bulk transfer (~1.56 µs/byte), so the fix is DMA or a
+dirty-rectangle flush. `config.h` claimed "~61 ms" until 2026-08-28; that was arithmetic presented
+as a measurement. Because face detection runs from the same `loop()`, this flush — not
+`FACE_DETECT_INTERVAL_MS` — sets the detection rate.
 
 ### I2C and the IMU
+
+**A clock-stretching slave can take the whole bus down, and with it two innocent devices.**
+`I2C_TIMEOUT_MS` (250 ms, `config.h`) is the master's patience; the Arduino default of 50 ms is too
+short. When it expires the controller abandons the transaction **mid-frame** and leaves both lines
+low — so a silent BNO055 also costs you the GPS (`0x10`) and the servo driver (`0x40`). Set it after
+`Wire.begin()`; `begin()` resets it. Measured 2026-08-28: at 50 ms the bus was dead after the
+*second* access at every clock rate and with every library; at 1000 ms it survived 12 reads but a
+missing device then cost a full second per read and stalled the main loop entirely.
+
+**A missing IMU must never be fatal.** `Sensors::begin()` returns true with `_imuReady = false`, and
+`main.cpp` logs a warning instead of entering `ERROR`. Until 2026-08-28 a silent BNO055 took the
+whole owl down — eyes, camera, face detection and servos included — none of which depend on it.
 
 Do not read a boot-time burst of `ESP_ERR_INVALID_STATE` (259) as a broken bus. In the IDF 5.x
 `i2c_master` driver that code means **the slave NACKed**, and `Adafruit_BNO055::begin()` soft-resets
@@ -244,13 +272,21 @@ exists**, so delete the generated one after changing defaults or nothing happens
 **Never flash `firmware.factory.bin` at 0x0** — it spans past 0x9000 and wipes the NVS partition,
 taking the BNO055 calibration with it. Flash bootloader/partitions/boot_app0/firmware separately.
 
-Four things that cost time and will again if forgotten:
+Five things that cost time and will again if forgotten:
 
+- **Look at a frame before you diagnose anything.** On 2026-08-28 the camera passed every
+  `camtest` check — `0x3660`, driver init, 27 ms frames, brightness 133 dropping to 29 under a
+  hand — while detection scored **0 hits in 31.5 s** against a face held still. It was aimed at the
+  ceiling. A mis-aimed camera produces perfectly healthy numbers, so no brightness reading can catch
+  it; the diagnosis went to thresholds and loop timing, and both were innocent. Run
+  `pio run -e camsnap -t upload` and `tools/schnappschuss.py`, and look. After re-aiming, the same
+  build scored 39 hits in 28.8 s.
 - **`sensor->set_vflip(s, 1)` is mandatory.** The camera sits vertically flipped in the owl's head.
   Measured over all four orientations with a face in frame: normal **0** hits, vflip **57**,
   hmirror 2, 180° 10. These models only detect *upright* faces, so without vflip detection can never
   work — no threshold or lighting fixes it. (The BNO055 is likewise mounted inverted; the whole
-  assembly is.)
+  assembly is.) Re-confirmed `1` on 2026-08-28 after the ribbon extension was fitted — that remount
+  did not change the vertical mounting, but the check is cheap and the failure is total.
 - **RGB565**: use `DL_IMAGE_PIX_TYPE_RGB565BE` (62 hits vs 2 for LE).
 - **Thresholds are not the problem.** Default 0.5 is right; measured scores are 0.58–1.00.
 - **`CONFIG_FREERTOS_HZ=1000`** is a hard Arduino-core requirement in espidf mode (IDF defaults to
@@ -492,6 +528,15 @@ including cable colours — is in `WIRING.md`, corrected against `config.h` on 2
 
 All three I2C devices work (verified: live BNO055 Euler angles, 43 NMEA sentences in 6 s from the
 PA1010D, a PCA9685 servo ramp). Telemetry runs at ~535 ms.
+
+**Camera + face detection, hardware session 2026-08-28.** The ribbon extension is fitted and the
+original camera works through it: `0x3660` at `0x3C`, 27 ms frames, brightness 133 → 29 under a hand
+and back. Face detection works end to end — 39 hits in 28.8 s, confidence 0.69–1.00,
+`idle → detecting → interacting`. Two things to carry forward: the extension **changed the camera's
+aim** (it pointed at the ceiling, and detection scored 0 while every diagnostic looked perfect —
+always take a `camsnap` and look), and the **eye flush at 149.9 ms caps the main loop at 4.4 Hz**,
+which is what actually limits the detection rate. `BACKLOG.md` Step 4 has the full breakdown; the
+remaining fix is a dirty-rectangle or DMA flush, **not** a higher `LCD_SPI_FREQ`.
 
 **Refactoring pass, 2026-08-27** (10 commits, all seven PlatformIO envs build, RPi suite 104 → 174
 tests): dead code removed across the eyes/driver/sensors; five real defects fixed (an ack log line

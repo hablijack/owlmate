@@ -109,13 +109,24 @@ nearest person, and the one to follow.
 
 ## Open
 
-* **Detection is far more sporadic in the firmware than in isolation** — 6 hits
-  in 25 s, against near-every-frame in the standalone `facelab/` project with the
-  same model, camera and thresholds. So it is the integration, not the detector.
-  Two leads, in order of suspicion:
-  1. The main loop is slower than `FACE_DETECT_INTERVAL_MS` (100 ms) — eye
-     rendering alone costs ~61 ms per eye — so fewer attempts happen than
-     intended. Measure the actual loop period first.
-  2. Stale frames: with `CAMERA_GRAB_WHEN_EMPTY` and grabs only every 100 ms, the
-     returned buffer may be old. Try `CAMERA_GRAB_LATEST`.
-  Use `face.total` as the metric, not `face.detected`.
+* **The detection rate is capped by the eye renderer, and that cap is the whole
+  story.** Lead 1 below is now measured and confirmed; lead 2 was never reached.
+  Measured 2026-08-28 with `loop_hz` and `face.attempts` in telemetry:
+  `FACE_DETECT_INTERVAL_MS` (100 ms, i.e. 10 attempts/s) is **entirely
+  non-binding** — detection runs on *every* loop iteration because the loop
+  itself only manages 4.4 Hz. Of that ~227 ms iteration, ~160 ms is
+  `eyes.render()` and ~47 ms is inference. So attempts sit at ~4.4/s no matter
+  what the interval says, and the fix belongs in SPEC-003 (the 149.9 ms flush),
+  not here. Detector accuracy is not the problem: **54 % of attempts hit**, at
+  confidence 0.69–1.00, once the camera is actually pointed at a face.
+* **The 6-hits-in-25-s baseline is not trustworthy.** It was recorded 2026-08-26,
+  before anyone had looked at what the camera sees. On 2026-08-28 the same
+  firmware scored **0 hits in 31.5 s** with a face deliberately held still —
+  because the camera was aimed at the ceiling (see SPEC-008). After re-aiming,
+  the same build scored 39 hits in 28.8 s. Any detection-rate number taken
+  without confirming framing first measures the mounting, not the detector.
+* Stale frames (`CAMERA_GRAB_WHEN_EMPTY` vs `CAMERA_GRAB_LATEST`) remains
+  untested — it was the second lead and the first one accounted for the gap.
+  Worth revisiting only after the flush is fixed.
+  Use `face.total` as the metric, not `face.detected` — and read it against
+  `face.attempts`, which exists precisely so a low `total` can be attributed.
