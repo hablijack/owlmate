@@ -89,6 +89,18 @@ This subsystem produced the two most expensive wrong beliefs in the project.
   No clock rate would have worked: no chip-select was ever asserted. The panels
   were not refusing data, they were never addressed. The clock was reduced to
   6 MHz on this theory and has since been raised to 16 MHz with no ill effect.
+* **"Frame time is set by `LCD_SPI_FREQ`, so 16 MHz gives ~61 ms for both
+  eyes."** Measured 2026-08-28: both eyes flush in **149.9 ms at 16 MHz and
+  149.9 ms at 40 MHz** — identical to 0.1 ms. The transfer is not clock-bound at
+  all, and the ~61 ms figure that stood in `config.h` was arithmetic
+  (`820 kbit / 16 MHz`) presented as a measurement. Two follow-up hypotheses
+  died the same way, each giving the same 149.9 ms: the **PSRAM framebuffer**
+  (moving it to internal RAM changed nothing) and the **byte swap** in
+  `writePixels()` (`writeBytes()` without the swap changed nothing — legal here
+  only because `COLOR_BG`/`COLOR_INK` are `0xFFFF`/`0x0000` and byte-order
+  symmetric). What is left is per-chunk overhead inside the bulk transfer,
+  ~1.56 us per byte. **Raising the clock to make the eyes faster does not
+  work; do not try it again without re-measuring.**
 
 The actual root cause: the driver never touched CS in any write path. A single
 panel worked anyway because `_cs` was passed to `SPIClass::begin()` as the
@@ -114,6 +126,13 @@ chip-select fault.
 
 ## Open
 
-* The clock can probably go above 16 MHz; nothing has been measured above it.
-  Watch for torn or speckled pixels, which is what an over-clocked panel
-  looks like.
+* **The flush is the main loop's bottleneck.** 149.9 ms per redraw for both eyes
+  dominates `loop()`, which also runs face detection (~47 ms) — so the detection
+  rate is capped by the eye renderer, not by `FACE_DETECT_INTERVAL_MS`. Measured
+  2026-08-28: 4.4 Hz loop while redrawing, 40+ Hz when the redraw is skipped.
+  The fix is to stop pushing all 51,200 bytes per eye for a blink: a
+  dirty-rectangle flush (a blink only changes the lid band) or a DMA transfer.
+  Neither is written. See SPEC-009 and BACKLOG.md.
+* Raising `LCD_SPI_FREQ` above 16 MHz is **not** a speed lever — see Falsified.
+  It remains untested above 40 MHz for signal integrity, but there is no reason
+  to raise it.

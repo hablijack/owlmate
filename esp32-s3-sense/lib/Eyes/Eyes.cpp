@@ -31,23 +31,31 @@ Eyes::Eyes(GC9D01& left, GC9D01& right)
 }
 
 void Eyes::setExpression(EyeExpression expr) {
+    // NUR bei echter Aenderung schmutzig markieren. updateState() ruft
+    // applyExpression()/applyGaze() in JEDER Runde der Hauptschleife auf, meist
+    // mit unveraendertem Wert; ein bedingungsloses _dirty = true hat deshalb
+    // die Skip-Logik in render() vollstaendig ausgehebelt und in jeder Runde
+    // einen kompletten Neuaufbau erzwungen. Gemessen 2026-08-28: 160 ms pro
+    // Runde, Hauptschleife 4,4 Hz, und weil die Gesichtserkennung an der
+    // Schleife haengt, dieselben 4,4 Erkennungsversuche/s statt der 10, die
+    // FACE_DETECT_INTERVAL_MS zusagt.
+    //
+    // Sicher, weil render() den sichtbaren Zustand ohnehin selbst vergleicht
+    // (_expr, _sleeping, Irisposition, _blinkProgress) und _dirty im
+    // Konstruktor true ist - das erste Bild wird also in jedem Fall gezeichnet.
+    if (expr == _expr) return;
     _expr = expr;
-    if (expr == EyeExpression::SLEEPING) {
-        _sleeping = true;
-    } else {
-        _sleeping = false;
-    }
-    // An expression change is a visible change: mark the frame dirty so the
-    // next render() actually flushes to the LCDs. Without this, render()
-    // skips the SPI push (dirty-flag optimization) and the panel never
-    // updates - it just shows the backlight with a stale/black frame.
+    _sleeping = (expr == EyeExpression::SLEEPING);
     _dirty = true;
 }
 
 void Eyes::setGaze(float x, float y) {
-    _gazeX = constrain(x, -1.0f, 1.0f);
-    _gazeY = constrain(y, -1.0f, 1.0f);
-    // Gaze moves the iris, which is a visible change too.
+    // Wie setExpression(): nur bei echter Aenderung. Siehe dort.
+    const float nx = constrain(x, -1.0f, 1.0f);
+    const float ny = constrain(y, -1.0f, 1.0f);
+    if (nx == _gazeX && ny == _gazeY) return;
+    _gazeX = nx;
+    _gazeY = ny;
     _dirty = true;
 }
 
