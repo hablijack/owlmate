@@ -35,6 +35,7 @@ Arduino-only path (SPEC-002).
 | `imuaxis` | IMU mounting | prints gravity in the **raw sensor frame**, deliberately no axis remap |
 | `vibtest` | vibration sensor | pull-up/pull-down test, sink impedance, edge scan over **all 11 header pins** |
 | `camtest` | camera | 8-bit **and** 16-bit ID reads, plus mean brightness to catch "initialises but returns black" |
+| `camsnap` | camera framing/orientation | returns the **actual JPEG** in all four vflip/hmirror combinations — the only check that catches a camera aimed at the wrong place |
 | `powerprobe` | supply rail | a **genuinely** minimal image — its own `src/powerprobe.cpp`, no PSRAM/LCD/camera/I2C/servos — plus a rolling 5 V-input reading |
 
 **Host tools are separate from firmware diagnostics**, live in
@@ -46,10 +47,19 @@ hands:
 | `kalibrieren.py` | guided BNO055 calibration; enforces figure-8 **before** static poses |
 | `klopftest.py` | live tap intervals against the OTA window |
 | `preview_eyes.py` | renders `SHAPES[]` to an HTML contact sheet |
+| `schnappschuss.py` | decodes `camsnap`'s Base64 JPEGs to files; syncs on a sweep start so the four orientations are one comparable set |
 
 **Tools find their own serial port** — `OWL_PORT`, else `/dev/cu.usbmodem*`,
 `/dev/ttyACM*`, `/dev/ttyUSB*` — so the same script runs from the Mac or from the
 Pi.
+
+**A measurement that cannot fail is not a check.** `camtest` reports mean
+brightness, which distinguishes "black frame" from "real image" — but a camera
+pointed at the ceiling produces a flawless brightness reading, and on 2026-08-28
+that passed every `camtest` criterion while face detection scored 0 in 31.5 s
+(SPEC-008). `camsnap` exists because the only way to falsify "the camera sees
+what we think it sees" is to look at the frame. Prefer a diagnostic that returns
+the artefact over one that returns a statistic about it.
 
 **`preview_eyes.py` parses the C++ table** rather than duplicating it, and
 re-implements `drawBlob()`'s maths exactly. A preview that can drift from the
