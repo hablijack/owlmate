@@ -55,7 +55,9 @@ FULL_FRAME = {
     "face": {
         "detected": True, "x": 10, "y": 20, "w": 30, "h": 40,
         "confidence": 0.87, "gaze_x": -0.5, "gaze_y": 0.25, "total": 57,
+        "attempts": 233,
     },
+    "loop_hz": 10.5,
 }
 
 
@@ -190,11 +192,27 @@ class TestDiagnosticFields(unittest.TestCase):
         t = parse(FULL_FRAME)
         self.assertEqual(t.face.total, 57)
 
+    def test_face_attempts(self):
+        # The denominator for `total`. A low hit count means either a bad
+        # detector or a starved main loop, and only total/attempts tells them
+        # apart -- measured 2026-08-28, attempts sat at 4.4/s against the 10/s
+        # FACE_DETECT_INTERVAL_MS promises, which located the bug in the loop.
+        t = parse(FULL_FRAME)
+        self.assertEqual(t.face.attempts, 233)
+
+    def test_loop_hz(self):
+        # Measured main-loop rate. Face detection runs from loop(), so this is
+        # the ceiling on the detection rate no matter what the interval says.
+        t = parse(FULL_FRAME)
+        self.assertAlmostEqual(t.loop_hz, 10.5)
+
     def test_diagnostic_fields_default_to_zero(self):
-        t = parse(frame(imu=None, vibration=None, face=None))
+        t = parse(frame(imu=None, vibration=None, face=None, loop_hz=None))
         self.assertEqual(t.imu.cal.gyro, 0)
         self.assertEqual(t.vibration.pulses, 0)
         self.assertEqual(t.face.total, 0)
+        self.assertEqual(t.face.attempts, 0)
+        self.assertEqual(t.loop_hz, 0.0)
 
 
 class TestMalformedFieldsAreIsolated(unittest.TestCase):

@@ -38,6 +38,11 @@ class FaceDetection:
     # demonstrably in INTERACTING. A rising `total` is how you tell "detecting
     # sporadically" from "not detecting at all".
     total: int = 0
+    # Cumulative detection RUNS since boot, the denominator for `total`. A low
+    # `total` has two very different causes -- the detector missing faces, or
+    # the main loop rarely getting round to running it -- and they need
+    # opposite fixes. total/attempts separates them; see Telemetry.loop_hz.
+    attempts: int = 0
 
 
 @dataclass(frozen=True)
@@ -134,6 +139,10 @@ class Telemetry:
     state: str = "idle"
     uptime_ms: int = 0
     firmware: str = ""
+    # Measured main-loop rate. FACE_DETECT_INTERVAL_MS only caps how often
+    # detection may run; eye rendering and the loop's own delay decide how
+    # often it actually does. Without this the two are indistinguishable.
+    loop_hz: float = 0.0
     imu: IMUData = field(default_factory=IMUData)
     gps: GPSData = field(default_factory=GPSData)
     vibration: VibrationData = field(default_factory=VibrationData)
@@ -193,6 +202,7 @@ _FACE_FIELDS = (
     ("gaze_x", "gaze_x", float),
     ("gaze_y", "gaze_y", float),
     ("total", "total", int),
+    ("attempts", "attempts", int),
 )
 _UPDATE_FIELDS = (
     ("ssid", "ssid", str),
@@ -379,6 +389,7 @@ class SerialHandler:
         return Telemetry(
             state=_scalar(data, "state", str, "idle"),
             uptime_ms=_scalar(data, "uptime", int, 0),
+            loop_hz=_scalar(data, "loop_hz", float, 0.0),
             firmware=_scalar(data, "fw", str, ""),
             eye_expression=_scalar(data, "eye", str, "neutral"),
             imu=_section(

@@ -35,14 +35,15 @@ times over during hardware debugging.
 
 **Telemetry every `TELEMETRY_INTERVAL_MS` (500 ms).** Object shape:
 
-    {"type":"telemetry","state":…,"uptime":…,"fw":…,
+    {"type":"telemetry","state":…,"uptime":…,"loop_hz":…,"fw":…,
      "imu":{"pitch","roll","yaw","calibrated","cal":{"sys","gyro","accel","mag","restored"}},
      "gps":{"valid","latitude","longitude","altitude","satellites"},
      "vibration":{"detected","count","pulses"},
      "navigation":{"active","angle"},        // only while NAVIGATING
      "update":{"ssid","password","ip","url"}, // only while in UPDATE
      "servos":[5],
-     "face":{"detected","x","y","w","h","confidence","gaze_x","gaze_y","total"},
+     "face":{"detected","x","y","w","h","confidence","gaze_x","gaze_y",
+             "total","attempts"},
      "eye":…}
 
 **A sub-object is omitted when its device is absent.** `imu` and `gps` appear
@@ -58,6 +59,14 @@ from a link that is not there.
 `face.total` exist because a 2 Hz sample of an instantaneous boolean is blind to
 events shorter than the sampling interval. This has bitten twice
 (SPEC-007, SPEC-009); treat it as a rule for any new intermittent signal.
+
+**A counter needs its denominator.** `face.attempts` and `loop_hz` were added
+2026-08-28 because `face.total` alone is unattributable: a low hit count can mean
+the detector is missing faces or that the loop rarely runs it, and those need
+opposite fixes. The pair settled it in one measurement — attempts at 4.4/s
+against a `FACE_DETECT_INTERVAL_MS` promising 10/s, so the loop was the cause
+(SPEC-009). Prefer shipping the denominator with the counter rather than adding
+it during the next investigation.
 
 **Expression names come from one table** in `Eyes.cpp` (`NAMES[]`), which backs
 both directions. The RPi copy is **generated** from it

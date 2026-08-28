@@ -18,6 +18,13 @@ typedef struct {
     // "detected" wertlos, ein steigender Zaehler dagegen eindeutig. Konstant
     // bei einem Gesicht vor der Kamera = Erkennung arbeitet nicht.
     uint32_t total;
+    // Kumulative Zahl der DURCHLAEUFE seit dem Boot, Gegenstueck zu total.
+    // total allein sagt nicht, ob eine niedrige Trefferzahl an der Erkennung
+    // liegt oder daran, dass sie schlicht selten laeuft: die Hauptschleife
+    // rendert die Augen und schlaeft, und beides drueckt die Rate unter das,
+    // was FACE_DETECT_INTERVAL_MS verspricht. Erst total/attempts trennt
+    // "erkennt schlecht" von "kommt kaum dran". Siehe SPEC-008.
+    uint32_t attempts;
 } FaceResult_t;
 
 // Initialize face detection module

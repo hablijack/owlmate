@@ -34,6 +34,7 @@ static bool initialized = false;
 static FaceResult_t lastGood = {};
 static uint32_t lastGoodAt = 0;
 static uint32_t totalDetections = 0;
+static uint32_t totalAttempts = 0;
 
 // esp32-camera liefert RGB565 mit dem hohen Byte zuerst. Auf Hardware
 // gemessen: BE 62 Treffer gegen LE 2.
@@ -113,6 +114,15 @@ void FaceDetector_Detect(FaceResult_t *result) {
 
     if (!initialized || !detector) return;
 
+    // Ab hier laeuft ein echter Durchlauf - genau das zaehlt attempts.
+    totalAttempts++;
+    // Zaehler SOFORT setzen, nicht erst am Ende: der Ausstieg bei fehlendem
+    // Puffer liegt davor, und ohne das meldet die Telemetrie nach einem
+    // misslungenen Bildabruf total=0 - was wie ein Zaehlerreset aussieht und
+    // genau die Frage unbeantwortbar macht, fuer die die Zaehler da sind.
+    result->attempts = totalAttempts;
+    result->total = totalDetections;
+
     camera_fb_t *fb = esp_camera_fb_get();
     if (!fb) return;
 
@@ -159,6 +169,7 @@ void FaceDetector_Detect(FaceResult_t *result) {
         *result = lastGood;
     }
     result->total = totalDetections;
+    result->attempts = totalAttempts;
 
     esp_camera_fb_return(fb);
 }
