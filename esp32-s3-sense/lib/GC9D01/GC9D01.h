@@ -99,4 +99,20 @@ private:
     SPISettings _cfg;
     uint8_t _txDepth;
     uint16_t* _fb;
+
+    // Zeilenbereich, der sich seit dem letzten flush() WIRKLICH geaendert hat.
+    // Leer heisst _dirtyTop > _dirtyBot; dann ueberspringt flush() den Bus ganz.
+    //
+    // Nur Zeilen, kein echtes Rechteck: der Flaschenhals ist der Overhead PRO
+    // UEBERTRAGUNG (~1,56 us/Byte, unabhaengig vom SPI-Takt - gemessen
+    // 2026-08-28). Ein Rechteck braeuchte eine Uebertragung je Zeile und waere
+    // dadurch langsamer als ein einziger zusammenhaengender Block, auch wenn er
+    // ein paar Bytes mehr enthaelt.
+    int16_t _dirtyTop;
+    int16_t _dirtyBot;
+
+    void markRow(int16_t y) {
+        if (y < _dirtyTop) _dirtyTop = y;
+        if (y > _dirtyBot) _dirtyBot = y;
+    }
 };

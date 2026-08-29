@@ -71,7 +71,8 @@ static const uint8_t kInitSeq[] = {
 
 GC9D01::GC9D01(int8_t dc, int8_t cs, int8_t rst)
     : _dc(dc), _cs(cs), _rst(rst), _bus(nullptr),
-      _cfg(LCD_SPI_FREQ, MSBFIRST, SPI_MODE0), _txDepth(0), _fb(nullptr) {
+      _cfg(LCD_SPI_FREQ, MSBFIRST, SPI_MODE0), _txDepth(0), _fb(nullptr),
+      _dirtyTop(0), _dirtyBot(LCD_HEIGHT - 1) {
 }
 
 GC9D01::~GC9D01() {
@@ -170,29 +171,61 @@ void GC9D01::setWindow(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
     endWrite();
 }
 
+// Uebertraegt NUR die Zeilen, deren Pixel sich seit dem letzten flush() wirklich
+// geaendert haben.
+//
+// Das ist der Hebel bei den gemessenen 149,9 ms fuer beide Augen: ein Blinzeln
+// aendert nur das Lidband, nicht alle 51.200 Byte je Auge. Weil fillScreen() und
+// drawPixel() ausschliesslich Pixel als geaendert melden, deren WERT sich
+// unterscheidet, umfasst der Bereich nach einem Neuaufbau genau die Vereinigung
+// aus "wo war vorher Tinte" und "wo ist jetzt Tinte" - mehr muss die Anzeige
+// nicht sehen.
 void GC9D01::flush() {
     if (!_fb || !_bus) return;
+    if (_dirtyTop > _dirtyBot) return;    // nichts geaendert: kein Bus, kein Takt
+
+    const int16_t top = _dirtyTop;
+    const int16_t bot = _dirtyBot;
+    const size_t rows = (size_t)(bot - top + 1);
+
     startWrite();                         // one chip-select for the whole frame
-    setWindow(0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
+    setWindow(0, top, LCD_WIDTH - 1, bot);
     digitalWrite(_dc, HIGH);              // pixel data
     // writePixels() byte-swaps each 16-bit word, which is what the panel wants
     // (RGB565, high byte first on the wire).
-    _bus->writePixels(_fb, (size_t)LCD_WIDTH * LCD_HEIGHT * sizeof(uint16_t));
+    _bus->writePixels(_fb + (size_t)top * LCD_WIDTH,
+                      rows * LCD_WIDTH * sizeof(uint16_t));
     endWrite();
+
+    _dirtyTop = LCD_HEIGHT;               // Bereich leeren
+    _dirtyBot = -1;
 }
 
 // ----------------------------------------------------------------------------
 // Framebuffer drawing (no SPI traffic -- call flush() to make it visible)
 // ----------------------------------------------------------------------------
+// Nur Zeilen als geaendert melden, in denen sich tatsaechlich ein Pixel
+// unterscheidet. Eine bereits einfarbige Zeile bleibt sauber - genau das macht
+// den Teil-Flush wirksam, denn renderEye() ruft dies vor JEDEM Neuaufbau auf.
 void GC9D01::fillScreen(uint16_t color) {
     if (!_fb) return;
-    for (size_t i = 0; i < (size_t)LCD_WIDTH * LCD_HEIGHT; i++) _fb[i] = color;
+    for (int16_t y = 0; y < LCD_HEIGHT; y++) {
+        uint16_t* row = _fb + (size_t)y * LCD_WIDTH;
+        bool changed = false;
+        for (int16_t x = 0; x < LCD_WIDTH; x++) {
+            if (row[x] != color) { row[x] = color; changed = true; }
+        }
+        if (changed) markRow(y);
+    }
 }
 
 void GC9D01::drawPixel(int16_t x, int16_t y, uint16_t color) {
     if (!_fb) return;
     if (x < 0 || x >= LCD_WIDTH || y < 0 || y >= LCD_HEIGHT) return;
-    _fb[y * LCD_WIDTH + x] = color;
+    uint16_t& px = _fb[y * LCD_WIDTH + x];
+    if (px == color) return;              // unveraendert: Zeile bleibt sauber
+    px = color;
+    markRow(y);
 }
 
 void GC9D01::drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color) {
