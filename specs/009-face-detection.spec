@@ -131,6 +131,25 @@ nearest person, and the one to follow.
   Use `face.total` as the metric, not `face.detected` — and read it against
   `face.attempts`, which exists precisely so a low `total` can be attributed.
 
+**Two causes, both resolved 2026-08-29. The second was hiding behind a claim
+this spec made.**
+
+**(a) The coarse stage was rejecting faces before the fine stage saw them.**
+Detection is a cascade: MSR proposes candidate regions, MNP refines and scores.
+esp-dl defaults *both* to 0.5 and the firmware set both explicitly to 0.5.
+Adafruit's working MEMENTO shoulder robot instead runs the coarse stage at 0.1:
+
+    HumanFaceDetectMSR01 s1(0.1F, 0.5F, 10, 0.2F);
+    HumanFaceDetectMNP01 s2(0.5F, 0.3F, 5);
+
+Measured at 1 m with the crop already in place: hit rate **31 % → 100 %**, hits
+1.84/s → 4.93/s, confidence 0.96 avg. **Zero** false positives over 184 attempts
+in an empty room — precision survives because the reported score is still MNP's.
+
+This spec previously stated "Thresholds are NOT the lever". That was true of the
+FINAL score and false of the coarse stage, and the phrasing stopped anyone
+looking. Distinguish the two stages before repeating it.
+
 **RESOLVED 2026-08-29 — the face was simply too small in frame.** `run()`
 rescales its input to the model's own resolution, so detection depends on the
 face's size **relative to the frame**, not in pixels. At 1 m a head is ~40 px of

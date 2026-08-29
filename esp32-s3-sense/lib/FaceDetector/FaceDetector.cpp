@@ -100,8 +100,8 @@ bool FaceDetector_Init(void) {
         esp_camera_deinit();
         return false;
     }
-    detector->set_score_thr(FACE_SCORE_THRESHOLD, 0);   // MSR, grob
-    detector->set_score_thr(FACE_SCORE_THRESHOLD, 1);   // MNP, fein
+    detector->set_score_thr(FACE_SCORE_THRESHOLD_MSR, 0);  // MSR, grob: durchlaessig
+    detector->set_score_thr(FACE_SCORE_THRESHOLD, 1);      // MNP, fein: streng
     detector->set_nms_thr(FACE_NMS_THRESHOLD, 0);
     detector->set_nms_thr(FACE_NMS_THRESHOLD, 1);
 

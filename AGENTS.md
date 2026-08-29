@@ -298,7 +298,15 @@ Seven things that cost time and will again if forgotten:
   was recorded at bring-up under unstated conditions; re-measured in a normal room it scored **5 %**
   on the full frame, *worse* than the firmware. Two days of "it must be the integration" rested on
   that comparison. Measure the control in the same sitting as the thing it controls for.
-- **Thresholds are not the problem.** Default 0.5 is right; measured scores are 0.58–1.00.
+- **The two detection stages need DIFFERENT thresholds.** Detection is a cascade: MSR proposes
+  candidate regions, MNP refines and scores them. esp-dl defaults both to 0.5, and so did we — which
+  throws faces away at the proposal stage before the refiner can ever look at them. `FACE_SCORE_THRESHOLD_MSR`
+  is now **0.1** (permissive) while `FACE_SCORE_THRESHOLD` stays 0.5 (strict), matching Adafruit's
+  working MEMENTO shoulder robot. Measured 2026-08-29 at 1 m: hit rate **31 % → 100 %**, hits
+  1.84/s → 4.93/s, and **zero** false positives over 184 attempts in an empty room. Precision is
+  protected because the reported score still comes from MNP.
+- **"Thresholds are not the lever" was wrong, and cost time.** That claim was about the FINAL score,
+  where 0.5 is indeed right and measured scores are 0.58–1.00. It was never true of the coarse stage.
 - **`CONFIG_FREERTOS_HZ=1000`** is a hard Arduino-core requirement in espidf mode (IDF defaults to
   100 and the core's CMakeLists aborts).
 

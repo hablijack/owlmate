@@ -305,7 +305,26 @@
 // 0.5 is the library default and measured right: real detections score
 // 0.58-1.00, mostly above 0.9. Lowering these is only useful while debugging
 // and invites false positives in production.
+// Schwelle der FEINEN Stufe (MNP). Das ist der Wert, der in den gemeldeten
+// Scores landet, und 0,5 ist hier richtig.
 #define FACE_SCORE_THRESHOLD 0.5f
+
+// Schwelle der GROBEN Stufe (MSR). Bewusst NIEDRIG.
+//
+// Die Erkennung laeuft zweistufig: MSR schlaegt Kandidatenbereiche vor, MNP
+// bewertet sie fein. Wer die grobe Stufe streng einstellt, wirft Gesichter weg,
+// bevor die feine Stufe sie ueberhaupt zu sehen bekommt - und die Genauigkeit
+// haengt trotzdem an MNP, weil von dort der gemeldete Score stammt.
+//
+// esp-dl setzt beide Stufen per Voreinstellung auf 0,5. Adafruits
+// funktionierender "MEMENTO Shoulder Robot" fuehrt die grobe Stufe dagegen mit
+// 0,1 und nur die feine mit 0,5:
+//   HumanFaceDetectMSR01 s1(0.1F, 0.5F, 10, 0.2F);
+//   HumanFaceDetectMNP01 s2(0.5F, 0.3F, 5);
+//
+// ACHTUNG: der frueher hier notierte Satz "Schwellwerte sind nicht der Hebel"
+// bezog sich auf den ENDSCORE. Fuer die grobe Stufe galt er nie.
+#define FACE_SCORE_THRESHOLD_MSR 0.1f
 #define FACE_NMS_THRESHOLD 0.5f
 // Post-filter on top of the model: only treat a face as "detected" (and drive
 // gaze/state) above this, so low-confidence flicker cannot flip the state

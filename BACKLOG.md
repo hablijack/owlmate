@@ -140,13 +140,23 @@ face's size **relative to the frame**, not in pixels. At 1 m a head is ~40 px of
 sharp and well exposed in both cases. `CAM_DETECT_CROP_DIV` (`config.h`) now
 gives the detector the centre crop, doubling relative size for free.
 
+**Second cause, found by reading a working robot's source** (Adafruit's MEMENTO
+shoulder robot): the cascade's two stages need *different* thresholds. MSR
+proposes candidates, MNP refines them, and esp-dl defaults both to 0.5 — so the
+proposal stage was discarding faces the refiner never got to see. MSR is now 0.1,
+MNP stays 0.5.
+
 Measured at 1 m, same spot and light, `facelab` as control:
 
-| | full frame | centre crop 2× |
-|---|---|---|
-| facelab | 0.0 % | **59.4 %** |
-| firmware, hits | 0.00/s | **1.84/s** |
-| firmware, state | `idle` | **`interacting` for 30 s, never dropping out** |
+| | full frame | + centre crop 2× | + MSR 0.1 |
+|---|---|---|---|
+| facelab | 0.0 % | 59.4 % | — |
+| firmware, hits | 0.00/s | 1.84/s | **4.93/s** |
+| firmware, hit rate | 0 % | 31 % | **100 %** |
+| firmware, state | `idle` | `interacting` | `interacting`, 55/55 frames |
+
+**False positives: zero** over 184 attempts in an empty room, state stayed
+`idle` throughout. Precision holds because the reported score is still MNP's.
 
 **A larger frame does NOT help** — VGA gives the model the same picture at the
 same field of view. The cost of the crop is field of view; `CAM_DETECT_CROP_DIV 1`
