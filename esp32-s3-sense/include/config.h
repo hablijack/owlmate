@@ -311,6 +311,26 @@
 // gaze/state) above this, so low-confidence flicker cannot flip the state
 // machine.
 #define FACE_MIN_CONFIDENCE 0.5f
+
+// Der Detektor bekommt nur den MITTIGEN AUSSCHNITT des Kamerabildes, mit
+// diesem Teiler: 2 = halbe Breite und Hoehe, also ein Viertel der Flaeche.
+//
+// Warum das der entscheidende Hebel ist: run() skaliert sein Eingangsbild
+// ohnehin auf die Modellaufloesung, also zaehlt die RELATIVE Groesse des
+// Gesichts, nicht die in Pixeln. Ein groesseres Kamerabild (VGA statt QVGA)
+// bringt deshalb GAR NICHTS - das Modell sieht bei gleichem Blickwinkel exakt
+// dasselbe. Ein Ausschnitt verdoppelt die relative Groesse dagegen sofort.
+//
+// Auf Hardware gemessen 2026-08-29, Person auf 1 m Abstand, gleiches Licht,
+// gleiche Stelle, mit facelab als Vergleich:
+//     ganzes Bild   0,0 % der Bilder mit Gesicht  (Kopf ~40 px von 320)
+//     Ausschnitt 2  59,4 %                        (Score im Mittel 0,82)
+// Auf 30 cm lag das ganze Bild bei 22 %. Das Bild war in beiden Faellen scharf
+// und gut belichtet - es war nie eine Qualitaets-, immer eine Groessenfrage.
+//
+// Preis: kleineres Blickfeld. Wer weiter aussen steht, wird nicht mehr gesehen.
+// 1 schaltet den Ausschnitt ab und liefert das alte Verhalten.
+#define CAM_DETECT_CROP_DIV 2
 // Nachhaltezeit fuer die Telemetrie. Die Erkennung laeuft alle
 // FACE_DETECT_INTERVAL_MS, die State-Machine sieht mit ~60 Hz jeden Treffer -
 // die Telemetrie tastet aber nur alle 500 ms einen Momentanwert ab und greift

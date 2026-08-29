@@ -1,6 +1,8 @@
 #include "FaceDetector.h"
 #include "config.h"
 #include <Arduino.h>
+#include <string.h>
+#include "esp_heap_caps.h"
 
 // ============================================================================
 // Gesichtserkennung mit esp-dl v3.
@@ -35,6 +37,7 @@ static FaceResult_t lastGood = {};
 static uint32_t lastGoodAt = 0;
 static uint32_t totalDetections = 0;
 static uint32_t totalAttempts = 0;
+static uint16_t *cropBuf = NULL;   // Ausschnittpuffer, einmal angelegt
 
 // esp32-camera liefert RGB565 mit dem hohen Byte zuerst. Auf Hardware
 // gemessen: BE 62 Treffer gegen LE 2.
@@ -126,10 +129,31 @@ void FaceDetector_Detect(FaceResult_t *result) {
     camera_fb_t *fb = esp_camera_fb_get();
     if (!fb) return;
 
+    // Nur den mittigen Ausschnitt an den Detektor geben - siehe
+    // CAM_DETECT_CROP_DIV in config.h. Der Puffer wird einmal angelegt und
+    // bleibt liegen; er ist klein (ein Viertel des Bildes) und im PSRAM.
+    const int cw = (int)fb->width / CAM_DETECT_CROP_DIV;
+    const int chh = (int)fb->height / CAM_DETECT_CROP_DIV;
+    const int x0 = ((int)fb->width - cw) / 2;
+    const int y0 = ((int)fb->height - chh) / 2;
+    if (CAM_DETECT_CROP_DIV > 1 && !cropBuf) {
+        cropBuf = (uint16_t *)heap_caps_malloc((size_t)cw * chh * 2,
+                                               MALLOC_CAP_SPIRAM);
+    }
+    const bool cropped = (CAM_DETECT_CROP_DIV > 1 && cropBuf);
+    if (cropped) {
+        const uint16_t *src = (const uint16_t *)fb->buf;
+        for (int y = 0; y < chh; y++) {
+            memcpy(cropBuf + (size_t)y * cw,
+                   src + (size_t)(y0 + y) * fb->width + x0,
+                   (size_t)cw * 2);
+        }
+    }
+
     dl::image::img_t img = {};
-    img.data = fb->buf;
-    img.width = fb->width;
-    img.height = fb->height;
+    img.data = cropped ? (uint8_t *)cropBuf : fb->buf;
+    img.width = cropped ? cw : (int)fb->width;
+    img.height = cropped ? chh : (int)fb->height;
     img.pix_type = PIX_TYPE;
 
     auto &results = detector->run(img);
@@ -147,15 +171,18 @@ void FaceDetector_Detect(FaceResult_t *result) {
     if (best) {
         totalDetections++;
         result->detected = true;
-        result->x = best->box[0];
-        result->y = best->box[1];
+        // Kastenkoordinaten zurueck ins VOLLE Kamerabild rechnen (der
+        // Ausschnitt ist 1:1 kopiert, also genuegt der Versatz). So bleibt die
+        // Telemetrie auf das Kamerabild bezogen und damit vergleichbar.
+        result->x = best->box[0] + (cropped ? x0 : 0);
+        result->y = best->box[1] + (cropped ? y0 : 0);
         result->w = best->box[2] - best->box[0];
         result->h = best->box[3] - best->box[1];
         result->confidence = best->score;
 
         // Blickrichtung -1..1 relativ zur Bildmitte. Das ist der Wert, dem die
         // Augen folgen und der in der Telemetrie landet.
-        const int cx = (best->box[0] + best->box[2]) / 2;
+        const int cx = (best->box[0] + best->box[2]) / 2;   // im Ausschnitt
         const int cy = (best->box[1] + best->box[3]) / 2;
         // fb->width/height sind size_t, also VORZEICHENLOS. Ohne die Umwandlung
         // nach int rechnet C die Differenz vorzeichenlos, und sobald das Gesicht
@@ -163,8 +190,11 @@ void FaceDetector_Detect(FaceResult_t *result) {
         // das auf +1.0 - die Augen starren dann hart nach rechts unten, statt zu
         // folgen. Auf Hardware beobachtet 2026-08-29: gemeldetes gaze_x
         // 2.684355e7 bei einem Gesicht 13 px links der Bildmitte.
-        const int halfW = (int)fb->width / 2;
-        const int halfH = (int)fb->height / 2;
+        // Blickrichtung relativ zu dem, was der Detektor WIRKLICH gesehen hat:
+        // volle Auslenkung heisst "am Rand des ausgewerteten Bereichs". Wuerde
+        // hier das ganze Bild zugrunde gelegt, bliebe der Wert kuenstlich klein.
+        const int halfW = (cropped ? cw : (int)fb->width) / 2;
+        const int halfH = (cropped ? chh : (int)fb->height) / 2;
         result->gaze_x = (float)(cx - halfW) / (float)halfW;
         result->gaze_y = (float)(cy - halfH) / (float)halfH;
 
