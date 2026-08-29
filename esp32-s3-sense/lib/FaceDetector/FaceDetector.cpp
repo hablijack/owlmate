@@ -157,8 +157,16 @@ void FaceDetector_Detect(FaceResult_t *result) {
         // Augen folgen und der in der Telemetrie landet.
         const int cx = (best->box[0] + best->box[2]) / 2;
         const int cy = (best->box[1] + best->box[3]) / 2;
-        result->gaze_x = (float)(cx - fb->width / 2) / (fb->width / 2.0f);
-        result->gaze_y = (float)(cy - fb->height / 2) / (fb->height / 2.0f);
+        // fb->width/height sind size_t, also VORZEICHENLOS. Ohne die Umwandlung
+        // nach int rechnet C die Differenz vorzeichenlos, und sobald das Gesicht
+        // LINKS der Mitte steht, laeuft sie auf ~2^32 ueber. setGaze() begrenzt
+        // das auf +1.0 - die Augen starren dann hart nach rechts unten, statt zu
+        // folgen. Auf Hardware beobachtet 2026-08-29: gemeldetes gaze_x
+        // 2.684355e7 bei einem Gesicht 13 px links der Bildmitte.
+        const int halfW = (int)fb->width / 2;
+        const int halfH = (int)fb->height / 2;
+        result->gaze_x = (float)(cx - halfW) / (float)halfW;
+        result->gaze_y = (float)(cy - halfH) / (float)halfH;
 
         lastGood = *result;
         lastGoodAt = millis();
