@@ -126,13 +126,35 @@ chip-select fault.
 
 ## Open
 
-* **The flush is the main loop's bottleneck.** 149.9 ms per redraw for both eyes
-  dominates `loop()`, which also runs face detection (~47 ms) — so the detection
-  rate is capped by the eye renderer, not by `FACE_DETECT_INTERVAL_MS`. Measured
-  2026-08-28: 4.4 Hz loop while redrawing, 40+ Hz when the redraw is skipped.
-  The fix is to stop pushing all 51,200 bytes per eye for a blink: a
-  dirty-rectangle flush (a blink only changes the lid band) or a DMA transfer.
-  Neither is written. See SPEC-009 and BACKLOG.md.
+* **RESOLVED 2026-08-29: the flush now sends only the rows that changed.**
+  `GC9D01` tracks a dirty row span, and `drawPixel()`/`fillScreen()` mark a row
+  only when a pixel's VALUE differs — so after a redraw the span is exactly the
+  union of "where there was ink" and "where there is ink now". `flush()` sets the
+  address window to that span, and returns without touching the bus at all when
+  nothing changed.
+
+  **Rows, not a true rectangle, and that is deliberate.** The bottleneck is
+  per-transfer overhead (~1.56 µs/byte, identical at 16 and 40 MHz). A rectangle
+  needs one transfer per row and loses to a single contiguous block even though
+  the block carries untouched pixels either side.
+
+  Measured on hardware, main loop while interacting:
+
+      4.3 Hz   before any of this work
+     10.5 Hz   after gating the dirty flag on a real change
+     29 Hz     with the partial flush and a slower blink cadence
+
+  Blink cadence matters here because every blink forces a redraw of both eyes;
+  it went from ~1.6 s to ~4.5 s between blinks (`BLINK_GAP_MIN_MS`).
+
+  **This did not improve the detection rate.** Attempts rose 4.36/s → 5.93/s but
+  hits did not follow, because the real limit was elsewhere entirely — see
+  SPEC-009, where the face turned out to be too small in frame. The loop work is
+  worth having for responsiveness; it was not the cause it was believed to be.
+
+* DMA transfer for the remaining full-frame path is still unwritten. With the
+  partial flush in place the payoff is much smaller, since full frames are now
+  rare.
 * Raising `LCD_SPI_FREQ` above 16 MHz is **not** a speed lever — see Falsified.
   It remains untested above 40 MHz for signal integrity, but there is no reason
   to raise it.

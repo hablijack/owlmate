@@ -176,3 +176,35 @@ control, measure it in the same sitting as the thing you are comparing.
 Detection is also **bursty** rather than uniformly sporadic: facelab logged 24
 hits in one 56-frame window and almost nothing either side — the signature of a
 face sitting at the model's size limit, not of a threshold or a race.
+
+## Still open
+
+* **A square detection crop.** The crop is currently 160×120, still 4:3.
+  Adafruit's MEMENTO shoulder robot uses `FRAMESIZE_240X240` — square. If the
+  model's input is square, a 4:3 image is distorted or letterboxed on rescale and
+  some of it is wasted. A 160×160 centre crop would be square *and* capture more
+  vertical extent, which suits faces. Untested; expected to be a modest gain.
+* **Field of view is the price of the crop.** `CAM_DETECT_CROP_DIV 2` means the
+  owl only sees the middle half of its camera view. `3` would extend range
+  further at more cost. Nobody has measured what the owl's useful cone actually
+  needs to be.
+* Stale frames (`CAMERA_GRAB_WHEN_EMPTY` vs `CAMERA_GRAB_LATEST`) — a weak lead
+  now, see above.
+
+## Reference
+
+Adafruit's **MEMENTO Shoulder Robot** is a working face-tracking robot on
+ESP32-S3, and reading it produced the cascade-threshold fix that took the hit
+rate from 31 % to 100 %. Worth consulting again before inventing anything here:
+
+    Adafruit_Learning_System_Guides/MEMENTO/Memento_Shoulder_Robot/
+        platformio_memento_shoulder_camera/src/main.cpp
+
+It is esp-dl **v1** (`HumanFaceDetectMSR01`/`MNP01`) on Arduino core 2.x, so the
+API differs from ours — but the *structure* of the problem is identical, and the
+constants it chose were arrived at on working hardware. Three worth knowing:
+
+    HumanFaceDetectMSR01 s1(0.1F, 0.5F, 10, 0.2F);   // coarse: permissive
+    HumanFaceDetectMNP01 s2(0.5F, 0.3F, 5);          // fine: strict
+    config.frame_size = FRAMESIZE_240X240;            // square, not 4:3
+    SERVO_HYSTERESIS 2 / SERVO_MOVEMENT_FACTOR 0.4    // deadband + proportional

@@ -191,6 +191,25 @@ is a weak lead.
 **Thresholds were never the lever** — 0.5 is the library default and measured
 right. The v1 knobs (`resize_scale`, `top_k`) do not exist in esp-dl v3.
 
+### Step 4b — Polish the tracking, now that it actually tracks  `[ ]`
+
+Small, laptop-plus-owl items left over from 2026-08-29. None is blocking.
+
+**Smooth the gaze.** The eyes follow the raw per-frame face position with no
+deadband and no filtering. Harmless while detection was sporadic; at the 100 %
+hit rate now achieved it is likely to look twitchy. Adafruit's MEMENTO shoulder
+robot uses a centre deadzone, 2 px hysteresis and a proportional step of 0.4 —
+see the Reference block in `specs/009-face-detection.spec`. The same control law
+applies to the head servo when it is wired up.
+
+**Try a square detection crop.** The crop is 160×120, still 4:3; the model's
+input is square, so some of it is wasted on rescale. A 160×160 centre crop is
+square and captures more vertical extent. Five-minute experiment.
+
+**Decide the field of view.** `CAM_DETECT_CROP_DIV 2` means the owl sees only
+the middle half of its camera view. Nobody has measured what cone the owl
+actually needs — that depends on where it ends up sitting.
+
 ### Step 5 — Verify navigation on hardware  `[ ]`
 
 Needs Step 3 done (a trustworthy heading) and a sky-view GPS fix.

@@ -105,6 +105,35 @@ reads as a machine idling.
 
 ## Falsified
 
+* **The eyes never tracked a face, for three independent reasons at once**
+  (all found and fixed 2026-08-29, each hidden by the others):
+  1. **`gaze_x`/`gaze_y` overflowed to 2³².** `fb->width` is `size_t`, so
+     `cx - fb->width / 2` was evaluated UNSIGNED and wrapped whenever the face
+     sat left of centre. `setGaze()` clamped the result to +1.0, so the eyes
+     snapped hard right instead of following. Present since the port. The tell
+     was `gaze_y / gaze_x` being exactly 4/3 — the frame's aspect ratio — with a
+     shared numerator of 4294967296.
+  2. **The direction was inverted.** A camera records the person opposite
+     mirrored: step right, appear left. Whether the camera in the head is *also*
+     physically mirrored was never established, because `CAM_VFLIP`/`CAM_HMIRROR`
+     were chosen for UPRIGHT faces and a left-right mirror does not show up in
+     that test. Now `EYE_GAZE_SIGN_X`, determined on hardware, not derived.
+  3. **The travel was two pixels.** `gaze_x` is normalised so that ±1 means "face
+     at the very edge of frame" — where nobody stands. Measured with someone
+     directly in front: ±0.34. Against 8 px of travel on a 160 px panel that is
+     invisible. Now gain 2.5 and 18 px travel.
+
+  Each of these alone would have looked like "tracking is broken"; together they
+  masked each other. Fixing only the overflow still gave a 2 px twitch in the
+  wrong direction.
+
+* **`setExpression()`/`setGaze()` marking the frame dirty unconditionally**
+  defeated the skip in `render()` entirely. `updateState()` calls both every loop
+  iteration, almost always with an unchanged value, so every single iteration
+  rebuilt both 160×160 frames — measured 2026-08-28 at 3 redraws per 3
+  iterations while idle, pinning the loop at 4.4 Hz. Gating on a real change is
+  safe because `render()` re-checks the visible state itself.
+
 * **`fillCircle()` was drawing a quarter of every circle.** It walked one
   Bresenham octant and filled only the columns between `cx±r` and `cx±r/√2`, so
   every circle rendered as two crescents flanking a one-pixel centre line. This
@@ -141,6 +170,20 @@ reads as a machine idling.
 
 ## Open
 
-* Blink smoothness is bounded by frame time (~61 ms per eye). If blinks look
-  choppy, the fix is redrawing only the changed band rather than the whole
-  160x160 frame, or raising `LCD_SPI_FREQ`.
+* Blink smoothness was bounded by frame time, and the "~61 ms per eye" figure
+  quoted here was arithmetic, not a measurement — it is 149.9 ms for both eyes.
+  **Both suggested fixes have since been tested**: redrawing only the changed
+  rows is implemented and works (SPEC-003); raising `LCD_SPI_FREQ` does nothing
+  at all and must not be tried again.
+
+* **Blink cadence is now 2.5–6.5 s** (`BLINK_GAP_MIN_MS`/`_JITTER_MS`), up from
+  0.7–2.5 s. The old rate was roughly twice a human's and read as nervous on the
+  assembled head. It is also the main driver of redraws, so it is a rendering
+  cost as much as an aesthetic choice.
+
+* **Gaze is unsmoothed.** The eyes follow the raw per-frame face position with no
+  deadband and no filtering. That was harmless while detection was sporadic; at
+  the 100 % hit rate now achieved (SPEC-009) it is likely to look twitchy.
+  Adafruit's MEMENTO shoulder robot — a working face-tracking robot — uses a
+  centre deadzone, a 2 px hysteresis and a proportional step of 0.4 rather than
+  jumping to the target. Worth copying for both the eyes and the head servo.
