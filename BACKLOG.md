@@ -159,7 +159,27 @@ the eyes are static** — but while `interacting` the gaze tracks the face and t
 eyes blink, so redraws still dominate and **attempts stayed at ~4.4/s**. The
 measured detection rate did not improve.
 
-**What is left is the flush itself, and the obvious lever is a dead end.** Both
+**Partial flush is DONE (2026-08-29) and the loop is no longer the limiter.**
+`GC9D01` now transmits only the row span whose pixels actually changed, and
+blinks were slowed from every ~1.6 s to every ~4.5 s. Measured while
+interacting: **4.3 Hz -> 29 Hz**, detection attempts 4.36/s -> 5.93/s.
+
+**But the detection RATE did not improve, and that is the open question.**
+Hits stayed at 1.26/s against 1.35/s this morning -- statistically unchanged
+despite 36 % more attempts. The "hit ratio" fell from 54 % to 21 %, which is an
+artefact: the denominator grew while the numerator did not. **Track hits/s, not
+ratio.** Something other than attempt frequency limits detection - most likely
+what fraction of camera frames contain a detectable face at all (motion blur,
+head angle, exposure). Next leads, in order:
+
+1. `CAMERA_GRAB_LATEST` instead of `CAMERA_GRAB_WHEN_EMPTY` - still untested,
+   and now the most plausible remaining cause.
+2. Check exposure/gain settings on the OV3660; the detector wants a sharp frame
+   more than a bright one.
+3. Log per-frame inference results rather than telemetry samples, to see whether
+   misses cluster (motion) or scatter (threshold).
+
+**The flush numbers below are kept because the measurements still stand.** Both
 eyes flush in 149.9 ms, *identical at 16 and 40 MHz* — not clock-bound. Also
 ruled out by measurement, all giving the same 149.9 ms: the PSRAM framebuffer
 (internal RAM is no faster) and the `writePixels()` byte swap (`writeBytes()`
