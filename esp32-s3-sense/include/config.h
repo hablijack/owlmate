@@ -158,6 +158,22 @@
 #define CAM_VFLIP 1
 #define CAM_HMIRROR 0
 
+// Vorzeichen, mit dem die waagerechte Blickrichtung auf die Augen abgebildet
+// wird. -1 heisst: gaze_x aus dem Kamerabild wird gespiegelt, bevor die Augen
+// ihm folgen.
+//
+// Warum das noetig ist: eine Kamera nimmt das Gegenueber seitenverkehrt auf -
+// wer nach RECHTS geht, wandert im Bild nach LINKS. Zusaetzlich ist offen, ob
+// die Kamera im Kopf auch waagerecht gespiegelt sitzt: CAM_VFLIP/CAM_HMIRROR
+// wurden danach ausgewaehlt, welche Kombination AUFRECHTE Gesichter liefert,
+// und eine Seitenspiegelung faellt bei dieser Pruefung nicht auf.
+//
+// Deshalb NICHT hergeleitet, sondern auf Hardware bestimmt (2026-08-29): mit
+// +1 wanderten die Augen nach links, waehrend der Betrachter nach rechts ging.
+// Wenn die Kamera neu eingebaut wird, hier wieder ausprobieren - genau wie
+// navigation.aim_sign auf der RPi-Seite.
+#define EYE_GAZE_SIGN_X (-1)
+
 // ============================================================================
 // Vibration Sensor (SW420)
 // Wired to D2 = GPIO3. (The RIGHT eye's DC sits on D3 = GPIO4 -- see LCD_DC_R

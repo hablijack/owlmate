@@ -1,4 +1,5 @@
 #include "Eyes.h"
+#include "config.h"   // EYE_GAZE_SIGN_X
 #include <math.h>
 
 // Auto-blink cadence: a random gap in [BLINK_GAP_MIN_MS, MIN + JITTER).
@@ -93,12 +94,31 @@ void Eyes::render() {
         }
     }
 
-    // Calculate iris position based on gaze.
-    // Vertical travel is intentionally smaller than horizontal (6 vs 8 px)
-    // so the eyes track in a "natural" way — real eyes move less up/down
-    // than side to side. Don't "fix" this into a symmetric range.
-    int irisCX = EYE_CX + (int)(_gazeX * 8);
-    int irisCY = EYE_CY + (int)(_gazeY * 6);
+    // Blickrichtung in eine Augenposition umrechnen.
+    //
+    // Zwei Groessen, und beide waren zu klein, um sichtbar zu sein:
+    //
+    // GAZE_GAIN: _gazeX ist die Gesichtsposition im Kamerabild, normiert auf
+    // -1..1. Volle Auslenkung hiesse "Gesicht am aeussersten Bildrand" - dort
+    // steht niemand. Auf Hardware gemessen 2026-08-29 bei jemandem direkt vor
+    // der Eule: gaze_x lag zwischen -0,34 und -0,03. Ohne Verstaerkung nutzt
+    // die Anzeige also nie mehr als ein Drittel ihres Weges.
+    //
+    // TRAVEL: 8 px auf einem 160-px-Panel sind bei realistischem gaze_x ganze
+    // ZWEI Pixel - unsichtbar. Das Panel hat einen nutzbaren Radius von 65 und
+    // der Blob ist halb 33 breit, also waeren rund +-30 px moeglich; 18 laesst
+    // bewusst Rand, damit die Form auch bei voller Auslenkung nicht am
+    // Kreisrand anschlaegt.
+    //
+    // Vertikal bleibt bewusst kleiner als horizontal - echte Augen wandern
+    // weniger auf und ab als zur Seite. NICHT auf gleiche Werte "korrigieren".
+    static const float GAZE_GAIN = 2.5f;
+    static const int TRAVEL_X = 18;
+    static const int TRAVEL_Y = 12;
+    const float gx = constrain(_gazeX * GAZE_GAIN * EYE_GAZE_SIGN_X, -1.0f, 1.0f);
+    const float gy = constrain(_gazeY * GAZE_GAIN, -1.0f, 1.0f);
+    int irisCX = EYE_CX + (int)(gx * TRAVEL_X);
+    int irisCY = EYE_CY + (int)(gy * TRAVEL_Y);
 
     // The UPDATE spinner animates continuously: force a new frame
     // every 50ms (~20fps) while the update expression is active.
