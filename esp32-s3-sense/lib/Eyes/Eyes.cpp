@@ -1,11 +1,18 @@
 #include "Eyes.h"
 #include <math.h>
 
-// Auto-blink cadence: a random gap in [BLINK_GAP_MIN_MS, MIN + JITTER). Kept
-// deliberately short and jittery -- a regular or sparse blink reads as a
-// machine idling, a frequent irregular one reads as alive.
-#define BLINK_GAP_MIN_MS 700
-#define BLINK_GAP_JITTER_MS 1800
+// Auto-blink cadence: a random gap in [BLINK_GAP_MIN_MS, MIN + JITTER).
+// Jittery on purpose -- a metronome blink reads as a machine idling.
+//
+// War 700/1800 (Luecke 0,7-2,5 s, im Mittel ~1,6 s). Das ist deutlich haeufiger
+// als ein Mensch blinzelt (~3-4 s) und wirkte am fertigen Kopf nervoes. Jetzt
+// 2,5-6,5 s, im Mittel ~4,5 s.
+//
+// Hat auch eine messbare Seite: JEDES Blinzeln erzwingt einen Neuaufbau beider
+// Augen, und der Flush ist der teuerste Posten der Hauptschleife (SPEC-003).
+// Ein Drittel so viele Blinzler heisst ein Drittel so viele Neuaufbauten.
+#define BLINK_GAP_MIN_MS 2500
+#define BLINK_GAP_JITTER_MS 4000
 
 // Eye geometry and colors come from common.h (included via Eyes.h).
 
