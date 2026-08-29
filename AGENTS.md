@@ -272,7 +272,7 @@ exists**, so delete the generated one after changing defaults or nothing happens
 **Never flash `firmware.factory.bin` at 0x0** — it spans past 0x9000 and wipes the NVS partition,
 taking the BNO055 calibration with it. Flash bootloader/partitions/boot_app0/firmware separately.
 
-Five things that cost time and will again if forgotten:
+Seven things that cost time and will again if forgotten:
 
 - **Look at a frame before you diagnose anything.** On 2026-08-28 the camera passed every
   `camtest` check — `0x3660`, driver init, 27 ms frames, brightness 133 dropping to 29 under a
@@ -288,6 +288,16 @@ Five things that cost time and will again if forgotten:
   assembly is.) Re-confirmed `1` on 2026-08-28 after the ribbon extension was fitted — that remount
   did not change the vertical mounting, but the check is cheap and the failure is total.
 - **RGB565**: use `DL_IMAGE_PIX_TYPE_RGB565BE` (62 hits vs 2 for LE).
+- **Size in frame is the whole game.** `run()` rescales its input to the model's resolution, so what
+  decides detection is the face's size **relative to the frame**, not in pixels. At 1 m a head is
+  ~40 px of 320 and is *never* found; at 30 cm it is ~62 px and the rate jumps. `CAM_DETECT_CROP_DIV`
+  feeds the detector the centre crop, which doubles relative size for free — measured 2026-08-29 at
+  1 m: 0.0 % → 59.4 % of frames. **A bigger frame size does NOT help**: VGA gives the model the same
+  picture at the same field of view. This was the real cause of "detection is too sporadic".
+- **Do not trust `facelab` as a control without re-measuring it.** Its "near-every-frame detection"
+  was recorded at bring-up under unstated conditions; re-measured in a normal room it scored **5 %**
+  on the full frame, *worse* than the firmware. Two days of "it must be the integration" rested on
+  that comparison. Measure the control in the same sitting as the thing it controls for.
 - **Thresholds are not the problem.** Default 0.5 is right; measured scores are 0.58–1.00.
 - **`CONFIG_FREERTOS_HZ=1000`** is a hard Arduino-core requirement in espidf mode (IDF defaults to
   100 and the core's CMakeLists aborts).

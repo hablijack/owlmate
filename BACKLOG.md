@@ -130,78 +130,56 @@ failing protocol step rather than just "not found". Then the calibration
 because the head has been open, `IMU_HEADING_OFFSET_DEG` (75.4) needs
 **re-deriving**, not just the calibration redone.
 
-### Step 4 — Detection rate: diagnosed, half fixed  `[~]`
+### Step 4 — Detection rate: RESOLVED 2026-08-29  `[x]`
 
-**Diagnosed on hardware 2026-08-28. The detector was never the problem, and
-neither was the integration lead the old text bet on.** Two separate causes, one
-fixed, one open.
+**The face was too small in frame. Nothing else was ever wrong.**
 
-**Cause 1 — the camera was aimed at the ceiling. FIXED (mechanically).** The
-2026-08-26 baseline of "6 detections in 25 s" was taken without ever looking at a
-frame. On 2026-08-28 the same firmware scored **0 hits in 31.5 s** against a face
-held deliberately still, while passing every `camtest` check — brightness is
-blind to aim. After tilting the camera down: **39 hits in 28.8 s (1.35/s)**,
-confidence 0.69–1.00, `idle → detecting → interacting` and staying there.
-Treat every pre-2026-08-28 detection number as measuring the mounting.
-`CAM_VFLIP=1`/`CAM_HMIRROR=0` re-confirmed correct after the remount.
+`run()` rescales its input to the model's resolution, so detection depends on the
+face's size **relative to the frame**, not in pixels. At 1 m a head is ~40 px of
+320 and is never found; at 30 cm it is ~62 px and the rate jumps. Frames are
+sharp and well exposed in both cases. `CAM_DETECT_CROP_DIV` (`config.h`) now
+gives the detector the centre crop, doubling relative size for free.
 
-**Cause 2 — the eye flush caps the loop, and therefore the detection rate. OPEN.**
-`loop_hz` and `face.attempts` were added to telemetry to settle this:
-`FACE_DETECT_INTERVAL_MS` (100 ms → 10 attempts/s) is **entirely non-binding**.
-Detection runs on *every* loop iteration because the loop manages only 4.4 Hz.
-Of a ~227 ms iteration, **~160 ms is `eyes.render()`** and ~47 ms is inference.
-Detector accuracy is fine: **54 % of attempts hit**.
+Measured at 1 m, same spot and light, `facelab` as control:
 
-Half of this is fixed: `setExpression()`/`setGaze()` marked the frame dirty
-unconditionally while `updateState()` calls them every iteration, so the skip in
-`render()` never fired. Gating on a real change lifts the loop to **40+ Hz when
-the eyes are static** — but while `interacting` the gaze tracks the face and the
-eyes blink, so redraws still dominate and **attempts stayed at ~4.4/s**. The
-measured detection rate did not improve.
+| | full frame | centre crop 2× |
+|---|---|---|
+| facelab | 0.0 % | **59.4 %** |
+| firmware, hits | 0.00/s | **1.84/s** |
+| firmware, state | `idle` | **`interacting` for 30 s, never dropping out** |
 
-**Partial flush is DONE (2026-08-29) and the loop is no longer the limiter.**
-`GC9D01` now transmits only the row span whose pixels actually changed, and
-blinks were slowed from every ~1.6 s to every ~4.5 s. Measured while
-interacting: **4.3 Hz -> 29 Hz**, detection attempts 4.36/s -> 5.93/s.
+**A larger frame does NOT help** — VGA gives the model the same picture at the
+same field of view. The cost of the crop is field of view; `CAM_DETECT_CROP_DIV 1`
+restores the old behaviour.
 
-**But the detection RATE did not improve, and that is the open question.**
-Hits stayed at 1.26/s against 1.35/s this morning -- statistically unchanged
-despite 36 % more attempts. The "hit ratio" fell from 54 % to 21 %, which is an
-artefact: the denominator grew while the numerator did not. **Track hits/s, not
-ratio.** Something other than attempt frequency limits detection - most likely
-what fraction of camera frames contain a detectable face at all (motion blur,
-head angle, exposure). Next leads, in order:
+Fixed along the way, both found by chasing this:
 
-1. `CAMERA_GRAB_LATEST` instead of `CAMERA_GRAB_WHEN_EMPTY` - still untested,
-   and now the most plausible remaining cause.
-2. Check exposure/gain settings on the OV3660; the detector wants a sharp frame
-   more than a bright one.
-3. Log per-frame inference results rather than telemetry samples, to see whether
-   misses cluster (motion) or scatter (threshold).
+* **`gaze_x`/`gaze_y` overflowed to 2³²** whenever the face was left of centre —
+  `fb->width` is `size_t`, so the subtraction was unsigned. The eyes snapped hard
+  right instead of tracking. Present since face detection was ported.
+* **The eyes barely moved even when correct.** Travel was 8 px on a 160 px panel
+  against a realistic `gaze_x` of ±0.34 — two pixels. Now gain 2.5 and 18 px
+  travel, with `EYE_GAZE_SIGN_X` for the mirror question, determined on hardware.
 
-**The flush numbers below are kept because the measurements still stand.** Both
-eyes flush in 149.9 ms, *identical at 16 and 40 MHz* — not clock-bound. Also
-ruled out by measurement, all giving the same 149.9 ms: the PSRAM framebuffer
-(internal RAM is no faster) and the `writePixels()` byte swap (`writeBytes()`
-without it is no faster). What remains is per-chunk overhead in the bulk
-transfer, ~1.56 µs/byte. So:
+**The `facelab` baseline that framed this whole investigation was wrong.**
+"Near-every-frame detection" was recorded at bring-up under unstated conditions.
+Re-measured 2026-08-29 in a normal room it scored **5 %** on the full frame —
+*worse* than the firmware's 21 %. Two days of "it must be the integration" rested
+on a comparison that did not hold. Re-measure a control in the same sitting as
+the thing it is controlling for.
 
-1. **Dirty-rectangle flush** — a blink only changes the lid band, not all
-   51,200 bytes per eye. Highest value, and it helps the tracking case too.
-2. **DMA transfer** for the full-frame path.
-3. Decouple detection from the render cadence (own task/core) — sidesteps rather
-   than fixes.
+**Loop performance, also done** (was the suspected cause, and was not):
+partial flush plus a slower blink cadence took the main loop from **4.3 Hz to
+29 Hz** while interacting, and attempts from 4.36/s to 5.93/s. Worth having, but
+it moved hits/s not at all — the crop did that.
 
-Do **not** raise `LCD_SPI_FREQ` for this; it was tried and measured (SPEC-003).
+**Still open, and now low priority:** stale frames
+(`CAMERA_GRAB_WHEN_EMPTY` vs `CAMERA_GRAB_LATEST`). facelab grabs in a tight loop
+with the freshest frames obtainable and still scored 5 % before cropping, so this
+is a weak lead.
 
-**Still untested:** stale frames under `CAMERA_GRAB_WHEN_EMPTY` (try
-`CAMERA_GRAB_LATEST`). It was lead 2 and lead 1 accounted for the whole gap.
-
-**Thresholds are NOT the lever** — 0.5 is the library default and measured right
-(real detections score 0.58–1.00, and 0.93–1.00 with good framing). The v1 knobs
-(`resize_scale`, `top_k`) do not exist in esp-dl v3. Reaching for either is the
-documented false lead (SPEC-009). `facelab/` is kept as the A/B control; do not
-delete it.
+**Thresholds were never the lever** — 0.5 is the library default and measured
+right. The v1 knobs (`resize_scale`, `top_k`) do not exist in esp-dl v3.
 
 ### Step 5 — Verify navigation on hardware  `[ ]`
 

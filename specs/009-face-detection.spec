@@ -126,7 +126,34 @@ nearest person, and the one to follow.
   the same build scored 39 hits in 28.8 s. Any detection-rate number taken
   without confirming framing first measures the mounting, not the detector.
 * Stale frames (`CAMERA_GRAB_WHEN_EMPTY` vs `CAMERA_GRAB_LATEST`) remains
-  untested — it was the second lead and the first one accounted for the gap.
-  Worth revisiting only after the flush is fixed.
+  untested, and is now a **much weaker** lead: `facelab` grabs in a tight loop
+  with the freshest frames obtainable and still scored 5 % before cropping.
   Use `face.total` as the metric, not `face.detected` — and read it against
   `face.attempts`, which exists precisely so a low `total` can be attributed.
+
+**RESOLVED 2026-08-29 — the face was simply too small in frame.** `run()`
+rescales its input to the model's own resolution, so detection depends on the
+face's size **relative to the frame**, not in pixels. At 1 m a head is ~40 px of
+320 and is never found; at 30 cm it is ~62 px and the rate jumps. The frames are
+sharp and well exposed in both cases — this was never image quality. Measured
+with `facelab` as the control, same spot and light:
+
+    full frame        0.0 % of frames had a face
+    centre crop 2x   59.4 %   (score 0.82 avg)
+
+`CAM_DETECT_CROP_DIV` (`config.h`) now feeds the detector the centre crop. In the
+firmware at 1 m that took hits from 0.00/s to 1.84/s and held `interacting` for
+30 s without once dropping out. **A larger frame size does not help** — VGA gives
+the model the same picture at the same field of view, just resampled. The cost of
+the crop is field of view.
+
+**The `facelab` baseline quoted above was wrong.** "Near-every-frame detection"
+was recorded at bring-up under unstated conditions. Re-measured 2026-08-29 in a
+normal room, facelab scored **5 %** on the full frame — *worse* than the
+firmware's 21 %. Every inference of the form "facelab is fine, so it must be the
+integration" rested on a comparison that did not hold. If you use facelab as a
+control, measure it in the same sitting as the thing you are comparing.
+
+Detection is also **bursty** rather than uniformly sporadic: facelab logged 24
+hits in one 56-frame window and almost nothing either side — the signature of a
+face sitting at the model's size limit, not of a threshold or a race.
