@@ -178,14 +178,23 @@ entirely and forced a full redraw every single iteration — measured 2026-08-28
 (`_expr`, `_sleeping`, iris position, `_blinkProgress`) and `_dirty` starts `true`, so the first
 frame always draws.
 
-**The flush is the loop's bottleneck, and `LCD_SPI_FREQ` is not the lever.** It is 16 MHz. Both
-eyes flush in **149.9 ms**, and that number is *identical* at `LCD_SPI_FREQ` 16 MHz and 40 MHz — it
-is not clock-bound. Moving the
-framebuffer to internal RAM and dropping the `writePixels()` byte swap each changed nothing either.
-What is left is per-chunk overhead in the bulk transfer (~1.56 µs/byte), so the fix is DMA or a
-dirty-rectangle flush. `config.h` claimed "~61 ms" until 2026-08-28; that was arithmetic presented
-as a measurement. Because face detection runs from the same `loop()`, this flush — not
-`FACE_DETECT_INTERVAL_MS` — sets the detection rate.
+**The flush was the loop's bottleneck, and `LCD_SPI_FREQ` was never the lever.** It is 16 MHz.
+A full flush of both eyes took **149.9 ms**, and that number was *identical* at `LCD_SPI_FREQ`
+16 MHz and 40 MHz — it is not clock-bound. Moving the framebuffer to internal RAM and dropping the
+`writePixels()` byte swap each changed nothing either; what remained was per-chunk overhead in the
+bulk transfer (~1.56 µs/byte). `config.h` claimed "~61 ms" until 2026-08-28; that was arithmetic
+presented as a measurement.
+
+**Fixed 2026-08-29 by a dirty-row flush** (`8b0ec83`), not by DMA: `GC9D01` tracks
+`_dirtyTop`/`_dirtyBot`, `drawPixel()`/`fillScreen()` mark a row only when a pixel's *value* really
+changes, and `flush()` skips the bus entirely when the range is empty — so a blink pushes the lid
+band instead of 51,200 bytes per panel. If this ever regresses, do not reach for a higher
+`LCD_SPI_FREQ`: that lever was measured and does nothing.
+
+**Do not repeat the inference that this flush sets the detection rate.** It is the obvious next
+thought and it is wrong — Step 4 found detection was limited by the face's size relative to the
+frame and by a mis-set proposal-stage threshold, with loop timing innocent. See
+`specs/009-face-detection.spec`.
 
 ### I2C and the IMU
 
@@ -228,6 +237,12 @@ The BNO055 is mounted bottom-PCB-up; `IMU_AXIS_REMAP_CONFIG`/`_SIGN` in `config.
 correct that in hardware. Re-measure with `-e imuaxis` if it is ever remounted — a level owl should
 read roll and pitch near 0. `AXIS_MAP` can only express the 24 axis-aligned orientations, so a
 sensor glued in at an odd angle needs a software rotation instead.
+
+`IMU_HEADING_OFFSET_DEG` is 75.4, measured on hardware: 70.8° of mounting rotation plus **+4.594° of
+magnetic declination**. That second term is required, not cosmetic — the BNO055 reports a *magnetic*
+heading while `geo.bearing_deg()` computes a *true geographic* bearing, so both sides must share one
+north reference (`true = magnetic + declination`). `imu.yaw` is therefore a true geographic heading
+of the beak, accurate to roughly ±5–10°. Re-check the declination if the owl changes region.
 
 ### The vibration sensor is a pulse source, not a level
 
@@ -538,64 +553,28 @@ diverge. Two hand-kept mirrors existed until 2026-08-27 and had already drifted 
 parses `SHAPES[]` straight out of the C++ and re-implements the identical maths, so the contact sheet
 cannot drift from the firmware.
 
-## Current state
+## Current state — deliberately NOT here
 
-Both eyes work on the shared bus and render independently. The wiring as physically built —
-including cable colours — is in `WIRING.md`, corrected against `config.h` on 2026-08-27.
-`config.h` remains authoritative if the two ever disagree.
+**This file does not track status, and must not start again.** What is built,
+what is broken and what to do next live in exactly one place each:
 
-All three I2C devices work (verified: live BNO055 Euler angles, 43 NMEA sentences in 6 s from the
-PA1010D, a PCA9685 servo ramp). Telemetry runs at ~535 ms.
+| question | file |
+|---|---|
+| What do I do next? What is still open? | `BACKLOG.md` — the dependency-ordered Step list at the top |
+| Why is it like this? What did we already try and falsify? | `specs/` — start at `000-index.spec` |
+| What is this project, and does subsystem X work? | `README.md`'s status table |
 
-**Camera + face detection, hardware session 2026-08-28.** The ribbon extension is fitted and the
-original camera works through it: `0x3660` at `0x3C`, 27 ms frames, brightness 133 → 29 under a hand
-and back. Face detection works end to end — 39 hits in 28.8 s, confidence 0.69–1.00,
-`idle → detecting → interacting`. Two things to carry forward: the extension **changed the camera's
-aim** (it pointed at the ceiling, and detection scored 0 while every diagnostic looked perfect —
-always take a `camsnap` and look), and the **eye flush at 149.9 ms caps the main loop at 4.4 Hz**,
-which is what actually limits the detection rate. `BACKLOG.md` Step 4 has the full breakdown; the
-remaining fix is a dirty-rectangle or DMA flush, **not** a higher `LCD_SPI_FREQ`.
+A section here duplicating any of that is a bug, not a convenience. It was one:
+this file carried a "Current state" block until 2026-08-30 that claimed the IMU
+calibration was present in NVS while `specs/006` and `BACKLOG.md` both correctly
+said it had been erased — the exact defect that caused `tools/check_docs.py` to
+be written, quoted in that program's own header. The block also still described
+the `main.cpp` split as parked on a detection bug that had been resolved the day
+before, and named the eye flush as the cap on the detection rate after that had
+been falsified.
 
-**Refactoring pass, 2026-08-27** (10 commits, all seven PlatformIO envs build, RPi suite 104 → 174
-tests): dead code removed across the eyes/driver/sensors; five real defects fixed (an ack log line
-with a format-placeholder mismatch, a doubled UPDATE-mode announcement, a read loop that died on any
-callback exception, `angleToUs` ignoring `SERVO_MAX_US`, and a `powerprobe` env that built the whole
-firmware); the seven dropped telemetry fields now parsed and surfaced in the web UI; the expression
-list generated from `NAMES[]`; `WIRING.md` corrected (it had the two eye CS lines swapped and the
-vibration sensor on the right eye's DC). See `BACKLOG.md` for what the pass deliberately left alone —
-in particular **`src/main.cpp` is still 883 lines and its split is parked at lowest priority** until
-the sporadic-detection bug is diagnosed, because it would alter loop structure while loop timing is
-the leading suspect.
-
-**The IMU calibration is GONE and must be redone. Do it before trusting any heading.** It was
-written to NVS on 2026-08-26 and then wiped later the same session by flashing
-`firmware.factory.bin` at 0x0, which spans past 0x9000 and erases the NVS partition. (This is the
-one flashing mistake the repo warns about in three places; it still happened. Flash
-bootloader/partitions/boot_app0/firmware separately — see the offsets table above.)
-
-    ~/.platformio/penv/bin/python esp32-s3-sense/tools/kalibrieren.py
-
-**Order matters**: the figure-8 for `mag` comes BEFORE the static poses for `accel`, never after —
-sustained motion resets the `accel` counter to 0. Done when all four counters read 3/3 and the log
-says `IMU: calibration complete - offsets saved to flash`; a reboot must then log
-`IMU: restored calibration offsets from flash`.
-
-Until that is done, `imu.calibrated` stays false and `navigation.py` correctly refuses to aim, so
-"guide me home" will look broken when it is in fact working as specified. This is `BACKLOG.md` Step 3 — after the
-head-opening work in Step 1, not before it — and `specs/006-imu-orientation.spec` is
-`Status: partial` for the same reason.
-
-**Checking it no longer needs a serial log.** Telemetry carries `imu.cal.{sys,gyro,accel,mag,restored}`
-and the web UI displays all of them, including a `from flash` marker for `restored`. That only became
-true on 2026-08-27 — the RPi had been discarding those five fields, so "is my calibration still
-there?" was unanswerable from the Pi side, which is a fair part of why this drifted out of date here.
-Re-run the tool whenever the sensor is replaced or remounted, or NVS is erased again.
-
-`IMU_HEADING_OFFSET_DEG` is 75.4, measured on hardware: 70.8° of mounting rotation plus **+4.594° of
-magnetic declination**. That second term is required, not cosmetic — the BNO055 reports a *magnetic*
-heading while `geo.bearing_deg()` computes a *true geographic* bearing, so both sides must share one
-north reference (`true = magnetic + declination`). `imu.yaw` is therefore a true geographic heading
-of the beak, accurate to roughly ±5–10°. Re-check the declination if the owl changes region.
-
-Outstanding for navigation: `navigation.aim_sign` in the RPi `config.yaml` is still unverified
-against hardware — flip it if the head turns the wrong way.
+The pattern is why: a status paragraph is true when written and silently rots,
+while the surrounding technical guidance stays valid — so the file keeps looking
+trustworthy. Durable facts (pin maps, traps, measured constants, the reasoning
+behind a design) belong here. Anything with a date, a checkbox or a "still
+outstanding" belongs in `BACKLOG.md`.

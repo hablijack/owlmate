@@ -13,8 +13,27 @@ before any detection tuning: remounting changes the framing and may change
 `CAM_VFLIP`, so tuning against a camera that is about to move is wasted effort.
 Navigation cannot be verified until the heading is trustworthy.
 
-Steps 0–5 need the owl. Step 6 needs nothing but a laptop — it is the
-rainy-day list.
+Steps 0–5 need the owl. Step 6 needs nothing but a laptop.
+
+**Read the two orders separately.** The Step numbers are a *dependency* order and
+stay fixed — renumbering them would destroy the information they carry. What is
+worth doing *next* is a different question, and as of 2026-08-30 the two have
+come apart:
+
+| step | state | why |
+|---|---|---|
+| 0, 1, 4 | done | ticked above |
+| **3** | **BLOCKED on a part** | the BNO055 must be physically replaced; nothing else unblocks it |
+| 2 | ready, but cheap and low-value alone | a 2-minute confirmation, best folded into the next flash |
+| 5 | blocked *through* 3 | navigation cannot be verified without a trustworthy heading |
+| **4b** | **ready, needs the owl** | gaze smoothing, square crop, field of view |
+| **6** | **ready, laptop only** | and internally ordered by impact |
+
+So the dependency chain 0→5 is stalled at 3 until the IMU arrives, which leaves
+**4b and 6 as the only actionable work** — the two highest-numbered items. Step 6
+was called "the rainy-day list" when it was written; while the part is in the
+post it is the main road, and its item 1 (the `main.cpp` split) is the largest
+single improvement available to this project right now.
 
 > **"Step" here, "Phase" elsewhere — they are different things.** These Steps are
 > this session's task order. The `Phase 1..4` you will see in `rpi-brain/brain/`
@@ -24,28 +43,27 @@ rainy-day list.
 
 ---
 
-### Step 0 — Get the refactored firmware onto the owl  `[ ]`
+### Step 0 — Get the refactored firmware onto the owl  `[x]` DONE 2026-08-28/29
 
-**Gate for everything else.** The 2026-08-27 refactoring pass builds clean (all
-seven envs) and the RPi suite is green at 177 tests, but **none of it has run on
-hardware**. Flash before trusting any of it.
+**Superseded by events, ticked 2026-08-30.** This said "none of it has run on
+hardware"; that stopped being true two days later. The 2026-08-27 refactor has
+since been flashed and measured repeatedly on the owl — `39c44bd` (centre crop),
+`8b0ec83` (dirty-row flush) and `35ece9b` (cascade thresholds) were each verified
+against a real face, and Step 4's numbers below (4.93 hits/s, 55/55 frames) are
+firmware readings, not simulation.
 
-    cd esp32-s3-sense && pio run && pio run -t upload
+Left as a step rather than deleted because the flashing rule it carries is the
+one this project has already broken once:
 
 **NEVER `firmware.factory.bin` at 0x0** — it spans past 0x9000 and erases NVS.
 That is how the IMU calibration was lost on 2026-08-26. Flash the pieces:
 `bootloader.bin` @0x0, `partitions.bin` @0x8000, `boot_app0.bin` @0xf000,
-`firmware.bin` @0x20000. `partitions.csv` was not touched by the refactor, so a
-correct flash preserves NVS and Step 3 only has to be done once.
+`firmware.bin` @0x20000.
 
-**Done when**: eyes render, telemetry arrives at ~535 ms, state settles to
-`idle`, no LCD error at boot.
-
-**While you are here, 30 seconds**: bring up the web UI (`web.enabled: true`) and
-look at the new diagnostics line — heading, GPS fix, `imu.cal` counters,
-pulse/hit totals. Those seven fields were parsed for the first time on
-2026-08-27 and have **only ever been fed synthetic frames**. This is the first
-time anyone sees them against a real owl.
+**Still genuinely unseen**: the web UI's diagnostics line — heading, GPS fix,
+`imu.cal` counters, pulse/hit totals. Those seven fields were parsed for the
+first time on 2026-08-27 and have only ever been fed synthetic frames. 30
+seconds with `web.enabled: true` next time the owl is up.
 
 ### Step 1 — Fit the camera extension cable  `[x]` DONE 2026-08-28
 
@@ -96,8 +114,14 @@ Step 1 in seconds, rather than after twenty minutes of figure-eights.
     pio run -e xiao_esp32s3 -t upload
 
 One `{"type":"hardware_check",...}` line reports both LCDs, PCA9685, GPS,
-BNO055, vibration and camera; `i2c_found` lists every address that answered
-(expect `0x10`, `0x28`, `0x40`). Set the flag back to `0` and re-flash.
+BNO055, vibration and camera; `i2c_found` lists every address that answered.
+Set the flag back to `0` and re-flash.
+
+**Expect `0x10` and `0x40` only — `0x28` missing is the KNOWN fault, not a new
+one.** This step used to say "expect `0x10`, `0x28`, `0x40`", which Step 3 below
+makes impossible: the BNO055 holds SCL low and has to be replaced. Read a
+missing `0x28` here as confirmation of Step 3, and re-diagnose only if `0x10` or
+`0x40` also vanish — that would mean the bus is down for a *different* reason.
 
 ### Step 3 — The BNO055 holds SCL low and must be replaced  `[ ]`
 
@@ -222,30 +246,72 @@ IMU yaw increases clockwise.
 
 ### Step 6 — Software backlog (no owl required)  `[ ]`
 
-In this order:
+**Ordered by impact**, re-measured 2026-08-30 — not by dependency, because only
+item 3 has a real prerequisite. Each entry states what it costs to *verify*: on
+this list that varies far more than the work itself does.
 
-1. **Consolidate the three supervisor test doubles.** `tests/stubs.py`
-   `FakeSupervisor` plus a local `StubSupervisor` in each of
-   `test_navigation.py` and `test_navigation_webui.py`. Every new supervisor
-   method must be added in all three — that is how it was noticed. This is a
-   duplication defect in the test suite itself (SPEC-012 R-012.2).
-2. **`render_template` instead of `render_template_string`** in `web_ui.py`,
-   *only* on a machine that actually has Flask installed. The split was done on
-   one that does not, so the template-folder path has never been executed. The
-   Jinja syntax in `brain/templates/index.html` is already compatible.
-3. **`src/main.cpp` split — LAST. Do not start it before Step 4 is
-   diagnosed.** 883 lines, and the seams are already known:
-   `runHardwareCheck()` (164 lines) wants its own file behind its flag like every
-   other diagnostic; `handleCommand()` / `sendTelemetry()` /
-   `parseSerialCommands()` want a `protocol.cpp`; the state machine wants a
-   `behavior.cpp` — leaving `main.cpp` at ~120 lines of wiring. Also in there:
-   the ack serialize-and-println boilerplate repeats **7×**, and the I2C scan
-   loop appears **twice in the same file** (a third copy is in `i2ctest.cpp`).
-   **Why it waits**: it touches the production image and alters loop structure,
-   while loop timing is the leading suspect in Step 4. Splitting files under an
-   active timing investigation muddies the diagnosis.
+1. **`src/main.cpp` split — now UNBLOCKED, and the biggest single win.**
+   **911 lines** (883 on 2026-08-27; it grows with every command added). It is
+   the one file that has to be understood in full before any firmware change,
+   and it is what the last three sessions read and re-read while debugging.
+
+   **The gate expired.** This was parked because it alters loop structure while
+   loop timing was the leading suspect for sporadic detection. Step 4 is
+   resolved: the cause was the face's size relative to the frame plus the
+   MSR/MNP threshold split, and **loop timing was innocent**. There is no longer
+   a diagnosis to muddy.
+
+   Seams, re-measured against the current file:
+
+   | seam | where | what |
+   |---|---|---|
+   | `runHardwareCheck()` | `main.cpp:606`, **154 lines** | the only diagnostic still compiled into the production image; every other one lives in its own `src/*.cpp` behind a `build_src_filter` env |
+   | `handleCommand()`, `sendTelemetry()`, `parseSerialCommands()` | `main.cpp:126`, `:265`, `:565` | want a `protocol.cpp`. This is the wire contract with `serial_handler.py` and should be as findable as its counterpart |
+   | state machine | `updateState()` `main.cpp:446`, plus `transitionTo()`/`applyExpression()`/`applyGaze()` | want a `behavior.cpp` |
+
+   That leaves `main.cpp` at ~120 lines of wiring. Two duplications to collapse
+   while in there:
+
+   - the ack serialize-and-println block repeats **8×** inside `handleCommand()`
+     (`main.cpp:135`–`:243`). It was 7× on 2026-08-27, so it gains a copy per
+     new command — one `sendAck()` helper stops that.
+   - the I2C address-scan loop appears **twice in the same file**
+     (`main.cpp:660` in `runHardwareCheck()`, `main.cpp:772` in `setup()`), and
+     a third time in `i2ctest.cpp`. **The bodies genuinely differ** — one builds
+     the `i2c_found` JSON array and sets device flags, the other prints to
+     serial — so this is a shared iterator taking a callback, not a copy-paste
+     deletion. Do not "fix" it by making one caller print what the other needs.
+
+   **Verification costs a flash.** It touches the production image, so "all envs
+   build" is necessary and not sufficient. Done when the eyes render, telemetry
+   arrives at ~535 ms, state settles to `idle`, and `HARDWARE_CHECK=1` still
+   emits its one JSON line.
+
+2. **Consolidate the three supervisor test doubles.** `tests/stubs.py:168`
+   `FakeSupervisor`, plus a near-identical local `StubSupervisor` in
+   `test_navigation.py:47` and `test_navigation_webui.py:34`. Every new
+   supervisor method has to be added in all three — that is how it was noticed.
+   A duplication defect in the test suite itself (SPEC-012 R-012.2).
+
+   Less impact than item 1, but the **best ratio on this list**: laptop-only, no
+   hardware, and the 177-test suite verifies it completely. Worth doing first as
+   a warm-up, because it makes that suite a more trustworthy check for item 1.
+
+3. **`render_template` instead of `render_template_string`** in `web_ui.py:159`.
+   **Still blocked, and the block is the entire point.** It has to be done on a
+   machine that actually has Flask; this one does not (`import flask` fails),
+   which is precisely the condition under which the split was originally made
+   and why the template-folder path has never once been executed. Doing it here
+   would repeat the original mistake with more confidence behind it. The Jinja
+   in `brain/templates/index.html` is already compatible, and the comment at
+   `web_ui.py:97` records the state.
+
+   Lowest impact of the three: it changes no behaviour anyone can observe, it
+   only retires a documented oddity.
+
 4. **Mechanical assembly** — enclosure, servo attachment for ears/head/wings,
-   LCD bezels. Not blocked by anything here.
+   LCD bezels. Not blocked by anything here, and not really comparable to the
+   above: it is the only item that changes what the owl physically is.
 
 ---
 
@@ -324,19 +390,13 @@ vibration sensor listed on **D3 — the right eye's DC**. Corrected against
 
 ### Deliberately NOT done
 
-* **`src/main.cpp` is still 883 lines — LOWEST PRIORITY, do not start this
-  yet.** The seams are clean and known: `runHardwareCheck()` (164 lines) wants
-  its own file behind its flag like every other diagnostic,
-  `handleCommand()`/`sendTelemetry()`/`parseSerialCommands()` want a
-  `protocol.cpp`, the state machine wants a `behavior.cpp`, which would leave
-  `main.cpp` at ~120 lines of wiring. Also inside it: the ack
-  serialize-and-println boilerplate repeats **7×** and the I2C scan loop appears
-  **twice in the same file** (a third copy is in `i2ctest.cpp`).
-  **Why it is parked:** it is the largest change, it touches the production
-  image, it needs a flash to verify, and it would alter loop structure while
-  "detection is too sporadic" is open with **loop timing as the leading
-  suspect**. Splitting files under an active timing investigation muddies the
-  diagnosis. Do the detection work first.
+* **`src/main.cpp` split — parked here on 2026-08-27, UNPARKED 2026-08-30.**
+  It was deferred because it alters loop structure while loop timing was the
+  leading suspect for sporadic detection. That suspect was cleared when Step 4
+  was resolved on 2026-08-29 (the face was too small in frame; loop timing was
+  innocent), so the reason to wait no longer holds. The seams, the re-measured
+  line counts and the verification cost now live in **Step 6 item 1** — one
+  place, not two.
 * **`facelab/` kept.** It is the known-good control for the sporadic-detection
   bug: same model, same camera, same thresholds, near-every-frame detection.
   Deleting it would destroy the A/B reference for an open investigation. (It does
