@@ -67,6 +67,11 @@ static float loopHz = 0.0f;
 static uint32_t updateModeSince = 0;
 static uint32_t navSince = 0;
 static float navTargetAngle = 0.0f;
+// Expires when the HAPPY burst on entering INTERACTING is over. Armed in
+// transitionTo(), NOT in the state branch: loop() runs that branch ~60x/s, so
+// arming it there would restart the burst forever and reproduce exactly the
+// frozen grin it replaces.
+static uint32_t greetUntil = 0;
 
 // Temporary overrides from the RPi supervisor. These take precedence over the
 // state-driven expression/gaze until they expire or the state changes. They
@@ -359,6 +364,12 @@ void transitionTo(State newState) {
     currentState = newState;
     overrideExprUntil = 0;
     overrideGazeActive = false;
+    // Entering INTERACTING is the event "I have seen you". The early return
+    // above (newState == currentState) is what keeps the burst to one per
+    // genuine entry rather than one per frame.
+    if (newState == State::INTERACTING) {
+        greetUntil = millis() + INTERACT_GREET_MS;
+    }
 }
 
 // Apply the expression for the current state, honoring an active supervisor
@@ -508,7 +519,19 @@ void updateState() {
         }
 
         case State::INTERACTING: {
-            applyExpression(EyeExpression::HAPPY);
+            // Two beats instead of one frozen face: a brief HAPPY in reaction
+            // to noticing someone, then AWE for as long as we keep tracking.
+            //
+            // AWE rather than HAPPY is deliberate. HAPPY carries botRise 62,
+            // the deepest crescent in the whole table, and a deep crescent
+            // renders as a CLOSED eye. This is the state in which the owl
+            // follows a face, so a squeezed-shut eye contradicts the behaviour.
+            // AWE has no botRise, no topSag and no slant, and its row was
+            // widened to 42x42 at roundness 3.2 -- +40% area over NEUTRAL and
+            // ROUND where every other mood is a taller oval, so the change is
+            // visible across a room rather than only side by side.
+            applyExpression(millis() < greetUntil ? EyeExpression::HAPPY
+                                                  : EyeExpression::AWE);
             if (faceResult.detected) {
                 lastFaceSeen = millis();
                 applyGaze(faceResult.gaze_x, faceResult.gaze_y);

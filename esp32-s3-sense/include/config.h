@@ -394,6 +394,12 @@
 #define DETECT_TIMEOUT_MS 10000     // DETECTING -> IDLE when no face seen
 #define INTERACT_TIMEOUT_MS 5000    // INTERACTING -> IDLE when face lost
 
+// Short HAPPY burst on entering INTERACTING, then the calm AWE face.
+// Affect is legible through change: an expression pinned at full amplitude
+// stops reading as an expression and becomes a mask. So: a spike on the
+// event, a plateau for the state.
+#define INTERACT_GREET_MS 1000      // how long HAPPY flashes on noticing you
+
 // Temporary overrides sent by the RPi supervisor (do not change state)
 #define EXPRESSION_OVERRIDE_MS 3000 // how long an RPi expression override lasts
 #define GAZE_OVERRIDE_MS 3000       // how long an RPi gaze override lasts

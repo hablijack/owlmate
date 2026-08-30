@@ -101,7 +101,7 @@ inputs (vibration sensor + on-device face detection):
 | **BOOT** | SEARCHING | 3-second init, then → IDLE |
 | **IDLE** | NEUTRAL | Monitors vibration + face; on either → DETECTING |
 | **DETECTING** | DETECTING | Face confirmed → INTERACTING; no face for 10s → IDLE |
-| **INTERACTING** | HAPPY | Gaze follows face; face lost for 5s → IDLE |
+| **INTERACTING** | HAPPY for 1s, then AWE | Gaze follows face; face lost for 5s → IDLE |
 | **SLEEPING** | SLEEPING (closed) | Eyes closed, servos centered; wake command → IDLE |
 | **NAVIGATING** | SEARCHING | Head held at the RPi's compass bearing (a *persistent* `nav` override, not the 3s gaze override); `nav active:false` or a 5s no-refresh timeout → IDLE |
 | **UPDATE** | UPDATE (spinner) | SoftAP + `/update` HTTP server; 4-tap vibration enters, one tap exits |

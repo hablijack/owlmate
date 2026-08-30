@@ -230,6 +230,19 @@ applies to the head servo when it is wired up.
 input is square, so some of it is wasted on rescale. A 160×160 centre crop is
 square and captures more vertical extent. Five-minute experiment.
 
+**Look at the new INTERACTING arc.** Changed 2026-08-30: a ~1 s `HAPPY` burst on
+entry (`INTERACT_GREET_MS`) and then `AWE` held, instead of `HAPPY` pinned for
+the whole state — sustained `HAPPY` has `botRise 62` and reads as an eye
+squeezed shut while the owl is visibly tracking you. Builds clean on all 11
+envs; **nobody has seen it on a panel.** `AWE`'s row was widened the same day
+from `35×41` to `{42, 42, 32}` — +12 % area over `NEUTRAL` was not a visible
+change, +40 % and round-instead-of-oval should be. Two judgement calls that
+still need eyes on hardware rather than arithmetic: whether 1 s is the right
+burst length, and whether the widened blob crowds the bezel at full gaze
+deflection (it reaches 69.5 px of the 80 px disc, against 68.9 for the shipped
+`SURPRISED`). `tools/preview_eyes.py` renders the whole sheet from the same
+`SHAPES[]` if you want to compare before flashing. See SPEC-004.
+
 **Decide the field of view.** `CAM_DETECT_CROP_DIV 2` means the owl sees only
 the middle half of its camera view. Nobody has measured what cone the owl
 actually needs — that depends on where it ends up sitting.

@@ -78,8 +78,53 @@ rotating spinner), `ERROR` (a cross), `SLEEPING` (a single closed bar).
 
 **Blinks are background-coloured bars** closing in from top and bottom, so a
 blink eats into whatever shape is underneath. Auto-blink gap is a random
-0.7–2.5 s — deliberately short and irregular, because a regular or sparse blink
-reads as a machine idling.
+2.5–6.5 s (`BLINK_GAP_MIN_MS` 2500 + `random(BLINK_GAP_JITTER_MS)` 4000, both in
+`lib/Eyes/Eyes.cpp`) — irregular on purpose, because a regular blink reads as a
+machine idling. This spec said "0.7–2.5 s" until 2026-08-30; that was the
+original cadence, widened by `f79c96a` because it read as nervous.
+
+**INTERACTING is two beats, not one held face** — a ~1 s `HAPPY` burst on entry
+(`INTERACT_GREET_MS`), then `AWE` for as long as the owl keeps tracking.
+
+Sustained `HAPPY` was the original choice and read as strange on hardware, for a
+reason that is in the shape table rather than in taste. `HAPPY` carries
+`botRise 62`, the deepest crescent of all 26 rows — next is `SQUINT` at 52, then
+`GLEE` at 28 — and a deep crescent renders as a **closed** eye. INTERACTING is
+precisely the state in which the owl follows a face, so the expression said "my
+eyes are squeezed shut" while the behaviour said "I am watching you". Held flat
+at peak amplitude for the whole state, it also stopped reading as an emotion at
+all: affect is legible through *change*, and a constant maximum is a mask.
+
+`AWE` is the sustained face because it is the only unused row that is fully
+open — no `botRise`, no `topSag`, no slant.
+
+**Its row was widened on 2026-08-30, because as drawn it was not a visible
+change.** At `35×41` it covered only **+12 % more area than `NEUTRAL`** — a
+difference you can find side by side and not across a room, which is the only
+comparison that matters when someone is standing in front of the owl. It is now
+`{42, 42, 32}`: **+40 % area**, and *round* where every other mood is a taller
+oval, so it differs in shape as well as size. Roundness 3.2 is the boxiest
+exponent in the table.
+
+The size is bounded by the panel, not by taste. The farthest outline point of a
+superellipse is its diagonal corner at `2^(-1/n)` of each half-axis, and the
+gaze can push the whole blob `hypot(18, 12) = 21.6 px` off centre, so what has
+to fit is *corner + deflection*. `NEUTRAL` reaches 61.6 px of the 80 px disc and
+the shipped `SURPRISED` already reaches 68.9 px. The new `AWE` reaches **69.5 px**
+— inside the envelope an owner-approved mood already occupies. Do not read the
+"usable radius 65" note in `Eyes.cpp` as a hard limit; `SURPRISED` has always
+exceeded it.
+
+The burst is armed in `transitionTo()`, **not** in the INTERACTING branch of
+`updateState()`. The branch runs every loop iteration (~60 Hz), so arming it
+there would restart the flash forever and reproduce exactly the frozen grin it
+replaces. `transitionTo()` returns early when the state is unchanged, so the
+flash fires once per genuine entry.
+
+Keeping `HAPPY` off the sustained face also keeps it **earnable**: it stays
+available for the RPi to send when speech recognises someone or the owl is
+tapped. Spending peak joy on mere presence leaves nothing in reserve for when
+something good actually happens.
 
 ## Verified facts
 
