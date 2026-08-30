@@ -29,8 +29,13 @@ pre-implementation design.
 ## Decisions
 
 **faster-whisper (CTranslate2), not openai-whisper.** No torch on a Pi. The
-`tiny` model is the default; `base` is configurable if accuracy matters more
-than latency.
+default is the **`small` model with `compute_type="int8"`** — the combination
+faster-whisper itself recommends for a Pi 4, and the reason int8 is hardcoded
+in `speech.py` while the size stays configuration (R-014.6). `tiny`/`base` cut
+latency and RAM and remain valid values, at a real accuracy cost on German place
+names. The default was `tiny` until 2026-08-30; nothing measured on this
+hardware justified it, so the vendor recommendation wins until a measurement on
+the Pi says otherwise.
 
 **A three-part gate, not always-on transcription** (R-014.3). ASR runs only when
 the owl is awake *and* a face is in frame *and* the mic energy passes an RMS VAD
@@ -110,8 +115,12 @@ nav triggers, stop words (R-014.6). Adding a reaction is a config edit.
   stubbed model. Unknown until it runs on the Pi: real VAD threshold, actual
   transcription latency for a 2.5 s window on Pi hardware, and whether the RMS
   gate needs tuning for the room.
-* Whether `tiny` is accurate enough for German place names, or whether `base`
-  is needed — this interacts with SPEC-013's fuzzy name matching, which exists
+* **Whether `small`/int8 is fast enough on the Pi 4 — unmeasured.** It is the
+  vendor's recommendation for that board, not a number taken here; transcription
+  latency for a 2.5 s window on real hardware is still unknown, and `cooldown_s`
+  (4.5 s) may need raising if a transcription outlasts it. Drop to `base` or
+  `tiny` if the owl feels sluggish, and record the measurement here. Accuracy on
+  German place names interacts with SPEC-013's fuzzy name matching, which exists
   partly to absorb ASR error.
 * No dialogue and no confirmation turn, by design. Revisit only if misheard
   navigation targets turn out to be common in practice.

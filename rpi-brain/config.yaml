@@ -97,7 +97,11 @@ audio:
 # Disabled by default: flip 'enabled: true' once a USB mic is plugged in.
 #
 #   mic_device  - ALSA capture device (from `arecord -l` / `aplay -l`); "" = default
-#   model       - whisper model size: tiny / base / small (tiny = fastest)
+#   model       - whisper model size: tiny / base / small. Default **small**,
+#                 which is what faster-whisper recommends for a Pi 4 together
+#                 with the int8 compute type brain/speech.py already uses.
+#                 tiny/base are faster but noticeably worse on German place
+#                 names; small costs ~1 s more per utterance and ~0.5 GB RAM.
 #   window_s    - length of the audio clip transcribed when the gate opens
 #   chunk_s     - VAD window: how much audio accumulates before an energy check
 #   sample_rate - mic sample rate (Whisper expects 16 kHz; the capture resamples)
@@ -119,7 +123,7 @@ audio:
 speech:
   enabled: false
   language: de
-  model: tiny
+  model: small
   mic_device: ""
   window_s: 2.5
   chunk_s: 0.3

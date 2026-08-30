@@ -63,7 +63,7 @@ class Speech:
         cfg = (config or {}).get("speech", {})
         self.enabled = bool(cfg.get("enabled", False))
         self.language = cfg.get("language", "de")
-        self.model = cfg.get("model", "tiny")
+        self.model = cfg.get("model", "small")
         self.mic_device = cfg.get("mic_device", "") or ""
         self.window_s = float(cfg.get("window_s", 2.5))
         self.chunk_s = float(cfg.get("chunk_s", 0.3))
@@ -146,8 +146,12 @@ class Speech:
         from faster_whisper import WhisperModel
 
         # Load the model once on the worker thread (first run downloads it).
-        # int8 on CPU: the RPi has no GPU, int8 is the right precision, and it
-        # keeps the model small + fast. Auto-detects the device (cpu on the Pi).
+        # 'small' + compute_type="int8" on CPU is faster-whisper's own
+        # recommendation for a Pi 4: the Pi has no GPU, int8 quantisation is
+        # what makes 'small' fit in RAM and run at a usable speed, and smaller
+        # models cost accuracy on German place names (SPEC-013 fuzzy matching
+        # absorbs some, but not all, ASR error). The size itself is config --
+        # see specs/014-speech.spec.
         try:
             self._whisper = WhisperModel(self.model, device="cpu", compute_type="int8")
         except Exception as e:

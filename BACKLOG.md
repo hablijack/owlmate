@@ -921,8 +921,8 @@ UI) and Step 4 (autonomous sleep + wake-on-speech) code is **done and
 unit-tested on the Mac** (38 tests, stubbed serial/supervisor/mic/Whisper).
 See `specs/014-speech.spec`. The RPi `Speech` class captures a USB mic,
 runs an energy VAD, and on a gated utterance transcribes with **faster-whisper**
-(`tiny`, int8 on CPU — the CTranslate2 engine, no torch, ~4× faster than
-openai-whisper) and drives a *temporary* reaction (expression/gaze/audio) via
+(`small`, int8 on CPU — the size/precision pair faster-whisper recommends for a
+Pi 4; the CTranslate2 engine, no torch, ~4× faster than openai-whisper) and drives a *temporary* reaction (expression/gaze/audio) via
 the existing override path — no firmware change.
 
 **Setup is now a single interactive command:** `sudo ./setup.sh` runs a config

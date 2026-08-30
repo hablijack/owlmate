@@ -326,7 +326,9 @@ sudo ./setup.sh
 4. **Install** — copies the brain to `/opt/robot-owl/rpi-brain`, builds a `.venv`,
    installs `requirements.txt` (incl. **faster-whisper** — offline ASR, no torch).
 5. **Pre-download the Whisper model** — so the first live transcription is instant
-   instead of a several-minute download.
+   instead of a several-minute download. The default is **`small` with
+   `compute_type="int8"`**, faster-whisper's recommendation for a Pi 4 (~0.5 GB);
+   pick `tiny`/`base` in the wizard for lower latency and less accuracy.
 6. **User + permissions** — creates the `robotowl` system user in the `dial` group
    and installs a udev rule so it can open the ESP32 USB CDC serial port.
 7. **systemd** — installs + enables `robot-owl-brain.service`.
@@ -477,7 +479,7 @@ python main.py [config.yaml]   # Default config path
 | **OTA Update Mode** | ✅ Complete | 4-tap vibration → SoftAP `RobotOwl-Update` + `/update` HTTP page (HTTPUpdateServer); one tap exits; dual-bank ota_0/ota_1; standalone boot (5s USB wait) |
 | **Face Detection (RPi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
 | **Web UI (RPi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and BNO055 calibration counters, and a map place-picker for navigation. Page lives in `brain/templates/index.html` |
-| **Speech (RPi)** | ✅ Implemented | German. Mic → RMS VAD gate → faster-whisper (CTranslate2, not torch) → keyword clusters / navigation triggers. Gated on awake + face + energy so the owl does not react to the TV. Disabled by default. See `specs/014-speech.spec` |
+| **Speech (RPi)** | ✅ Implemented | German. Mic → RMS VAD gate → faster-whisper (`small`, int8 on CPU — the combination recommended for a Pi 4; CTranslate2, not torch) → keyword clusters / navigation triggers. Gated on awake + face + energy so the owl does not react to the TV. Disabled by default. See `specs/014-speech.spec` |
 | **RPi test suite** | ✅ 177 tests | Runs on a plain dev machine with no Pi, mic, PortAudio, faster-whisper, Flask, Jinja2 or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔RPi wire contract (39) and firmware-vs-RPi drift guards (11) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
 

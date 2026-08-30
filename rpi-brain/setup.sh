@@ -18,7 +18,9 @@
 #   4. Install the brain to /opt/robot-owl, create a virtualenv, and install
 #      the Python requirements (faster-whisper + ctranslate2, no torch).
 #   5. Pre-download the Whisper model (from Hugging Face) so the first real
-#      transcription is instant instead of a several-minute download.
+#      transcription is instant instead of a several-minute download. The
+#      default is 'small' with compute_type=int8 -- faster-whisper's own
+#      recommendation for a Pi 4 (~0.5 GB to fetch, so this step takes a while).
 #   6. Create a dedicated 'robotowl' system user in the 'dial' group and
 #      install a udev rule so it can open the ESP32 USB CDC serial port.
 #   7. Install + enable the systemd service.
@@ -149,15 +151,15 @@ run_config_wizard() {
     else
         SPEECH_ENABLED="n"
     fi
-    local speech_model="tiny" speech_lang="de" speech_mic="${mic}"
+    local speech_model="small" speech_lang="de" speech_mic="${mic}"
     if [ "${SPEECH_ENABLED}" = "y" ] && [ "${INTERACTIVE}" -eq 1 ]; then
-        ask "Whisper model size (tiny = fastest; base = a bit better) [tiny]" speech_model
+        ask "Whisper model size (small = recommended for a Pi 4; tiny/base = faster, less accurate) [small]" speech_model
         ask "Spoken language (ISO code) [de]" speech_lang
         ask "Mic device (ALSA card from 'arecord -l'; blank = default) [${mic}]" speech_mic
     fi
     # Keep a valid model size + language even if speech was just disabled, so the
     # pre-download step (and a later re-enable) still have sensible values.
-    [ -z "${speech_model}" ] && speech_model="tiny"
+    [ -z "${speech_model}" ] && speech_model="small"
     [ -z "${speech_lang}" ] && speech_lang="de"
 
     # ---- Autonomous sleep (Phase 4) ----------------------------------------
@@ -315,13 +317,16 @@ try:
     import yaml
     with open(sys.argv[1]) as f:
         cfg = yaml.safe_load(f) or {}
-    print((cfg.get("speech", {}) or {}).get("model", "tiny"))
+    print((cfg.get("speech", {}) or {}).get("model", "small"))
 except Exception:
-    print("tiny")
+    print("small")
 PY
 )
 if [ -n "${WHISPER_MODEL}" ]; then
     info "Pre-downloading faster-whisper model '${WHISPER_MODEL}' (CPU/int8) ..."
+    if [ "${WHISPER_MODEL}" = "small" ]; then
+        info "  'small' is ~0.5 GB — this can take a few minutes on a slow line."
+    fi
     # Run as robotowl so the cache lands in the user that runs the service.
     # (robotowl is created in the next step; create it first if needed.)
     id -u "${SERVICE_USER}" >/dev/null 2>&1 || \
