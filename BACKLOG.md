@@ -624,13 +624,31 @@ millisecond. The core-0 task computes and *then* sleeps the interval, so the two
 add rather than overlap. (This does **not** settle SPEC-009's open question about
 5.8 Hz — that one is the render rate on the old blocking firmware.)
 
-**Still not verified, and why.** The `DETECTING`/`INTERACTING` timeout paths
-through `returnToIdle()` need the face to *leave* frame, which this capture did
-not do; only the `NAVIGATING` path was exercised — the same three lines, but not
-the same path. And `Sensors::getImu()`'s `ImuData data{}` is unreachable while
-`_imuReady` is false, so that initialiser waits on the replacement BNO055; the
-`GpsData`/`VibrationData` equivalents run every telemetry frame and report
-correctly.
+**`returnToIdle()` on the INTERACTING timeout — verified, owner stepped out of
+frame.** The second of its three call sites, caught in a 35 s `cat` capture:
+
+| | |
+|---|---|
+| in frame | `interacting`, eye **`awe`** (the sustained beat, not the greeting), `face.total` climbing to 907 |
+| owner leaves | `face.detected` goes false, state holds `interacting` |
+| **transition** | → `idle`, eye **`neutral`**, **5.7 s** after the last frame reporting a face |
+| expected | `INTERACT_TIMEOUT_MS` 5.0 s + up to 0.5 s telemetry granularity — `detected` is an instantaneous 2 Hz sample, so the true last hit sits *between* frames. 5.7 s is on schedule |
+
+**Bonus: 0 false positives in 169 attempts over 25.4 s of empty frame.** The owl
+held `idle`/`neutral` for the rest of the capture with no flap back to
+`detecting`, `face.total` frozen at 907. That independently reproduces the
+"zero false positives over 184 attempts in an empty room" reading that justified
+`FACE_SCORE_THRESHOLD_MSR` 0.1 — the permissive proposal stage still is not
+costing precision. `infer_ms` with no face: **48-52 ms**, i.e. the low end of the
+envelope, confirming the size mechanism from the other direction.
+
+**Still not verified, and why.** The `DETECTING` timeout is the one remaining
+`returnToIdle()` call site — it needs a face to arrive and then never be
+confirmed, which is awkward to stage deliberately. It is now the same helper call
+as the two that were watched fire. And `Sensors::getImu()`'s `ImuData data{}` is
+unreachable while `_imuReady` is false, so that initialiser waits on the
+replacement BNO055; the `GpsData`/`VibrationData` equivalents run every telemetry
+frame and report correctly.
 
 **The falsified inference figure was still asserted as current in four places.**
 `FaceDetector.h`/`.cpp` had been corrected when the number was overturned; these

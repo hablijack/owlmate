@@ -103,6 +103,15 @@ nearest person, and the one to follow.
   `29 29 29 27 27 29 29 29 29 21 29 29 25 28 28 …`. Judge this change on the
   sequence and on the count of samples below 15 Hz, never on the mean. At idle
   the mean does move, 40.8 → 55.8 Hz, because there the loop is otherwise free.
+* **Precision confirmed a second time, from a different sitting.** 2026-08-31,
+  25.4 s of *empty* frame immediately after the owner stepped away: **169
+  attempts, 0 hits**, state held `idle` with no flap back to `detecting` and
+  `face.total` frozen. That independently reproduces the "zero false positives
+  over 184 attempts" reading behind `FACE_SCORE_THRESHOLD_MSR` 0.1 — the
+  permissive proposal stage still costs no precision, because the reported score
+  comes from MNP. `infer_ms` over that window was **48-52 ms**, the low end of
+  the envelope, which confirms the size mechanism from the other direction: no
+  candidates to refine, no cost.
 * **The attempt rate is `infer_ms` + `FACE_DETECT_INTERVAL_MS`, and that now
   reconciles exactly.** Measured 2026-08-31 with the owner in frame: mean
   `infer_ms` 81 ms + the task's 100 ms inter-cycle delay = 181 ms, against
