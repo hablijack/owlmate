@@ -1,7 +1,7 @@
 # SPEC-000: Index and format
 
 Status: living document
-Last updated: 2026-08-27
+Last updated: 2026-08-31
 
 ## What this directory is
 
@@ -66,7 +66,7 @@ commit messages.
 | [006](006-imu-orientation.spec) | IMU axes, mounting, calibration, heading | partial |
 | [007](007-vibration-and-ota.spec) | Vibration sensing and OTA entry | implemented |
 | [008](008-camera.spec) | Camera module, mounting, compatibility | implemented |
-| [009](009-face-detection.spec) | On-device face detection | partial |
+| [009](009-face-detection.spec) | On-device face detection | implemented |
 | [010](010-serial-protocol.spec) | NDJSON contract between ESP32 and RPi | implemented |
 | [011](011-diagnostics.spec) | Diagnostic builds and host tools | implemented |
 | [012](012-rpi-brain.spec) | RPi brain internals: ownership, packaging, testing | implemented |

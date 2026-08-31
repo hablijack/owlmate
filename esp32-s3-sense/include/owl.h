@@ -52,15 +52,28 @@ extern Eyes eyes;
 extern Sensors sensors;
 extern ServoController servos;
 
-// The most recent face-detection result. loop() refreshes it on
-// FACE_DETECT_INTERVAL_MS; behaviour and telemetry both read it, and between
-// refreshes the state machine keeps using the last one.
+// The most recent face-detection result, as a SNAPSHOT for core 1.
+//
+// The detection itself runs in its own task on core 0 (see include/vision.h);
+// loop() copies the newest published result in here once per iteration, before
+// the state machine runs. So behaviour and telemetry always agree on what the
+// owl currently sees, and neither can catch a result half-written by the other
+// core. Between refreshes the state machine keeps using the last one.
 extern FaceResult_t faceResult;
 
-// Measured main-loop rate, reported in telemetry. The loop renders the eyes and
-// sleeps 16 ms; both push this down, and with it the number of detection runs.
-// FACE_DETECT_INTERVAL_MS is only an upper bound -- what actually happens is
-// not visible without measuring it.
+// Measured main-loop rate, reported in telemetry. It is the RENDER rate: the
+// loop draws the eyes and sleeps 16 ms, and nothing else in it is expensive
+// since the inference moved off core 1 on 2026-08-31.
+//
+// Read it as the SEQUENCE, not the mean -- a mean cannot show a stall, and here
+// it actively hid one. Measured 2026-08-31 with a face in frame, before and
+// after the inference moved to core 0:
+//
+//   before  10.8 / 30.2 / 44.1 Hz   11 29 31 35 32 42 26 41 33 17 36 31 40 ...
+//   after   15.6 / 28.3 / 61.7 Hz   29 29 29 27 27 29 29 29 29 21 29 29 25 ...
+//
+// The mean went DOWN. What changed is the spread: 3 of 55 samples were below
+// 15 Hz before (visibly frozen), 0 of 58 after.
 extern float loopHz;
 
 // ----------------------------------------------------------------------------

@@ -25,6 +25,26 @@ typedef struct {
     // was FACE_DETECT_INTERVAL_MS verspricht. Erst total/attempts trennt
     // "erkennt schlecht" von "kommt kaum dran". Siehe SPEC-008.
     uint32_t attempts;
+    // Wie lange dieser Durchlauf gedauert hat, aufgeteilt in die zwei Posten,
+    // die man nicht gegeneinander abwaegen kann, solange man nur die Summe
+    // kennt: capture_ms ist die WARTEZEIT auf ein Kamerabild, infer_ms die
+    // Rechenzeit (Ausschnitt kopieren + run()).
+    //
+    // Auf Hardware gemessen 2026-08-31, und beide Zahlen waren eine
+    // Ueberraschung: capture_ms ist in JEDER Abtastung 0 - der Treiber haelt
+    // mit fb_count=2 immer ein Bild bereit, gewartet wird nie. Der Durchlauf
+    // ist also zu 100 % Rechenzeit, und die betraegt 48 ms ohne Gesicht und
+    // bis 91 ms (Mittel 66) mit einem. Die frueher notierten ~170-200 ms waren
+    // nie direkt gemessen, sondern aus loop_hz erschlossen - und darin steckte
+    // das Augenzeichnen mit drin. Siehe specs/009-face-detection.spec.
+    uint16_t capture_ms;
+    uint16_t infer_ms;
+    // Freier Stapel der Erkennungsaufgabe (Byte, Tiefstand seit dem Start).
+    // Die Inferenz lief bis 2026-08-31 auf dem Arduino-Loop-Stapel; seit sie
+    // eine eigene Aufgabe auf Kern 0 hat, ist ihr Stapelbedarf eine offene
+    // Frage, die still mit einem Ueberlauf endet. Siehe VISION_TASK_STACK.
+    // 0, solange noch kein Durchlauf fertig ist.
+    uint32_t stack_free;
 } FaceResult_t;
 
 // Initialize face detection module

@@ -165,7 +165,8 @@ Full design, math and open questions: `specs/013-navigation.spec`.
   "vibration": { "detected": false, "count": 3, "pulses": 3252 },
   "servos": [0.0, 0.0, 5.2, -1.0, 1.5],
   "face": { "detected": true, "x": 45, "y": 38, "w": 62, "h": 74, "confidence": 0.87,
-            "gaze_x": -0.19, "gaze_y": -0.05, "total": 57, "attempts": 233 },
+            "gaze_x": -0.19, "gaze_y": -0.05, "total": 57, "attempts": 233,
+            "capture_ms": 0, "infer_ms": 66, "stack_free": 5584 },
   "eye": "detecting"
 }
 ```
@@ -186,6 +187,12 @@ real failure: `vibration.pulses` (raw ISR edges since boot), `face.total` (cumul
 `face.attempts` with `loop_hz` — the denominator that says whether a low hit count means a poor
 detector or a starved main loop. `imu.cal.*` carries the BNO055 calibration counters and whether
 they were restored from flash.
+
+`face.capture_ms` / `face.infer_ms` split a detection cycle into waiting on the camera against
+computing, and `face.stack_free` is the low-water mark of the core-0 detection task's stack. They
+exist because the sum alone was misleading: the cycle had been "measured" at ~170-200 ms by dividing
+into `loop_hz`, which charged the detector for the eye render. Timed directly it is 48-91 ms, and
+`capture_ms` is 0 in every sample — the camera is never waited on.
 
 While in **UPDATE** state the owl is on an isolated SoftAP (`RobotOwl-Update`); all commands except `heartbeat` are ignored, and telemetry carries the AP credentials under `update` (ssid / password / ip / url).
 
@@ -251,6 +258,7 @@ esp32-s3-sense/                    # ESP32 firmware
 │   ├── main.cpp                   # Wiring only: construct, bring up, run the loop
 │   ├── behavior.cpp               # The state machine + OTA update mode
 │   ├── protocol.cpp               # NDJSON commands + telemetry (the RPi contract)
+│   ├── vision.cpp                 # Face-detection task pinned to core 0; loop() only reads it
 │   ├── hardware_check.cpp         # -DHARDWARE_CHECK=1 wiring probe; else compiles to nothing
 │   ├── Sensors.cpp                # BNO055 IMU, PA1010D GPS, SW420 vibration
 │   ├── ServoController.cpp        # PCA9685 smooth servo interpolation
@@ -273,7 +281,7 @@ rpi-brain/                         # Raspberry Pi brain (Python)
 ├── assets/sounds/                 # Owl-call WAVs played through the I2S amp
 ├── tools/
 │   └── gen_expressions.py         # GENERATES brain/expressions.py from the firmware's NAMES[]
-├── tests/                         # 177 tests; run on a plain Mac, no Pi or audio stack needed
+├── tests/                         # 179 tests; run on a plain Mac, no Pi or audio stack needed
 │   ├── run_tests.py               # unittest discovery
 │   ├── stubs.py                   # fakes third-party modules ONLY when not importable
 │   ├── test_protocol.py           # the ESP32<->RPi wire contract (39 tests)
@@ -483,12 +491,12 @@ python main.py [config.yaml]   # Default config path
 | **State Machine** | ✅ Complete | 8 states on ESP32 (owns behavior): BOOT/IDLE/DETECTING/INTERACTING/SLEEPING/NAVIGATING/UPDATE/ERROR |
 | **NDJSON Protocol** | ✅ Complete | Telemetry (500ms) + commands (expression/servo/gaze/nav/wake/blink/heartbeat) |
 | **Navigation "guide me home"** | ✅ Implemented | RPi computes the compass bearing to a named destination and streams the head aim; ESP32 holds it in the NAVIGATING state (live compass). Start via voice ("Bring mich nach Home") or web UI; exit via spoken keyword, web UI, arrival, or timeout. See `specs/013-navigation.spec`. On-hardware `aim_sign` verification pending (BACKLOG Step 5) |
-| **Face Detection (ESP32)** | ✅ Complete | esp-dl **v3** `HumanFaceDetect` (managed IDF component, *not* the old `HumanFaceDetectMSR01`), OV3660 QVGA RGB565BE, `set_vflip(1)` mandatory, ~170-200 ms inference on the owl (**not** the 48 ms measured in `facelab/`), gaze offsets + state transitions on-device. Hit rate is 100 % at a normal seating distance; it is dominated by face size in frame, and glasses cost about a third of it — see `specs/009-face-detection.spec` |
+| **Face Detection (ESP32)** | ✅ Complete | esp-dl **v3** `HumanFaceDetect` (managed IDF component, *not* the old `HumanFaceDetectMSR01`), OV3660 QVGA RGB565BE, `set_vflip(1)` mandatory, 48-91 ms inference **on core 0** since 2026-08-31 so it no longer stalls the eye render, gaze offsets + state transitions on-device. Hit rate is 100 % at a normal seating distance; it is dominated by face size in frame, and glasses cost about a third of it — see `specs/009-face-detection.spec` |
 | **OTA Update Mode** | ✅ Complete | 4-tap vibration → SoftAP `RobotOwl-Update` + `/update` HTTP page (HTTPUpdateServer); one tap exits; dual-bank ota_0/ota_1; standalone boot (5s USB wait) |
 | **Face Detection (RPi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
 | **Web UI (RPi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and BNO055 calibration counters, and a map place-picker for navigation. Page lives in `brain/templates/index.html` |
 | **Speech (RPi)** | ✅ Implemented | German. Mic → RMS VAD gate → faster-whisper (`small`, int8 on CPU — the combination recommended for a Pi 4; CTranslate2, not torch) → keyword clusters / navigation triggers. Gated on awake + face + energy so the owl does not react to the TV. Disabled by default. See `specs/014-speech.spec` |
-| **RPi test suite** | ✅ 177 tests | Runs on a plain dev machine with no Pi, mic, PortAudio, faster-whisper, Flask, Jinja2 or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔RPi wire contract (39) and firmware-vs-RPi drift guards (11) |
+| **RPi test suite** | ✅ 179 tests | Runs on a plain dev machine with no Pi, mic, PortAudio, faster-whisper, Flask, Jinja2 or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔RPi wire contract (44, `test_protocol.py`) and firmware-vs-RPi drift guards (11, `test_expressions.py`) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
 
 ---

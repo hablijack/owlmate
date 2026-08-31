@@ -192,16 +192,23 @@
 // Abtastungen - 200 bis 400 ms, und das faellt staerker auf als das Zittern.
 // Ein lebendiger Blick war dem Besitzer wichtiger als ein ruhiger.
 //
+// DIESE BEGRUENDUNG IST SEIT 2026-08-31 UEBERHOLT, und zwar genau in dem
+// Punkt, auf dem sie stand. Die Inferenz laeuft auf Kern 0 (include/vision.h),
+// die Augen zeichnen durchgehend mit 28-29 Hz statt in Schueben, und ein
+// Blickziel kommt alle 181 ms statt alle 382 ms. Die Rechnung oben ging von
+// 5 Abtastungen je Sekunde aus - es sind jetzt 5,5, aber vor allem sind es
+// 29 GEZEICHNETE Bilder je Sekunde statt 6. Eine kurze Interpolation zwischen
+// zwei Blickzielen hat damit 5 Bilder Zeit statt einem und kann als
+// Augenbewegung durchgehen. Ein Filter ist also NEU zu bewerten und nicht mehr
+// durch diesen Absatz erledigt - siehe BACKLOG.md Step 4b.
+//
 // Gemessen und WIDERLEGT, bitte nicht wiederholen:
-//   * FACE_DETECT_INTERVAL_MS 100 -> 0: 19 ms schneller, kostet 85 % Bildrate
-//     (40 -> 6 Hz)
 //   * FACE_SCORE_THRESHOLD_MSR 0.1 -> 0.3 -> 0.5: Inferenz kaum schneller
 //     (5,0 -> 6,0 Hz), Trefferquote 100 -> 85 -> 31 %, nutzbares Blickziel
 //     also 200 -> 207 -> 528 ms. 0,1 ist bereits richtig.
-//
-// Der einzige echte Hebel ist, die Inferenz auf den zweiten Kern zu legen.
-// Erst mit deutlich mehr Abtastungen kann ein Filter ruhig UND schnell sein.
-// Siehe BACKLOG.md und specs/009-face-detection.spec.
+//   * "FACE_DETECT_INTERVAL_MS 100 -> 0 kostet 85 % Bildrate (40 -> 6 Hz)":
+//     galt nur, solange die Inferenz in loop() lief. Der Zusammenhang
+//     existiert nicht mehr; der Wert steht wieder auf 100.
 
 // Dauer EINES Blinzelschritts in Millisekunden. Die Lidkurve laeuft ueber
 // 2 * BLINK_SPEED Schritte (schliessen, oeffnen), speed 3 also 6 Schritte =
@@ -337,26 +344,47 @@
 #ifndef FACE_DETECTION_ENABLED
 #define FACE_DETECTION_ENABLED 1
 #endif
-// Mindestabstand zwischen zwei Erkennungslaeufen. KEIN Ratenregler - die
-// Inferenz selbst braucht ~170 ms, dieser Wert kommt oben drauf.
+// Mindestabstand zwischen zwei Erkennungslaeufen, jetzt auf KERN 0.
 //
-// 300 statt 100, und das ist ein bewusst getauschter Kompromiss, am
-// 2026-08-31 auf Hardware gegeneinander bewertet:
+// Seit 2026-08-31 laeuft die Inferenz in einer eigenen Aufgabe auf Kern 0
+// (siehe include/vision.h), nicht mehr in loop(). Damit ist dieser Wert das
+// erste Mal wirklich nur noch ein Mindestabstand: er verzoegert kein Bild mehr,
+// sondern begrenzt nur, wie oft Kern 0 das PSRAM und den Cache mitbenutzt.
+//
+// Der Wert war bis dahin ein TAUSCH, weil die Inferenz die Hauptschleife
+// blockierte - am 2026-08-31 auf Hardware gegeneinander bewertet:
 //
 //   100: neues Blickziel alle 180 ms, Bildrate 5,8 Hz  -> Augen fast dauernd
 //        eingefroren, wirkt tot
 //   300: neues Blickziel alle 411 ms, Bildrate 29 Hz   -> Augen laufen fluessig,
 //        folgen aber traeger. Vom Besitzer als deutlich lebendiger bewertet
 //
-// Denn die Inferenz BLOCKIERT die Hauptschleife. Bei 100 ms steckt fast jede
-// Runde in der Erkennung; bei 300 ms laeuft die Schleife 300 ms frei bei ~40 Hz
-// und steht dann ~170 ms still. Das ergibt ein sichtbares Stocken etwa zweimal
-// je Sekunde - beschrieben als "mal echtzeitnah, mal haengt es".
+// Dieser Tausch existiert nicht mehr, deshalb steht der Wert wieder auf 100.
+// ACHTUNG bei einer weiteren Senkung: die Inferenz braucht ohnehin ~180 ms, der
+// Abstand kommt oben drauf. 100 -> 0 kauft also hoechstens 100 ms Blickalter,
+// laesst Kern 0 aber dauerhaft am Anschlag laufen (Cache- und PSRAM-Konkurrenz
+// mit dem Rendern auf Kern 1, plus IDLE0 knapp am Task-Watchdog vorbei).
+#define FACE_DETECT_INTERVAL_MS 100
+
+// Stapel der Erkennungsaufgabe in BYTE (die ESP-IDF-Portierung von
+// xTaskCreate rechnet in Byte, nicht in Worten).
 //
-// Beides ist nur ein Notbehelf: der Tausch verschwindet, sobald die Inferenz
-// auf dem zweiten Kern laeuft (BACKLOG Step 6 Punkt 2). Dann gibt es beides,
-// und dieser Wert kann zurueck auf 100.
-#define FACE_DETECT_INTERVAL_MS 300
+// 8192, weil die Inferenz vorher auf dem Arduino-Loop-Stapel lief und der genau
+// so gross ist (CONFIG_ARDUINO_LOOP_STACK_SIZE=8192) - dort hat esp-dl
+// nachweislich funktioniert, inklusive des Modell-Ladens beim ersten run().
+// Ein Stapelueberlauf hier waere ein sporadischer Absturz mitten in der
+// Erkennung, deshalb meldet die Telemetrie face.stack_free (Tiefstand) dauerhaft
+// mit. Verkleinern nur gegen diese Zahl, nicht nach Gefuehl.
+#define VISION_TASK_STACK 8192
+
+// Prioritaet der Erkennungsaufgabe. 1 = dieselbe wie der Arduino-Loop.
+// Hoeher bringt nichts (sie ist auf Kern 0 allein), niedriger wuerde sie im
+// UPDATE-Modus hinter den WLAN-Aufgaben verhungern - dort ist sie aber aus.
+#define VISION_TASK_PRIORITY 1
+
+// Wartezeit einer Runde, wenn die Erkennung abgeschaltet ist (UPDATE-Modus).
+// Nur, damit die Aufgabe nicht im Leerlauf rotiert.
+#define VISION_PAUSED_POLL_MS 100
 
 // esp-dl v3 knobs. NOTE the old MSR01 parameters (top_k, resize_scale) do not
 // exist in v3 -- the model handles its own preprocessing. What remains are the

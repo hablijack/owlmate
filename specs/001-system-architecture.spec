@@ -43,12 +43,27 @@ supervisor to freeze the owl's face. `NAVIGATING` is the one persistent override
 and it carries its own escape hatch — `NAV_TIMEOUT_MS` (5 s) without a refresh
 returns the head to centre.
 
-**The firmware is four files, and `main.cpp` is wiring.** Split 2026-08-31 from
+**The firmware is five files, and `main.cpp` is wiring.** Split 2026-08-31 from
 a single ~930-line `main.cpp` that held the state machine, the NDJSON protocol,
 the hardware check and the boot wiring together: `behavior.cpp`, `protocol.cpp`,
 `hardware_check.cpp`, and a `main.cpp` that only constructs, boots and loops.
-`include/owl.h` carries the little they share (the `State` enum, the peripheral
-externs, `faceResult`, `loopHz`).
+`vision.cpp` joined them later the same day when the face-detection inference
+moved to core 0. `include/owl.h` carries the little they share (the `State`
+enum, the peripheral externs, `faceResult`, `loopHz`).
+
+**The owl uses both cores, and the split is by deadline, not by subsystem.**
+Core 1 runs the Arduino loop (`CONFIG_ARDUINO_RUNNING_CORE=1`): protocol, state
+machine, eyes, servos, telemetry — everything with a frame deadline. Core 0 runs
+one task, `vision.cpp`, doing camera capture and esp-dl inference, which has no
+frame deadline and only needs to finish eventually. That is the whole
+concurrency in this firmware, and it should stay that way.
+
+`faceResult` is the only state that crosses the two, and it crosses under one
+`portMUX_TYPE` as a whole-struct copy — never field by field. A spinlock and not
+a FreeRTOS mutex, deliberately: a mutex can block the renderer, and the
+renderer's frame rate is the entire point of the exercise. `loop()` takes its
+copy once per iteration, before `behavior::update()`, so the state machine and
+`sendTelemetry()` cannot disagree about what the owl is currently looking at.
 
 Reason: R-001.2 says there is exactly one state machine, and this file was where
 you had to go to check that — but reading it meant reading the protocol parser

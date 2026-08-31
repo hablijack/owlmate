@@ -1,7 +1,7 @@
 # SPEC-011: Diagnostic builds and host tools
 
 Status: implemented
-Verified: 2026-08-26 — every tool used in anger during that session
+Verified: 2026-08-31 — every tool used in anger; trefferquote extended for loop_hz
 Depends on: 002
 
 ## Intent
@@ -86,7 +86,29 @@ explicitly first or is packaged as a script the user starts themselves.
   absent or further away, not a defect. `tools/trefferquote.py` prints the state
   and face size alongside the rate so this is visible in the output rather than
   inferred. Its `--live` mode exists because the person watching the owl and the
-  person reading the terminal are often not in the same room.
+  person reading the terminal are often not in the same room. **Say out loud
+  when you are in front of the camera and when you are not** — this cost most of
+  a session on 2026-08-31, because a reading taken with nobody in view is
+  indistinguishable from a broken owl, and one was mistaken for exactly that.
+* **Attaching `cat` to an unread port corrupts the first `loop_hz` samples.**
+  Measured 2026-08-31: a fresh attach read `4 22 40 56 50 …` while an immediate
+  repeat read `47 47 47 53 …`. Likely the full USB CDC TX buffer draining once a
+  reader appears. `trefferquote.py --datei` therefore discards the first two
+  telemetry frames. Without that, **every** capture reports a stall that was only
+  the measurement — precisely the class of artefact this project loses days to,
+  and it appears in the one metric added to detect stalls.
+* **Report `loop_hz` as a sequence, not a mean.** The tool prints both, plus a
+  count of samples below 15 Hz (the rate at which eye motion stops reading as
+  motion). The mean is actively misleading here: moving the inference to core 0
+  took the mean *down* (30.2 → 28.3 Hz) while removing the stall entirely
+  (3 of 55 samples below 15 Hz → 0 of 58). A tool that reported only the mean
+  would have scored the fix as a regression. See SPEC-009.
+* **`face.capture_ms` / `face.infer_ms` exist because a sum cannot be
+  attributed.** Added 2026-08-31 and they immediately overturned a figure three
+  documents asserted — the detection cycle had been "measured" at ~170-200 ms by
+  dividing into `loop_hz`, which also contains the eye render. Timed directly it
+  is 48-91 ms. **A subtraction is not a measurement**; if a number matters,
+  instrument the thing itself.
 
 Diagnostics that changed a conclusion, and what they cost:
 

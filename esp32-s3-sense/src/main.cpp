@@ -4,6 +4,7 @@
 #include "owl.h"
 #include "behavior.h"
 #include "protocol.h"
+#include "vision.h"
 #include "hardware_check.h"
 
 // ============================================================================
@@ -14,6 +15,7 @@
 //
 //   behavior.cpp        the state machine + the OTA update mode
 //   protocol.cpp        the NDJSON wire contract with rpi-brain
+//   vision.cpp          the face-detection task on core 0
 //   hardware_check.cpp  the -DHARDWARE_CHECK=1 wiring probe
 //
 // It was ~930 lines holding all four, which meant reading all four before any
@@ -37,7 +39,9 @@ Eyes eyes(lcdLeft, lcdRight);
 Sensors sensors;
 ServoController servos;
 
-// The last thing the camera saw, refreshed below on FACE_DETECT_INTERVAL_MS.
+// The last thing the camera saw. Produced by the core-0 task in vision.cpp;
+// loop() copies the newest result in here once per iteration so the state
+// machine and the telemetry both work from ONE coherent snapshot.
 FaceResult_t faceResult = {0};
 
 // Measured loop rate, reported in telemetry.
@@ -45,7 +49,6 @@ float loopHz = 0.0f;
 
 // Loop-local bookkeeping: nothing outside this file reads these.
 static uint32_t lastTelemetry = 0;
-static uint32_t lastFaceDetect = 0;
 static uint32_t loopCount = 0;
 static uint32_t lastLoopMeasure = 0;
 
@@ -125,7 +128,10 @@ void setup() {
 
     // Initialize face detection (optional)
 #if FACE_DETECTION_ENABLED
-    if (FaceDetector_Init()) {
+    // Camera + model first, then the core-0 task that drives them. Order
+    // matters: vision::begin() must not start a task that would call an
+    // uninitialised detector.
+    if (FaceDetector_Init() && vision::begin()) {
         Serial.println(F("Face detection enabled"));
     } else {
         Serial.println(F("Face detection failed - running without it"));
@@ -167,23 +173,26 @@ void loop() {
     // Parse incoming commands
     protocol::poll();
 
+    // Pick up whatever the core-0 detection task has found. This is a ~40-byte
+    // copy under a spinlock, not an inference: the ~180 ms of camera + esp-dl
+    // work happens on the other core (see include/vision.h). Until 2026-08-31
+    // FaceDetector_Detect() was called right here, which froze the eyes for the
+    // whole inference -- 5.8 Hz render while tracking a face.
+    //
+    // Read BEFORE behavior::update() so the state machine and sendTelemetry()
+    // below see the same snapshot for this whole iteration.
+#if FACE_DETECTION_ENABLED
+    vision::setEnabled(behavior::current() != State::UPDATE);
+    vision::latest(faceResult);
+#else
+    faceResult.detected = false;
+#endif
+
     // Update state machine
     behavior::update();
 
     // Serve the /update page while in update mode (no-op otherwise).
     behavior::serveUpdateClient();
-
-    // Run face detection (if enabled), rate-limited so the expensive
-    // inference doesn't starve the rest of the loop. Between runs the
-    // state machine keeps using the last result in faceResult.
-#if FACE_DETECTION_ENABLED
-    if (behavior::current() != State::UPDATE && millis() - lastFaceDetect >= FACE_DETECT_INTERVAL_MS) {
-        FaceDetector_Detect(&faceResult);
-        lastFaceDetect = millis();
-    }
-#else
-    faceResult.detected = false;
-#endif
 
     // Render eyes
     eyes.render();

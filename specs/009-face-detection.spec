@@ -1,6 +1,6 @@
 # SPEC-009: On-device face detection
 
-Status: partial — works; detection rate in the firmware needs work
+Status: works; inference on core 0 since 2026-08-31, render no longer stalls
 Verified: 2026-08-26 — end to end, state machine reacts, eyes respond
 Depends on: 002, 008
 
@@ -15,7 +15,10 @@ lets the owl be interesting when unplugged.
 * **R-009.1** Detection runs on the ESP32, not on the Pi.
 * **R-009.2** A detected face yields a bounding box and a gaze vector in
   −1..1 relative to the frame centre.
-* **R-009.3** Detection must not stall the main loop.
+* **R-009.3** Detection must not stall the main loop. Held only on paper until
+  2026-08-31, when the inference moved to core 0 — before that it stalled the
+  loop for the length of every cycle. Backed by the before/after measurement
+  under Verified facts.
 * **R-009.4** Intermittent detection must be observable in telemetry.
 
 ## Decisions
@@ -78,16 +81,41 @@ nearest person, and the one to follow.
   `CAM_DETECT_CROP_DIV`'s crop, because the exposure decision is made on the
   full frame. Untested lever: `set_ae_level()` / `set_aec2()`.
 
-* **Tracking collapses the render rate to ~6 fps, and that is the dominant
-  "the eyes feel dead" cause.** Measured 2026-08-31 on hardware, twice, by two
-  different methods: `loop_hz` is 29-44 Hz at idle but **5.8 Hz mean (1.9-11.1)
-  while a face is being tracked at a 100 % hit rate**. Inference blocks the main
-  loop, so during tracking every loop iteration *is* a detection cycle and the
-  eyes redraw at the detection rate. Nothing in the eye code can fix this; see
-  BACKLOG "Inference on the second core".
-* ~~Inference **48 ms**, stable over 212 frames → **~21 frames/s**.~~ MEASURED
-  FALSE on the owl 2026-08-31, see Falsified. (The README
-  previously projected ~25 fps for the old v1 model; this is comparable.)
+* **Inference runs on core 0 since 2026-08-31, and the periodic stall is
+  gone.** `FaceDetector_Detect()` used to be called from `loop()`, so the eyes
+  stopped drawing for the length of every inference. It now runs in its own
+  FreeRTOS task pinned to core 0 (`src/vision.cpp`); `loop()` only copies the
+  latest result. Measured before and after in one sitting, face in frame at a
+  normal seating distance:
+
+  | | before (blocking, interval 300) | after (core 0, interval 100) |
+  |---|---|---|
+  | loop_hz min / mean / max | 10.8 / 30.2 / 44.1 | 15.6 / **28.3** / 61.7 |
+  | samples below 15 Hz | **3 of 55** | **0 of 58** |
+  | new gaze target | every 382 ms | every **181 ms** |
+  | detection attempts | 2.6 Hz | 6.0 Hz |
+  | hit rate | 100 % | 92 % |
+
+  **The mean render rate did not improve — it fell slightly — and that is not
+  a failure, it is the whole finding.** What the offload removed is the
+  *spread*: the before sequence reads
+  `11 29 31 35 32 42 26 41 33 17 36 31 40 26 42 33 …`, the after sequence
+  `29 29 29 27 27 29 29 29 29 21 29 29 25 28 28 …`. Judge this change on the
+  sequence and on the count of samples below 15 Hz, never on the mean. At idle
+  the mean does move, 40.8 → 55.8 Hz, because there the loop is otherwise free.
+* **A detection cycle is 48-91 ms and is 100 % compute — the camera is never
+  waited on.** Measured directly 2026-08-31 via `face.capture_ms` /
+  `face.infer_ms` rather than inferred from `loop_hz`. `capture_ms` was **0 in
+  every sample**: `fb_count=2` with `CAMERA_GRAB_WHEN_EMPTY` always has a frame
+  ready. `infer_ms` is 48 ms with no face in frame and 48-91 ms (mean 66) with
+  one — a *successful* inference is the slower one, because more candidates
+  reach the refinement stage.
+* **Moving to core 0 costs ~3 ms of inference and buys back the whole block.**
+  Control build, same instrumentation, blocking call on core 1, nobody in
+  frame: `infer_ms` 47-50 (mean 48), `loop_hz` 23.4 / 40.8 / 44.2. Same
+  conditions on core 0: `infer_ms` 48-63 (mean 51), `loop_hz` 28.0 / 55.8 /
+  61.8. The 3 ms is cache and PSRAM contention with the renderer; it is a good
+  trade.
 * Detection scores 0.58–1.00.
 * End to end in the real firmware: `face.total` climbing, confidence 0.61–0.87,
   state going `idle → detecting → interacting`, eye expression turning `happy`.
@@ -98,15 +126,35 @@ nearest person, and the one to follow.
 
 ## Falsified
 
-* **"Inference is 48 ms / ~21 fps."** That figure came from the `facelab`
-  prototype and is not true of the owl. Measured 2026-08-31 on hardware: a
-  detection cycle is **~170-200 ms**, and it is not even constant — it depends
-  on how much the coarse stage finds. With a clean, well-lit face the loop ran
-  at **5 Hz**; with a face the detector struggled on (darkened glasses) it ran
-  at **11 Hz**, because a *failed* inference is a *fast* inference. So a better
-  picture is more expensive to process. This is the second time a `facelab`
-  number has been trusted without re-measuring it here; see the note about its
-  hit rate below.
+* ~~**"Inference is 48 ms / ~21 fps."** That figure came from the `facelab`
+  prototype and is not true of the owl; a detection cycle is ~170-200 ms.~~
+  **THIS FALSIFICATION WAS ITSELF WRONG, and it is the most instructive entry
+  in this file.** Written 2026-08-31; overturned the same day by direct
+  measurement. The 48 ms was right all along: with `face.infer_ms` reporting
+  the time around `detector->run()` itself, a cycle is **48 ms** with no face
+  and **48-91 ms** with one.
+
+  The error was in how ~170-200 ms was obtained. Nobody timed the inference.
+  It was derived from `loop_hz` — 5.8 Hz while tracking, therefore 172 ms per
+  iteration, therefore a 172 ms inference. But a loop iteration is `delay(16)`
+  plus `eyes.render()` plus the inference, and during tracking the render is
+  the expensive part, because the iris moves on every hit and the dirty-row
+  flush then has real work to do. The inference was charged for the eyes.
+
+  Two things follow, and they generalise past this bullet. **A subtraction is
+  not a measurement**: `loop_hz` bounds the sum of everything in the loop and
+  attributes none of it, and every number in this project that was derived
+  that way has been wrong. And **a falsification deserves the same scrutiny as
+  the claim it kills** — this one was believed instantly because it fit the
+  `facelab`-is-not-a-control lesson learned two days earlier, and a correct
+  lesson made a wrong conclusion look well-supported.
+
+  **Still unexplained, and left open deliberately:** the recorded 5.8 Hz at
+  `FACE_DETECT_INTERVAL_MS` 100 does not follow from a 66 ms inference and a
+  ~35 ms iteration, which predict ~17 Hz. The interval-300 reading *was*
+  reproduced exactly on 2026-08-31 (30.2 Hz mean, dips to 11), so that half of
+  the record is sound; the interval-100 reading was never re-taken on the old
+  firmware and should not be trusted without doing so.
 * **"`FACE_DETECT_INTERVAL_MS` throttles the detection rate."** It is a floor,
   not a rate, and it is not the limit. Measured 2026-08-31: 100 -> 0 moved the
   gaze update from 190 ms to 171 ms (19 ms) while dropping the render rate from
@@ -151,6 +199,15 @@ nearest person, and the one to follow.
   but telemetry sampled an instantaneous flag at 2 Hz and missed all of them.
   Hence `face.total` and `FACE_HOLD_MS`.
 
+**The owner's verdict on the finished thing: "it feels really *alive* now."**
+That is the acceptance criterion this subsystem is actually held to, and it is
+recorded because the numbers alone would not have settled it — the mean render
+rate *fell*. The judgement that liveliness is made of render rate rather than
+tracking latency was made on the panel earlier the same day (interval 300 at
+29 Hz beat interval 100 at 5.8 Hz, "smoother, more alive — even though it
+lags"); the offload removed the need to choose, and the verdict above is on
+having both.
+
 ## Acceptance
 
 1. Boot log: `Face detection enabled` and the sensor PID line with `vflip=1`.
@@ -161,16 +218,14 @@ nearest person, and the one to follow.
 
 ## Open
 
-* **The detection rate is capped by the eye renderer, and that cap is the whole
-  story.** Lead 1 below is now measured and confirmed; lead 2 was never reached.
-  Measured 2026-08-28 with `loop_hz` and `face.attempts` in telemetry:
-  `FACE_DETECT_INTERVAL_MS` (100 ms, i.e. 10 attempts/s) is **entirely
-  non-binding** — detection runs on *every* loop iteration because the loop
-  itself only manages 4.4 Hz. Of that ~227 ms iteration, ~160 ms is
-  `eyes.render()` and ~47 ms is inference. So attempts sit at ~4.4/s no matter
-  what the interval says, and the fix belongs in SPEC-003 (the 149.9 ms flush),
-  not here. Detector accuracy is not the problem: **54 % of attempts hit**, at
-  confidence 0.69–1.00, once the camera is actually pointed at a face.
+* ~~**The detection rate is capped by the eye renderer.**~~ RESOLVED
+  2026-08-31 by moving the inference to core 0; the two are now independent.
+  The 2026-08-28 reading behind this — a ~227 ms iteration of which ~160 ms was
+  `eyes.render()` and ~47 ms inference — is worth keeping for one reason: that
+  47 ms was the *correct* inference cost, sitting in this file three days
+  before it was wrongly declared falsified. Detector accuracy was never the
+  problem: **54 % of attempts hit**, at confidence 0.69–1.00, once the camera
+  is actually pointed at a face.
 * **The 6-hits-in-25-s baseline is not trustworthy.** It was recorded 2026-08-26,
   before anyone had looked at what the camera sees. On 2026-08-28 the same
   firmware scored **0 hits in 31.5 s** with a face deliberately held still —
@@ -240,8 +295,20 @@ face sitting at the model's size limit, not of a threshold or a race.
   owl only sees the middle half of its camera view. `3` would extend range
   further at more cost. Nobody has measured what the owl's useful cone actually
   needs to be.
-* Stale frames (`CAMERA_GRAB_WHEN_EMPTY` vs `CAMERA_GRAB_LATEST`) — a weak lead
-  now, see above.
+* ~~Stale frames (`CAMERA_GRAB_WHEN_EMPTY` vs `CAMERA_GRAB_LATEST`).~~ Closed
+  2026-08-31: `face.capture_ms` is 0 in every sample, so `esp_camera_fb_get()`
+  always has a frame waiting. Switching grab modes cannot buy time that is not
+  being spent. It could still change frame *age*, but nothing points there.
+* **The render is now the larger cost during tracking, not the inference.**
+  48-91 ms of inference on core 0 against a ~35 ms loop iteration on core 1,
+  and it is the latter that sets the 28-29 Hz the eyes draw at. Anything that
+  wants a higher render rate belongs in SPEC-003, not here.
+* **`FACE_DETECT_INTERVAL_MS` has not been re-tuned since the offload.** It is
+  back to 100 as a floor between cycles, which with a 48-91 ms inference puts
+  attempts at ~6 Hz. Lowering it would let core 0 run flat out for a gaze
+  target maybe 30 % sooner, at the cost of permanent cache and PSRAM
+  contention with the renderer — the 3 ms already measured is what that costs
+  at a 100 ms duty cycle. Untested; measure `loop_hz` spread, not the mean.
 
 ## Reference
 

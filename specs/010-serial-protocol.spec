@@ -43,7 +43,7 @@ times over during hardware debugging.
      "update":{"ssid","password","ip","url"}, // only while in UPDATE
      "servos":[5],
      "face":{"detected","x","y","w","h","confidence","gaze_x","gaze_y",
-             "total","attempts"},
+             "total","attempts","capture_ms","infer_ms","stack_free"},
      "eye":…}
 
 **A sub-object is omitted when its device is absent.** `imu` and `gps` appear
@@ -67,6 +67,21 @@ opposite fixes. The pair settled it in one measurement — attempts at 4.4/s
 against a `FACE_DETECT_INTERVAL_MS` promising 10/s, so the loop was the cause
 (SPEC-009). Prefer shipping the denominator with the counter rather than adding
 it during the next investigation.
+
+**A duration must be reported split, not summed.** `face.capture_ms` and
+`face.infer_ms` were added 2026-08-31 with the move of the inference to core 0,
+and they immediately overturned a figure two documents asserted. The detection
+cycle had been "measured" at ~170-200 ms by dividing into `loop_hz` — but a loop
+iteration is the eye render *plus* the inference, so the subtraction charged the
+detector for the eyes. Timed directly the cycle is 48-91 ms, and `capture_ms` is
+0 in every sample: the camera is never waited on. Neither fact is recoverable
+from the sum. See SPEC-009 Falsified.
+
+**`face.stack_free`** is the low-water mark of the core-0 detection task's
+stack, in bytes. esp-dl used to run on the Arduino loop task; on its own task
+its stack need was a fresh unknown whose failure mode is a silent overflow
+mid-inference, so the headroom is reported continuously rather than checked
+once. Measured 5,584 bytes free of 8,192 (`VISION_TASK_STACK`).
 
 **Expression names come from one table** in `Eyes.cpp` (`NAMES[]`), which backs
 both directions. The RPi copy is **generated** from it

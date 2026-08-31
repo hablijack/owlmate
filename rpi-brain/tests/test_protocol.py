@@ -55,7 +55,7 @@ FULL_FRAME = {
     "face": {
         "detected": True, "x": 10, "y": 20, "w": 30, "h": 40,
         "confidence": 0.87, "gaze_x": -0.5, "gaze_y": 0.25, "total": 57,
-        "attempts": 233,
+        "attempts": 233, "capture_ms": 27, "infer_ms": 174, "stack_free": 3120,
     },
     "loop_hz": 10.5,
 }
@@ -200,9 +200,28 @@ class TestDiagnosticFields(unittest.TestCase):
         t = parse(FULL_FRAME)
         self.assertEqual(t.face.attempts, 233)
 
+    def test_face_cycle_timing(self):
+        # capture_ms vs infer_ms: waiting on the camera against computing. The
+        # sum was known (~170-200 ms) long before the split was, and without
+        # the split it was not decidable whether moving the inference to the
+        # ESP32's core 0 could raise the detection rate at all -- a
+        # capture-bound cycle gains nothing from a free core.
+        t = parse(FULL_FRAME)
+        self.assertEqual(t.face.capture_ms, 27)
+        self.assertEqual(t.face.infer_ms, 174)
+
+    def test_face_stack_free(self):
+        # Low-water mark of the ESP32's core-0 detection task stack. esp-dl ran
+        # on the Arduino loop task's 8192-byte stack before 2026-08-31; on its
+        # own task the headroom is a new unknown, and its failure mode is a
+        # silent overflow in the middle of an inference.
+        t = parse(FULL_FRAME)
+        self.assertEqual(t.face.stack_free, 3120)
+
     def test_loop_hz(self):
-        # Measured main-loop rate. Face detection runs from loop(), so this is
-        # the ceiling on the detection rate no matter what the interval says.
+        # Measured main-loop rate, i.e. the RENDER rate. It used to also be the
+        # ceiling on the detection rate, because the inference ran from loop();
+        # since 2026-08-31 it runs on core 0 and the two are independent.
         t = parse(FULL_FRAME)
         self.assertAlmostEqual(t.loop_hz, 10.5)
 
@@ -212,6 +231,9 @@ class TestDiagnosticFields(unittest.TestCase):
         self.assertEqual(t.vibration.pulses, 0)
         self.assertEqual(t.face.total, 0)
         self.assertEqual(t.face.attempts, 0)
+        self.assertEqual(t.face.capture_ms, 0)
+        self.assertEqual(t.face.infer_ms, 0)
+        self.assertEqual(t.face.stack_free, 0)
         self.assertEqual(t.loop_hz, 0.0)
 
 

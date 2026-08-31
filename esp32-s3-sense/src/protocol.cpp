@@ -209,6 +209,15 @@ void sendTelemetry() {
     // die ein Momentanwert von "detected" verschluckt.
     doc["face"]["total"] = faceResult.total;
     doc["face"]["attempts"] = faceResult.attempts;
+    // Laufzeit des letzten Durchlaufs, in zwei Posten: Warten auf die Kamera
+    // gegen Rechnen. Ohne die Aufteilung ist nicht entscheidbar, ob eine
+    // hoehere Erkennungsrate ueberhaupt erreichbar ist.
+    doc["face"]["capture_ms"] = faceResult.capture_ms;
+    doc["face"]["infer_ms"] = faceResult.infer_ms;
+    // Stapel-Tiefstand der Erkennungsaufgabe auf Kern 0 (Byte). Ein Ueberlauf
+    // dort waere ein sporadischer Absturz mitten in der Inferenz; siehe
+    // VISION_TASK_STACK.
+    doc["face"]["stack_free"] = faceResult.stack_free;
 
     // Eye expression (name comes from the same table parseExpression() uses)
     doc["eye"] = Eyes::nameOf(eyes.getCurrentExpression());

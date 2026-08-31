@@ -43,6 +43,19 @@ class FaceDetection:
     # the main loop rarely getting round to running it -- and they need
     # opposite fixes. total/attempts separates them; see Telemetry.loop_hz.
     attempts: int = 0
+    # How long the last detection cycle took, split into the two costs that
+    # cannot be traded off against each other while only their sum is known:
+    # capture_ms is WAITING for a camera frame, infer_ms is computing (crop +
+    # esp-dl run). ~170-200 ms together. Since 2026-08-31 the cycle runs on the
+    # ESP32's core 0, so it no longer bounds loop_hz -- these two say whether a
+    # higher detection rate is even reachable.
+    capture_ms: int = 0
+    infer_ms: int = 0
+    # Low-water mark of the ESP32 core-0 detection task's stack, in bytes.
+    # esp-dl used to run on the Arduino loop task's stack; on its own task its
+    # stack need is a fresh question whose failure mode is a silent overflow
+    # mid-inference. 0 until the first cycle completes.
+    stack_free: int = 0
 
 
 @dataclass(frozen=True)
@@ -203,6 +216,9 @@ _FACE_FIELDS = (
     ("gaze_y", "gaze_y", float),
     ("total", "total", int),
     ("attempts", "attempts", int),
+    ("capture_ms", "capture_ms", int),
+    ("infer_ms", "infer_ms", int),
+    ("stack_free", "stack_free", int),
 )
 _UPDATE_FIELDS = (
     ("ssid", "ssid", str),

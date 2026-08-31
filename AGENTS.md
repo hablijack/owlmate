@@ -66,6 +66,13 @@ The main env sets `-DCORE_DEBUG_LEVEL=0`: this USB CDC port carries the NDJSON p
 parses, so core log lines are protocol garbage. The diagnostic envs override `build_flags` and
 therefore keep full logging.
 
+**It only silences the *Arduino* core, not ESP-IDF components** — observed 2026-08-31 the first
+time anyone watched the 4-tap OTA transition: `WiFi.softAP()` puts about forty `I (…) wifi:` /
+`phy_init` / `esp_netif_lwip` lines straight onto the protocol port, and the RPi logs a parse
+warning for each. Harmless but exactly the noise the flag exists to prevent; logged as `BACKLOG.md`
+Step 6 item 6. If you need a genuinely quiet port, the lever is `CONFIG_LOG_DEFAULT_LEVEL_NONE`
+in `sdkconfig.defaults`, not `CORE_DEBUG_LEVEL`.
+
 `HARDWARE_CHECK` (in `include/config.h`, default `0`) replaces the normal boot with
 `runHardwareCheck()`: probes both LCDs, PCA9685, GPS, BNO055, vibration and camera, prints one
 `{"type":"hardware_check",...}` line (its `i2c_found` array lists every responding address), then
@@ -117,7 +124,7 @@ taking the BNO055 calibration with it. Flash the pieces separately:
 ### RPi brain (`rpi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (177 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (179 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
@@ -137,7 +144,7 @@ user and enables `robot-owl-brain.service`; on the Pi, edit
 
 ## Firmware architecture
 
-Four source files, one job each — split out of a single ~930-line `main.cpp` on 2026-08-31, because
+Five source files, one job each — split out of a single ~930-line `main.cpp` on 2026-08-31, because
 that file had to be read in full before any firmware change could be made safely:
 
 | file | owns |
@@ -145,7 +152,12 @@ that file had to be read in full before any firmware change could be made safely
 | `src/main.cpp` | **wiring only** — constructs the peripherals, `setup()`, `loop()` |
 | `src/behavior.cpp` | the state machine, the supervisor overrides, OTA update mode |
 | `src/protocol.cpp` | `handleCommand()` / `sendTelemetry()` / `poll()` — the NDJSON wire contract |
+| `src/vision.cpp` | the face-detection task on **core 0**, and the one piece of cross-core state |
 | `src/hardware_check.cpp` | `runHardwareCheck()`, built **only** under `-DHARDWARE_CHECK=1` |
+
+**Core 1 runs everything with a frame deadline; core 0 runs the inference.** That is the whole
+concurrency in this firmware — keep it that way. `faceResult` is the only state crossing the two,
+and it crosses as a whole-struct copy under one spinlock.
 
 `include/owl.h` is the only thing they share: the `State` enum, the peripheral externs, `faceResult`
 and `loopHz`. **Anything only one module needs stays a `static` inside that module's `.cpp`** —
@@ -304,26 +316,56 @@ exists**, so delete the generated one after changing defaults or nothing happens
 **Never flash `firmware.factory.bin` at 0x0** — it spans past 0x9000 and wipes the NVS partition,
 taking the BNO055 calibration with it. Flash bootloader/partitions/boot_app0/firmware separately.
 
-**Inference blocks the main loop, and that is what makes the eyes look dead.**
-Measured 2026-08-31: `loop_hz` is 29-44 Hz at idle and **5.8 Hz while tracking a
-face at a 100 % hit rate** — the eyes redraw about six times a second exactly
-when they are supposed to look alive. A detection cycle is **~170-200 ms** on
-this owl, *not* the 48 ms recorded from `facelab`, and it is not even constant:
-a *successful* inference is the slow one, because more candidates reach the
-refinement stage. Two consequences, both learned the hard way:
+**Inference runs on core 0, and it must stay there.** It used to be called
+straight from `loop()`, which froze the eyes for the length of every cycle —
+the long-unexplained "sometimes realtime, sometimes it lags a lot". Since
+2026-08-31 `src/vision.cpp` owns a FreeRTOS task pinned to core 0 (the Arduino
+loop has core 1, `CONFIG_ARDUINO_RUNNING_CORE=1`) and `loop()` only copies the
+latest result. Measured before and after in one sitting with a face in frame:
 
+| | before | after |
+|---|---|---|
+| `loop_hz` min / mean / max | 10.8 / 30.2 / 44.1 | 15.6 / **28.3** / 61.7 |
+| samples below 15 Hz | **3 of 55** | **0 of 58** |
+| new gaze target | every 382 ms | every **181 ms** |
+
+**Judge this on the sequence, never on the mean — the mean went down.** What
+changed is the spread: `11 29 31 35 32 42 26 41 33 17 …` became
+`29 29 29 27 27 29 29 29 29 21 …`. A mean cannot show a stall, and here it hid
+one for weeks.
+
+`faceResult` is now cross-core state. It is copied whole under one
+`portMUX_TYPE` spinlock — never field by field, and deliberately not a FreeRTOS
+mutex, which could block the renderer.
+
+**A detection cycle is 48-91 ms and 100 % compute; the camera is never waited
+on.** `face.capture_ms` is 0 in every sample (`fb_count=2` always has a frame
+ready) and `face.infer_ms` is 48 ms with no face, 48-91 ms (mean 66) with one —
+a *successful* inference is the slow one, because more candidates reach the
+refinement stage.
+
+- **"A detection cycle is ~170-200 ms" was wrong, and how it was wrong matters
+  more than the number.** Nobody timed the inference; it was divided out of
+  `loop_hz`. But an iteration is `delay(16)` + `eyes.render()` + inference, and
+  during tracking the render is the expensive part — so the detector was
+  charged for the eyes. **A subtraction is not a measurement.** The `facelab`
+  48 ms that this "falsified" had been right all along. See
+  `specs/009-face-detection.spec` Falsified; it is the most instructive entry
+  in that file.
 - **Do not tune eye animation before checking `loop_hz` during tracking.** A
   whole session was spent adjusting a gaze filter that was itself being sampled
-  at 6 fps. No time constant, deadband or threshold can produce smooth motion at
-  that frame rate.
-- The fix is structural (move inference to core 0 — see `BACKLOG.md`), not a
-  constant.
+  at 6 fps. That block is now clear — at 28-29 Hz an interpolation has ~5
+  frames between gaze targets — but check the rate first, every time.
 
 **Measuring the owl changes it, in two ways that have both produced wrong
 conclusions.** `pyserial` asserts DTR/RTS on open and **reboots the board**, so
 every capture starts from a fresh boot; plain `cat /dev/cu.usbmodem*` does
 **not** and lets you watch a running owl (verified 2026-08-31 — uptime kept
-climbing across two connects). And the owner has to be *in front of the camera*
+climbing across two connects). But **discard the first two telemetry frames of a
+`cat` capture**: attaching to a port nobody has been reading collapses the first
+`loop_hz` sample (measured `4 22 40 56 50 …`, with an immediate repeat reading
+`47 47 47 53 …`). `trefferquote.py --datei` does this for you. Without it every
+capture reports a stall that was only the measurement. And the owner has to be *in front of the camera*
 for any detection number to mean anything: several readings of "0 hits" and
 "31 %" were nobody standing there, or standing further away, not a fault.
 `tools/trefferquote.py` reports hit rate, face size and the gaze-target interval
@@ -512,6 +554,7 @@ Before finishing any change, ask:
 | a constant in `config.h` | every doc quoting it — the checker names them |
 | a pin | `WIRING.md` (both tables) — the checker diffs them against `config.h` |
 | the telemetry format | the `_*_FIELDS` table **and** `specs/010`; R-010.5 says every field sent must be parsed |
+| anything about timing | measure it **directly**; a number divided out of `loop_hz` is a subtraction, not a measurement, and that is how "~170-200 ms inference" got into three files |
 | `NAMES[]` | run `rpi-brain/tools/gen_expressions.py`; never hand-edit the generated list |
 | a design decision, or falsified a belief | the owning spec — **especially its `Falsified` section**, which is the most valuable part of `specs/` |
 | what is left to do | `BACKLOG.md`, and only there |

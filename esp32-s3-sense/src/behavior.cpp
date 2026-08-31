@@ -176,7 +176,11 @@ void exitUpdateMode() {
     WiFi.mode(WIFI_OFF);
     transitionTo(State::IDLE);
     eyes.setGaze(0, 0);
-    faceResult.detected = false;
+    // faceResult is NOT cleared here any more, and must not be: it is a
+    // snapshot that loop() refreshes from the core-0 task every iteration, so
+    // a write here would be overwritten a few milliseconds later. Clearing on
+    // the way OUT of detection is vision::setEnabled(false)'s job, and that
+    // already happened when update mode was entered.
     Serial.println("{\"type\":\"update_mode_end\"}");
 }
 

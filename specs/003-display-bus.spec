@@ -143,18 +143,33 @@ chip-select fault.
       4.3 Hz   before any of this work
      10.5 Hz   after gating the dirty flag on a real change
      29 Hz     with the partial flush and a slower blink cadence
+     29 Hz     steady, once the inference left the loop (2026-08-31)
 
   Blink cadence matters here because every blink forces a redraw of both eyes;
   it went from ~1.6 s to ~4.5 s between blinks (`BLINK_GAP_MIN_MS`).
+
+  **The last row is the same number meaning something different, and the
+  distinction is the whole point.** The 29 Hz above was a *mean* over a loop
+  that ran at ~42 Hz between detections and stopped dead inside each one; the
+  29 Hz below is what every single sample reads, because `FaceDetector_Detect()`
+  now runs on core 0 (SPEC-009, SPEC-001). Judging this subsystem by its mean
+  hid a periodic freeze for weeks. Measure the sequence.
 
   **This did not improve the detection rate.** Attempts rose 4.36/s → 5.93/s but
   hits did not follow, because the real limit was elsewhere entirely — see
   SPEC-009, where the face turned out to be too small in frame. The loop work is
   worth having for responsiveness; it was not the cause it was believed to be.
 
+* **The render is now the largest cost in the main loop, and the loop is the
+  cap on the eye frame rate.** Since 2026-08-31 the inference is on core 0, so
+  what remains on core 1 is `delay(16)` plus this renderer: ~35 ms per iteration
+  while tracking (28-29 Hz) against ~18 ms idle (56 Hz, i.e. the `delay(16)`
+  ceiling). The difference is the iris moving on every gaze target, which now
+  arrives every 181 ms instead of every 382. Anything that wants a higher
+  tracking frame rate is work in *this* spec — no longer in SPEC-009.
 * DMA transfer for the remaining full-frame path is still unwritten. With the
   partial flush in place the payoff is much smaller, since full frames are now
-  rare.
+  rare. It is, however, the most obvious remaining lever on the 35 ms above.
 * Raising `LCD_SPI_FREQ` above 16 MHz is **not** a speed lever — see Falsified.
   It remains untested above 40 MHz for signal integrity, but there is no reason
   to raise it.

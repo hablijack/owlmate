@@ -1,7 +1,7 @@
 # SPEC-007: Vibration sensing and OTA entry
 
 Status: implemented
-Verified: 2026-08-26 — tap counting exact; OTA sequence end to end
+Verified: 2026-08-31 — tap counting exact; OTA sequence end to end, re-run after the core-0 split
 Depends on: 002 (dual-bank partitions)
 
 ## Intent
@@ -58,6 +58,15 @@ The sensor emits **bursts of pulses**, not a level:
 * OTA sequence verified end to end: four taps entered `UPDATE`, the SoftAP
   `RobotOwl-Update` came up, a phone connected and loaded the `/update` page, and
   a single tap returned the owl to normal operation.
+* **Re-verified 2026-08-31, after the `main.cpp` split and after the face
+  inference moved to core 0** — the two refactors most able to break it, since
+  WiFi and the new detection task share core 0. Four taps → `state=update`, eye
+  `update`, `{"type":"update_mode","ssid":"RobotOwl-Update",…}` with
+  `wifi driver task … core=0`; one tap → `{"type":"update_mode_end"}` and
+  detection resuming 7 s later. `face.detected` stayed false for the whole
+  session, which is `vision::setEnabled(false)` clearing the published result as
+  designed (SPEC-001). This path had been carried as "unseen" through both
+  refactors; it now is not.
 
 **OTA timing** is a per-gap rule, not a total budget. Each tap must follow the
 previous within `UPDATE_TAP_GAP_MS` (1500 ms), so four taps span at most 4.5 s.
@@ -103,5 +112,19 @@ hardware, so 1500 ms stays.
 3. `tools/klopftest.py` — four taps enter update mode; one tap leaves it.
 
 ## Open
+
+* **Entering update mode puts ~40 non-JSON lines on the protocol port.**
+  Observed 2026-08-31 on the first capture of this transition. `WiFi.softAP()`
+  emits ESP-IDF component logs (`I (…) wifi:`, `phy_init`, `esp_netif_lwip`),
+  and `-DCORE_DEBUG_LEVEL=0` does not gate those — it silences only the Arduino
+  core. The RPi logs a parse warning per line. Nothing breaks; it violates the
+  spirit of the quiet-port decision in SPEC-002/SPEC-010. Lever is
+  `CONFIG_LOG_DEFAULT_LEVEL_NONE` in `sdkconfig.defaults`. BACKLOG Step 6
+  item 6.
+* **`cam_hal: EV-VSYNC-OVF`, once, as the AP comes up.** Expected rather than
+  alarming: the camera keeps filling its ring buffer while the paused vision
+  task stops calling `esp_camera_fb_get()`, so with `CAMERA_GRAB_WHEN_EMPTY` it
+  overflows. It recovered by itself and detection resumed normally. Worth
+  knowing so it is not diagnosed as a camera fault.
 
 * Nothing. This subsystem is closed.

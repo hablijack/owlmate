@@ -57,6 +57,20 @@ Dual-bank OTA is kept: the owl can be updated over its own SoftAP (SPEC-007).
 carries the NDJSON protocol the RPi parses; stray `[E][esp32-hal-i2c]` lines are
 protocol garbage. Diagnostic envs override `build_flags` and keep their logs.
 
+**It only covers the Arduino core, not ESP-IDF components** — found 2026-08-31,
+the first time anyone captured the OTA transition. `WiFi.softAP()` emits about
+forty `I (…) wifi:` / `phy_init` / `esp_netif_lwip` lines directly onto the
+protocol port, and the RPi logs a parse warning for each. The flag that would
+cover those is `CONFIG_LOG_DEFAULT_LEVEL_NONE` in `sdkconfig.defaults`, not
+`CORE_DEBUG_LEVEL`. Unfixed; BACKLOG Step 6 item 6, SPEC-007 Open.
+
+**The firmware uses both cores** since 2026-08-31, which is a build-relevant
+fact and not only an architectural one: the Arduino loop is pinned by
+`CONFIG_ARDUINO_RUNNING_CORE=1` in the generated `sdkconfig.xiao_esp32s3`, and
+`src/vision.cpp` pins its detection task to core 0 on the strength of that. If
+that config value ever changes, both tasks land on one core and the stall
+returns silently — nothing would fail to build. See SPEC-001.
+
 ## Verified facts
 
 Measured 2026-08-26:

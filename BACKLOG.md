@@ -26,8 +26,8 @@ come apart:
 | **3** | **BLOCKED on a part** | the BNO055 must be physically replaced; nothing else unblocks it |
 | 2 | ready, but cheap and low-value alone | a 2-minute confirmation, best folded into the next flash |
 | 5 | blocked *through* 3 | navigation cannot be verified without a trustworthy heading |
-| **4b** | **ready, needs the owl** | gaze smoothing, square crop, field of view |
-| **6** | items 1–2 **done and flashed** | item 3 stays blocked (no Flask here); items 4–5 open |
+| **4b** | **ready, needs the owl** | gaze smoothing (unblocked 2026-08-31), square crop, field of view |
+| **6** | items 1–3 **done and flashed** | item 4 stays blocked (no Flask here); items 5–6 open |
 
 So the dependency chain 0→5 is stalled at 3 until the IMU arrives. Step 6 was
 called "the rainy-day list" when it was written; while the part is in the post it
@@ -36,17 +36,22 @@ the firmware one was flashed and verified on the owl — supervisor test doubles
 (item 2) and the `main.cpp` split (item 1). Step 2 was folded into that same
 flash and is ticked.
 
-**The next real step is Step 6 item 2 — inference on the second core.** It was
-written on 2026-08-31 after a long session established, by measurement, that the
-eyes render at **6 fps while tracking** and that this — not the gaze code, not
-the `main.cpp` split, not exposure — is why they look dead. 4b's gaze smoothing
-is blocked behind it; attempting the filter first has already cost one session.
+**Step 6 item 2 — inference on the second core — is done and on the owl**
+(2026-08-31). The eyes now render continuously at 28-29 Hz while tracking, with
+no stall, and a gaze target arrives every 181 ms instead of every 382. **The
+next real step is Step 4b's gaze smoothing**, which that unblocked: the four
+filter variants rejected earlier were all sampled at 6 fps, so retry them before
+inventing a fifth.
+
+That work also overturned a number three documents asserted — the inference is
+48-91 ms, not ~170-200 ms; the old figure had been divided out of `loop_hz`,
+which charged the detector for the eye render. See SPEC-009 Falsified.
 
 **4b's remaining items need the owl.** One of its four
 items got a partial answer for free: the HAPPY→AWE arc was observed in
 telemetry, so what remains there is a judgement call about how it *looks*, not
-whether it fires. The 4-tap OTA path is the one thing the verification flash
-could not reach — it needs physical taps.
+whether it fires. The 4-tap OTA path was the one thing the verification flash
+could not reach; it was tapped by hand on 2026-08-31 and works (Step 6 item 2).
 
 > **"Step" here, "Phase" elsewhere — they are different things.** These Steps are
 > this session's task order. The `Phase 1..4` you will see in `rpi-brain/brain/`
@@ -255,25 +260,33 @@ right. The v1 knobs (`resize_scale`, `top_k`) do not exist in esp-dl v3.
 
 Small, laptop-plus-owl items left over from 2026-08-29. None is blocking.
 
-**Smooth the gaze.** `[!]` BLOCKED on Step 6 item 2, and attempting it again
-before that is unblocked will waste another session. Tried on hardware
+**Smooth the gaze.** `[ ]` **UNBLOCKED 2026-08-31** — Step 6 item 2 has landed.
+This is now the highest-value item that needs the owl. Tried on hardware
 2026-08-31 in four variants — Adafruit's deadband + proportional step, a
 time-constant filter, a distance-dependent snap/smooth split, and a pure
 threshold — and **every one was rejected as either jittery or laggy**. The
-reason was only found afterwards: the eyes render at **6 fps while tracking**,
+reason was only found afterwards: the eyes rendered at **6 fps while tracking**,
 so the filter itself was being sampled six times a second. No control law
 produces smooth motion at that frame rate.
 
-The measured signal, for whoever picks this up: the tremble is ~1.1 px of iris
-travel per sample, a slow head movement is also ~1 px per sample, and new
-positions arrive only ~5 times a second — so at the *current* sample rate noise
-and slow movement are literally the same signal and cannot be separated.
-Adafruit's `SERVO_HYSTERESIS 2` is wrong here regardless: it was chosen for a
-servo with a far larger range, and this iris travels only +-18 px total, so 2 px
-is wider than the entire signal at a normal seating distance.
+**What changed.** The eyes now draw continuously at **28-29 Hz while tracking**
+with no stall (0 of 58 samples below 15 Hz, against 3 of 55 before), and a new
+gaze target arrives every **181 ms** instead of every 382 ms. So an
+interpolation between two targets now has ~5 rendered frames to work with
+instead of one, which is the condition every one of those four variants was
+missing. **Retry them before inventing a fifth** — the earlier rejections say
+nothing about the laws themselves, only about the frame rate they ran at.
 
-Do the second-core offload first. At ~40 fps a short interpolation should read
-as natural eye movement; the same law applies to the head servo when wired.
+The measured signal, for whoever picks this up: the tremble is ~1.1 px of iris
+travel per sample, and a slow head movement is also ~1 px per sample. At the old
+5 Hz those were literally the same signal; at 5.5 targets/s they still are, so
+**the separation has to come from the interpolation between targets, not from
+filtering the targets themselves**. Adafruit's `SERVO_HYSTERESIS 2` is wrong
+here regardless: it was chosen for a servo with a far larger range, and this
+iris travels only +-18 px total, so 2 px is wider than the entire signal at a
+normal seating distance.
+
+Same law applies to the head servo when wired.
 
 **Try a square detection crop.** The crop is 160×120, still 4:3; the model's
 input is square, so some of it is wasted on rescale. A 160×160 centre crop is
@@ -363,82 +376,96 @@ this list that varies far more than the work itself does.
    read 604 ms and looked like a regression against the ~535 ms in the docs; it
    was just too short. Do not read a single short cadence sample as a signal.
 
-   **Still unseen:** the 4-tap OTA entry / 1-tap exit path. It needs physical
-   taps and was not exercised. Everything else in this table was.
+   ~~**Still unseen:** the 4-tap OTA entry / 1-tap exit path.~~ Exercised with
+   physical taps on 2026-08-31 while verifying item 2; it works end to end. See
+   item 2.
 
-2. **Inference on the second core — the eyes render at 6 fps while tracking.**
-   `[ ]` NEW 2026-08-31, and now the highest-impact item on this list.
+2. **Inference on the second core.** `[x]` DONE 2026-08-31, **flashed and
+   measured on the owl**, owner in front of the camera for both readings.
 
-   **The measurement.** `loop_hz` is 29-44 Hz at idle and **5.8 Hz mean
-   (1.9-11.1) while tracking a face at a 100 % hit rate**. Taken twice by two
-   methods (pyserial, which reboots the board, and `cat`, which does not), on a
-   warm owl with 9 minutes of uptime. `FaceDetector_Detect()` blocks `loop()`
-   for ~170-200 ms, so during tracking each loop iteration *is* a detection
-   cycle and the eyes redraw at the detection rate.
+   `FaceDetector_Detect()` now runs in a FreeRTOS task pinned to **core 0**
+   (`src/vision.cpp` + `include/vision.h`); the Arduino loop keeps core 1
+   (`CONFIG_ARDUINO_RUNNING_CORE=1`) and only copies the latest result.
+   `FACE_DETECT_INTERVAL_MS` is back to **100**.
 
-   **Why it matters more than it sounds.** Six frames per second is a
-   slideshow, and it is the state the owl is in whenever someone is looking at
-   it. An entire session on 2026-08-31 went into gaze smoothing before anyone
-   measured this — every filter was itself being sampled at 6 fps, which is why
-   each variant read as either jittery or laggy and none could be both smooth
-   and immediate. Ruled out by measurement in that session, so do not
-   re-diagnose them: the `main.cpp` split (A/B'd on hardware, felt identical),
-   the gaze code (the pre-session original felt equally slow), camera exposure
-   (face measures brighter than frame average, 0.2 % clipping), the serial
-   connection and the reset.
+   **Before and after, one sitting, same distance, face in frame:**
 
-   **The shape.**
+   | | before (blocking, interval 300) | after (core 0, interval 100) |
+   |---|---|---|
+   | `loop_hz` min / mean / max | 10.8 / 30.2 / 44.1 | 15.6 / **28.3** / 61.7 |
+   | samples below 15 Hz | **3 of 55** | **0 of 58** |
+   | new gaze target | every 382 ms | every **181 ms** |
+   | attempts | 2.6 Hz | 6.0 Hz |
+   | hit rate | 100 % | 92 % |
 
-       core 1 (ARDUINO_RUNNING_CORE=1)  loop(): protocol, state machine,
-                                        eyes, servos, telemetry — free-running
-       core 0 (idle today; WiFi only in UPDATE mode)
-                                        capture -> inference -> publish
+   At idle the mean moves too: 40.8 → 55.8 Hz (the loop's `delay(16)` ceiling is
+   62.5).
 
-   `xTaskCreatePinnedToCore` on core 0, and a safe handoff of `faceResult` —
-   a mutex or a double-buffer swap. A race here would be an intermittent bug of
-   exactly the kind this project loses days to.
+   **Read the sequence, not the mean — the mean went DOWN.** Before:
+   `11 29 31 35 32 42 26 41 33 17 36 31 40 26 42 33 …`. After:
+   `29 29 29 27 27 29 29 29 29 21 29 29 25 28 28 …`. The stall is what was
+   removed, and a mean cannot show a stall. The small drop in the mean is
+   expected: the iris now moves twice as often, so the dirty-row flush has more
+   to do every frame. That is the trade working, not a regression.
 
-   **The premise is no longer a hypothesis — it was tested 2026-08-31.**
-   `FACE_DETECT_INTERVAL_MS` was raised 100 -> 300 purely to trade gaze updates
-   for render frames, and the owner judged it from the panel:
+   **The unknowns are settled, and one of them overturned a documented number.**
 
-   | interval | gaze target | render rate | verdict |
-   |---|---|---|---|
-   | 100 | every 180 ms | 5.8 Hz | "slow, not alive" |
-   | 300 | every 411 ms | **29 Hz** | **"smoother, more alive — even though it lags"** |
+   * **Capture vs CPU: it is 100 % CPU.** `face.capture_ms` is **0 in every
+     sample** — `fb_count=2` with `CAMERA_GRAB_WHEN_EMPTY` always has a frame
+     ready, so `esp_camera_fb_get()` never waits.
+   * **The inference is 48-91 ms, not ~170-200 ms.** Timed directly via
+     `face.infer_ms`: 48 ms with nobody in frame, 48-91 ms (mean 66) with a
+     face. A control build — the old blocking call on core 1, same
+     instrumentation, nobody in frame — read 47-50 ms (mean 48). **The
+     `facelab` 48 ms was right all along.** The ~170-200 ms figure was never
+     timed; it was divided out of `loop_hz`, which also contains
+     `eyes.render()`, so the detector was charged for the eyes. See SPEC-009
+     Falsified — a subtraction is not a measurement.
+   * **Cost of the move: ~3 ms of inference** (48 → 51 ms, cache and PSRAM
+     contention with the renderer). Cheap for what it buys.
+   * **Stack: 5,584 bytes free of 8,192** (`VISION_TASK_STACK`), reported
+     continuously as `face.stack_free` because the failure mode is a silent
+     overflow mid-inference. PSRAM needed nothing new — the crop buffer and
+     esp-dl's own allocations are unchanged, just made from another task.
+   * **Watchdog: no trigger.** The task always yields at least one tick, so
+     IDLE0 is fed. No `Task watchdog` line appeared in any capture, which
+     matters doubly here: it would land in the NDJSON stream the RPi parses.
+   * **Core 0 contention during OTA:** none, as expected — `vision::setEnabled`
+     pauses the task on entry to `UPDATE` and clears the published result, so
+     WiFi has core 0 to itself.
 
-   So liveliness is made of *render rate*, and it is worth paying tracking
-   latency for it. The offload gives both, which is why it is worth the
-   concurrency work. 300 is committed as an interim compromise; revert it to
-   100 once this task lands.
+   **Verified on the owl after flashing:** boot line + `Face detection enabled`;
+   all 8 commands ack with `gaze` still silent; unknown expression falls back to
+   NEUTRAL and still acks; malformed JSON → `invalid_json`; `nav` →
+   `navigating` with the angle, self-timing-out to `idle` at 5.3 s; `sleep` /
+   `wake`; `HARDWARE_CHECK=1` still emits its one JSON line
+   (`i2c_found:"[10,40]"`); all 11 envs build.
 
-   **It also explains the intermittency.** With interval 300 the loop free-runs
-   at ~40 Hz and then stops dead for ~170 ms inside `FaceDetector_Detect()` —
-   measured as `6 3 24 42 21 31 35 32 42 33 41 43 28 42 33 10 40 ...`. The eyes
-   are smooth for 300 ms and frozen for 170 ms, about twice a second, and
-   whether it is noticed depends on whether the owner was moving during a
-   freeze. That is the long-unexplained "sometimes realtime, sometimes it lags
-   a lot". Offloading removes the stall entirely rather than shortening it.
+   **The 4-tap OTA path was exercised too, with physical taps** — the one path
+   this change could plausibly disturb, since WiFi and the vision task share
+   core 0, and the path BACKLOG had carried as unseen since the `main.cpp`
+   split. It works: 4 taps → `state=update`, eye `update`,
+   `{"type":"update_mode","ssid":"RobotOwl-Update",…,"url":"http://192.168.4.1/update"}`,
+   SoftAP up with `wifi driver task … core=0`; 1 tap → `{"type":"update_mode_end"}`
+   and detection resumes (`face.detected` true again 7 s later). `face.detected`
+   went false for the whole update session, which is `vision::setEnabled(false)`
+   clearing the published result as intended.
 
-   **Expected**: render 6 -> ~40 Hz *without* the periodic freeze; gaze targets
-   5 -> 6-10 Hz. The second number is still a hypothesis — measure `loop_hz`
-   and hit rate before and after with `tools/trefferquote.py`, owner in front
-   of the camera.
+   **Two things fell out of that first run, both pre-existing, neither caused
+   by this change — see the new item 6 below.**
 
-   **Unknowns to settle while doing it**: how much of the ~170 ms is CPU versus
-   waiting on the camera (if capture-bound, the detection rate gains less);
-   esp-dl's stack and PSRAM needs on a new task; the watchdog on a core running
-   flat out; and core 0 contention during OTA update mode (detection is
-   disabled there, so probably none).
+   **Owner's verdict on the panel: "it feels really *alive* now."** Worth
+   recording next to the numbers, because the numbers alone were ambiguous —
+   the mean render rate went *down*. What was bought is the absence of the
+   stall, and it reads on the finished head exactly as the measurement predicted.
 
-   **Only after this is it worth revisiting gaze smoothing.** At 40 fps a short
-   interpolation would read as natural eye movement rather than lag. At 6 fps
-   nothing does. See `specs/009-face-detection.spec`.
+   **Follow-on:** Step 4b's gaze smoothing is unblocked by this and is now the
+   best next thing to do with the owl.
 
 3. **Consolidate the three supervisor test doubles.** `[x]` DONE 2026-08-31.
    One `FakeSupervisor` in `tests/stubs.py`; the local `StubSupervisor` in
    `test_navigation.py` and `test_navigation_webui.py` are gone, along with the
-   `nav_start`/`nav_stop` monkey-patch in `test_navigation_speech.py`. 177 tests
+   `nav_start`/`nav_stop` monkey-patch in `test_navigation_speech.py`. 179 tests
    still pass. They had already drifted — only the web-UI copy carried the nav
    delegation, and it lacked the `navigation is None` guard the real supervisor
    has. See SPEC-012 Decisions for the one parameter (`last`) that needed care.
@@ -476,6 +503,31 @@ this list that varies far more than the work itself does.
    `0`. Reporting a wrong number is worse than reporting none — a `vcc_mv` of
    `0` reads as a dead rail.
 
+6. **Entering update mode dumps ~40 non-JSON lines onto the protocol port.**
+   `[ ]` FOUND 2026-08-31, on the first run of the 4-tap path. Pre-existing and
+   unrelated to the core-0 work, but nobody had ever watched this transition.
+
+   `-DCORE_DEBUG_LEVEL=0` silences the *Arduino* core's logging. It does not
+   gate ESP-IDF component logs, and `WiFi.softAP()` emits about forty of them
+   (`I (346384) wifi:wifi driver task…`, `phy_init`, `esp_netif_lwip`, …)
+   straight onto the USB CDC port that carries the NDJSON protocol. The RPi's
+   `_handle_message` logs `Failed to parse message` for each one. Nothing
+   breaks, but this is exactly the noise `CORE_DEBUG_LEVEL=0` exists to
+   prevent, and the port is the machine-to-machine link.
+
+   Fix is a one-liner in `sdkconfig.defaults`
+   (`CONFIG_LOG_DEFAULT_LEVEL_NONE=y`, or `esp_log_level_set("*", ESP_LOG_NONE)`
+   at boot) — but check first whether any diagnostic env depends on IDF logs;
+   they run in plain Arduino mode, so probably not. Remember
+   `sdkconfig.defaults` is only read when no `sdkconfig.<env>` exists.
+
+   One more line in the same capture: `cam_hal: EV-VSYNC-OVF`, once, as the AP
+   came up. Expected rather than alarming — the camera keeps filling its ring
+   buffer while the paused vision task stops calling `esp_camera_fb_get()`, so
+   with `CAMERA_GRAB_WHEN_EMPTY` it overflows. It recovered by itself and
+   detection resumed normally.
+
+
 6. **Mechanical assembly** — enclosure, servo attachment for ears/head/wings,
    LCD bezels. Not blocked by anything here, and not really comparable to the
    above: it is the only item that changes what the owl physically is.
@@ -500,7 +552,7 @@ wrong; run the lot only after mechanical work.
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
 | detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
-| RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 177 tests pass |
+| RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 179 tests pass |
 | firmware/RPi drift | `cd rpi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
@@ -522,7 +574,7 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` blocked
 
 The 2026-08-26 tree was committed and then refactored. Eight commits, no
 behaviour change intended anywhere; all seven PlatformIO envs build and the RPi
-suite went from 104 to 177 tests.
+suite went from 104 to 179 tests.
 
 **Dead code removed:** `Eyes::fillTriangle`, `Eyes::markDirty`,
 `GC9D01::drawRect`, `GC9D01::drawCircle`, `Sensors::_vibBurstStart`, a discarded

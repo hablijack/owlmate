@@ -19,8 +19,22 @@
 // Die v3-API hat mit v1 nichts gemeinsam: HumanFaceDetect statt
 // HumanFaceDetectMSR01, run() liefert std::list<dl::detect::result_t>.
 //
-// Auf Hardware nachgewiesen (2026-08-26): 48 ms Inferenz, ~21 Bilder/s,
-// Scores 0.58-1.00.
+// LAUFZEIT, direkt gemessen 2026-08-31 (capture_ms/infer_ms in der Telemetrie,
+// nicht aus loop_hz erschlossen): 48 ms ohne Gesicht im Bild, bis 91 ms mit
+// einem, Mittel 66 ms. Warten auf die Kamera: 0 ms in jeder Abtastung. Scores
+// 0.58-1.00. Ein ERFOLGREICHER Durchlauf ist der langsamere, weil mehr
+// Kandidaten die Feinstufe erreichen.
+//
+// Die 48 ms aus dem Vorprojekt facelab/ waren also RICHTIG. Sie wurden am
+// selben Tag fuer widerlegt erklaert ("~170-200 ms"), und diese Widerlegung
+// war der Fehler: die 170 ms stammten aus loop_hz, und darin steckte das
+// Augenzeichnen. Deshalb gibt es capture_ms und infer_ms - damit diese Zahl
+// nie wieder geschaetzt wird.
+//
+// Diese Funktion laeuft NICHT mehr in loop(), sondern in einer eigenen Aufgabe
+// auf Kern 0 - siehe include/vision.h. Sie darf deshalb blockieren, aber sie
+// darf NICHTS auf Serial schreiben: der Port traegt das NDJSON-Protokoll, und
+// zwei Kerne, die gleichzeitig drucken, verschraenken ihre Zeilen.
 // ============================================================================
 
 #if FACE_DETECTION_ENABLED
@@ -126,8 +140,19 @@ void FaceDetector_Detect(FaceResult_t *result) {
     result->attempts = totalAttempts;
     result->total = totalDetections;
 
+    // Zwei Posten getrennt messen, nicht die Summe: capture_ms ist Warten auf
+    // die Kamera, infer_ms ist Rechnen. Nur so ist beantwortbar, ob der Umzug
+    // auf Kern 0 die Erkennungsrate ueberhaupt heben KANN.
+    const uint32_t captureStart = micros();
     camera_fb_t *fb = esp_camera_fb_get();
+    const uint32_t captureUs = micros() - captureStart;
+    result->capture_ms = (uint16_t)((captureUs + 500) / 1000);
     if (!fb) return;
+
+    // Ab hier laeuft die Rechenzeit: der Ausschnitt gehoert dazu (er kopiert
+    // ~38 KB im PSRAM), sonst summieren die beiden Zahlen nicht auf den
+    // Durchlauf und beantworten die Frage nicht mehr.
+    const uint32_t inferStart = micros();
 
     // Nur den mittigen Ausschnitt an den Detektor geben - siehe
     // CAM_DETECT_CROP_DIV in config.h. Der Puffer wird einmal angelegt und
@@ -157,6 +182,7 @@ void FaceDetector_Detect(FaceResult_t *result) {
     img.pix_type = PIX_TYPE;
 
     auto &results = detector->run(img);
+    const uint32_t inferUs = micros() - inferStart;
 
     // Groesstes Gesicht gewinnt: das ist im Zweifel das naechste, und dem soll
     // die Eule folgen.
@@ -206,8 +232,13 @@ void FaceDetector_Detect(FaceResult_t *result) {
         // und die Telemetrie zeigt fast immer "nichts".
         *result = lastGood;
     }
+    // NACH dem Haltepfad setzen: dort ueberschreibt `*result = lastGood` alle
+    // Felder, auch die Zaehler und die Zeiten. Diese hier beschreiben aber
+    // DIESEN Durchlauf, nicht den letzten Treffer.
     result->total = totalDetections;
     result->attempts = totalAttempts;
+    result->capture_ms = (uint16_t)((captureUs + 500) / 1000);
+    result->infer_ms = (uint16_t)((inferUs + 500) / 1000);
 
     esp_camera_fb_return(fb);
 }
