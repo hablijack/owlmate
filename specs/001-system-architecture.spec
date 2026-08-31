@@ -43,6 +43,34 @@ supervisor to freeze the owl's face. `NAVIGATING` is the one persistent override
 and it carries its own escape hatch — `NAV_TIMEOUT_MS` (5 s) without a refresh
 returns the head to centre.
 
+**The firmware is four files, and `main.cpp` is wiring.** Split 2026-08-31 from
+a single ~930-line `main.cpp` that held the state machine, the NDJSON protocol,
+the hardware check and the boot wiring together: `behavior.cpp`, `protocol.cpp`,
+`hardware_check.cpp`, and a `main.cpp` that only constructs, boots and loops.
+`include/owl.h` carries the little they share (the `State` enum, the peripheral
+externs, `faceResult`, `loopHz`).
+
+Reason: R-001.2 says there is exactly one state machine, and this file was where
+you had to go to check that — but reading it meant reading the protocol parser
+and a 150-line diagnostic as well. The rule that keeps the split honest is that
+anything only one module needs stays a `static` in that module's `.cpp`. The
+override timers, the nav target and the `WebServer` are private to
+`behavior.cpp`; `protocol.cpp` reaches them only through `behavior.h`.
+
+Two duplications went with it: the ack serialize-and-println block, which had
+been copy-pasted 8 times inside `handleCommand()` and gained a copy with every
+command added, is now `sendJson()`/`sendAck()`; and the two I2C address-scan
+loops are one `i2cScan()` template taking the reporting as a callback. The two
+scans had *genuinely different bodies* — one builds the `i2c_found` JSON array
+and sets device flags, the other prints to serial — so this is a shared walk,
+not a deleted copy. Do not "fix" it by making one caller print what the other
+needs.
+
+`hardware_check.cpp` is now built only under `-DHARDWARE_CHECK=1`, matching the
+one-diagnostic-one-file pattern the ten diagnostic envs already follow. It was
+the last diagnostic linked into every production image; removing it cut 3,844
+bytes of flash and 168 bytes of RAM.
+
 **All audio lives on the RPi.** The ESP32 has no audio pins in this build; the
 MAX98357A amp hangs off the Pi's I2S bus.
 

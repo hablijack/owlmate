@@ -142,7 +142,7 @@ lines are protocol garbage on a machine-to-machine link.
    in `serial_handler.py`. This is the R-010.5 check and it is worth re-running
    by eye after any firmware telemetry change:
 
-       grep -oE 'doc\["[a-z_]+"\](\["[a-z_]+"\])*' esp32-s3-sense/src/main.cpp | sort -u
+       grep -oE 'doc\["[a-z_]+"\](\["[a-z_]+"\])*' esp32-s3-sense/src/protocol.cpp | sort -u
 
 ## Open
 

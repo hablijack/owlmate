@@ -137,8 +137,25 @@ user and enables `robot-owl-brain.service`; on the Pi, edit
 
 ## Firmware architecture
 
-`src/main.cpp` (~900 lines) is the whole application: state enum, `handleCommand()` NDJSON parser,
-`sendTelemetry()`, `updateState()`, OTA update mode, `runHardwareCheck()`, `setup()`, `loop()`.
+Four source files, one job each — split out of a single ~930-line `main.cpp` on 2026-08-31, because
+that file had to be read in full before any firmware change could be made safely:
+
+| file | owns |
+|---|---|
+| `src/main.cpp` | **wiring only** — constructs the peripherals, `setup()`, `loop()` |
+| `src/behavior.cpp` | the state machine, the supervisor overrides, OTA update mode |
+| `src/protocol.cpp` | `handleCommand()` / `sendTelemetry()` / `poll()` — the NDJSON wire contract |
+| `src/hardware_check.cpp` | `runHardwareCheck()`, built **only** under `-DHARDWARE_CHECK=1` |
+
+`include/owl.h` is the only thing they share: the `State` enum, the peripheral externs, `faceResult`
+and `loopHz`. **Anything only one module needs stays a `static` inside that module's `.cpp`** —
+that is the rule that keeps the header from growing back into the old god-file. The override timers,
+the nav target and the `WebServer` are private to `behavior.cpp` for exactly that reason; the
+protocol reaches them only through the narrow surface in `behavior.h`.
+
+Keep new subsystems out of `main.cpp`: give them a header and a source file, and let `main.cpp` own
+only their construction and their call in `loop()`.
+
 Peripherals are libraries under `lib/` (`GC9D01`, `Eyes`, `FaceDetector`) plus `src/Sensors.cpp` and
 `src/ServoController.cpp` with headers in `include/`.
 
@@ -380,8 +397,8 @@ without it" rather than exiting. The idle callback runs `supervisor.check_stale(
   `IMUCalibration`, `GPSData`, `FaceDetection`, `VibrationData`, `NavigationState`, `UpdateMode`)
   are the parsed telemetry shape; command senders (`set_expression`, `set_servo`, `set_gaze`, `nav`,
   `sleep`, `wake`, `blink`, `heartbeat`) are the outbound protocol. This is the contract with
-  `handleCommand()`/`sendTelemetry()` in `main.cpp` — a change on one side needs the matching change
-  on the other.
+  `handleCommand()`/`sendTelemetry()` in `src/protocol.cpp` — a change on one side needs the matching
+  change on the other.
   **Adding a telemetry field is one row in a `_*_FIELDS` table plus one dataclass field**, nothing
   else. Do not hand-write `.get()` calls: that is how seven fields the firmware sends came to be
   silently discarded until 2026-08-27 (`imu.cal.*`, `vibration.pulses`, `face.total` — all of them

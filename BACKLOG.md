@@ -27,13 +27,17 @@ come apart:
 | 2 | ready, but cheap and low-value alone | a 2-minute confirmation, best folded into the next flash |
 | 5 | blocked *through* 3 | navigation cannot be verified without a trustworthy heading |
 | **4b** | **ready, needs the owl** | gaze smoothing, square crop, field of view |
-| **6** | **ready, laptop only** | and internally ordered by impact |
+| **6** | items 1–2 written, **item 1 needs a flash** | item 3 stays blocked (no Flask here); item 4 is mechanical |
 
-So the dependency chain 0→5 is stalled at 3 until the IMU arrives, which leaves
-**4b and 6 as the only actionable work** — the two highest-numbered items. Step 6
-was called "the rainy-day list" when it was written; while the part is in the
-post it is the main road, and its item 1 (the `main.cpp` split) is the largest
-single improvement available to this project right now.
+So the dependency chain 0→5 is stalled at 3 until the IMU arrives. Step 6 was
+called "the rainy-day list" when it was written; while the part is in the post it
+became the main road, and on 2026-08-31 its two laptop-only items were done — the
+supervisor test doubles (item 2) and the `main.cpp` split (item 1).
+
+**That shifts the next session's job from writing to verifying.** The split
+touches the production image and has only been proven to *build*; item 1 lists
+exactly what to watch for at the next flash, and it is worth folding Step 2 into
+that same flash. After that, 4b is the remaining owl-side work.
 
 > **"Step" here, "Phase" elsewhere — they are different things.** These Steps are
 > this session's task order. The `Phase 1..4` you will see in `rpi-brain/brain/`
@@ -263,42 +267,39 @@ IMU yaw increases clockwise.
 item 3 has a real prerequisite. Each entry states what it costs to *verify*: on
 this list that varies far more than the work itself does.
 
-1. **`src/main.cpp` split — now UNBLOCKED, and the biggest single win.**
-   **911 lines** (883 on 2026-08-27; it grows with every command added). It is
-   the one file that has to be understood in full before any firmware change,
-   and it is what the last three sessions read and re-read while debugging.
+1. **`src/main.cpp` split** — `[~]` CODE DONE 2026-08-31, **NOT YET FLASHED**.
 
-   **The gate expired.** This was parked because it alters loop structure while
-   loop timing was the leading suspect for sporadic detection. Step 4 is
-   resolved: the cause was the face's size relative to the frame plus the
-   MSR/MNP threshold split, and **loop timing was innocent**. There is no longer
-   a diagnosis to muddy.
+   934 lines became four files: `main.cpp` (202, wiring only), `behavior.cpp`
+   (state machine + OTA mode), `protocol.cpp` (the NDJSON contract),
+   `hardware_check.cpp` (built only under `-DHARDWARE_CHECK=1`), sharing
+   `include/owl.h`. Both duplications went with it: the 8× ack
+   serialize-and-println is now `sendJson()`/`sendAck()`, and the two I2C scan
+   loops are one `i2cScan()` template taking the reporting as a callback. See
+   SPEC-001 Decisions.
 
-   Seams, re-measured against the current file:
+   Bonus: the hardware check is no longer linked into the production image,
+   which cut **3,844 bytes of flash and 168 bytes of RAM**.
 
-   | seam | where | what |
-   |---|---|---|
-   | `runHardwareCheck()` | `main.cpp:606`, **154 lines** | the only diagnostic still compiled into the production image; every other one lives in its own `src/*.cpp` behind a `build_src_filter` env |
-   | `handleCommand()`, `sendTelemetry()`, `parseSerialCommands()` | `main.cpp:126`, `:265`, `:565` | want a `protocol.cpp`. This is the wire contract with `serial_handler.py` and should be as findable as its counterpart |
-   | state machine | `updateState()` `main.cpp:446`, plus `transitionTo()`/`applyExpression()`/`applyGaze()` | want a `behavior.cpp` |
+   **What has been verified: all 11 envs build, plus `-DHARDWARE_CHECK=1`, plus
+   a `config.h`-set `HARDWARE_CHECK 1` (that last one because the new header
+   switches on the macro, and it reaches it only through a transitive include —
+   `hardware_check.h` now includes `config.h` itself so it cannot silently
+   compile to nothing).** The move was also checked statement by statement
+   against the old file: every line that disappeared is accounted for by a
+   rename or by one of the two intended dedups.
 
-   That leaves `main.cpp` at ~120 lines of wiring. Two duplications to collapse
-   while in there:
+   **What has NOT been verified, and it is the part that matters.** This touches
+   the production image and "all envs build" is necessary, not sufficient. Still
+   to do on the owl:
 
-   - the ack serialize-and-println block repeats **8×** inside `handleCommand()`
-     (`main.cpp:135`–`:243`). It was 7× on 2026-08-27, so it gains a copy per
-     new command — one `sendAck()` helper stops that.
-   - the I2C address-scan loop appears **twice in the same file**
-     (`main.cpp:660` in `runHardwareCheck()`, `main.cpp:772` in `setup()`), and
-     a third time in `i2ctest.cpp`. **The bodies genuinely differ** — one builds
-     the `i2c_found` JSON array and sets device flags, the other prints to
-     serial — so this is a shared iterator taking a callback, not a copy-paste
-     deletion. Do not "fix" it by making one caller print what the other needs.
+   - eyes render, telemetry arrives at ~535 ms, state settles to `idle`
+   - a face still drives `detecting → interacting` and the gaze follows
+   - every command still acks (`expression`, `servo`, `gaze`, `nav`, `sleep`,
+     `wake`, `blink`, `heartbeat`) — the ack path was the most-edited code here
+   - 4 taps still enter OTA mode, 1 tap still leaves it
+   - `HARDWARE_CHECK=1` still emits its one JSON line with `i2c_found` populated
+     — the scan is now a shared template, so this is a real regression risk
 
-   **Verification costs a flash.** It touches the production image, so "all envs
-   build" is necessary and not sufficient. Done when the eyes render, telemetry
-   arrives at ~535 ms, state settles to `idle`, and `HARDWARE_CHECK=1` still
-   emits its one JSON line.
 
 2. **Consolidate the three supervisor test doubles.** `[x]` DONE 2026-08-31.
    One `FakeSupervisor` in `tests/stubs.py`; the local `StubSupervisor` in
@@ -401,13 +402,13 @@ vibration sensor listed on **D3 — the right eye's DC**. Corrected against
 
 ### Deliberately NOT done
 
-* **`src/main.cpp` split — parked here on 2026-08-27, UNPARKED 2026-08-30.**
-  It was deferred because it alters loop structure while loop timing was the
-  leading suspect for sporadic detection. That suspect was cleared when Step 4
-  was resolved on 2026-08-29 (the face was too small in frame; loop timing was
-  innocent), so the reason to wait no longer holds. The seams, the re-measured
-  line counts and the verification cost now live in **Step 6 item 1** — one
-  place, not two.
+* **`src/main.cpp` split — parked 2026-08-27, unparked 2026-08-30, DONE
+  2026-08-31.** It was deferred because it alters loop structure while loop
+  timing was the leading suspect for sporadic detection. That suspect was
+  cleared when Step 4 was resolved on 2026-08-29 (the face was too small in
+  frame; loop timing was innocent), which is what released it. What was built,
+  and what still has to be checked on hardware, live in **Step 6 item 1**; the
+  reasoning lives in SPEC-001.
 * **`facelab/` kept.** It is the known-good control for the sporadic-detection
   bug: same model, same camera, same thresholds, near-every-frame detection.
   Deleting it would destroy the A/B reference for an open investigation. (It does

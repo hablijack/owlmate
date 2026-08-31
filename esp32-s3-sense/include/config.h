@@ -417,7 +417,8 @@
 // --project-option="build_flags=... -DHARDWARE_CHECK=1"`) to instead probe
 // every peripheral (LCDs, PCA9685, GPS, BNO055, vibration, camera) and report
 // each one's status over serial + on the eyes, then idle. See runHardwareCheck()
-// in main.cpp. Re-flash without the flag to return to normal operation.
+// in src/hardware_check.cpp, which compiles to nothing unless this is 1.
+// Re-flash without the flag to return to normal operation.
 #ifndef HARDWARE_CHECK
 #define HARDWARE_CHECK 0
 #endif

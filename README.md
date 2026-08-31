@@ -231,6 +231,10 @@ esp32-s3-sense/                    # ESP32 firmware
 ├── include/
 │   ├── config.h                   # Pin assignments, constants, addresses
 │   ├── common.h                   # Shared enums (EyeExpression), colors, geometry
+│   ├── owl.h                      # State enum + the peripherals every module drives
+│   ├── behavior.h                 # State machine surface (overrides, nav, update mode)
+│   ├── protocol.h                 # NDJSON poll/handle/send
+│   ├── hardware_check.h           # Wiring probe + the shared I2C scan
 │   ├── Sensors.h                  # Sensor data structures
 │   └── ServoController.h          # Servo controller interface
 ├── lib/
@@ -244,7 +248,10 @@ esp32-s3-sense/                    # ESP32 firmware
 │       ├── FaceDetector.h/.cpp    # OV3660 + HumanFaceDetect (v3 API) integration
 │                                    # Enabled with FACE_DETECTION_ENABLED=1
 ├── src/
-│   ├── main.cpp                   # State machine, protocol, telemetry, main loop
+│   ├── main.cpp                   # Wiring only: construct, bring up, run the loop
+│   ├── behavior.cpp               # The state machine + OTA update mode
+│   ├── protocol.cpp               # NDJSON commands + telemetry (the RPi contract)
+│   ├── hardware_check.cpp         # -DHARDWARE_CHECK=1 wiring probe; else compiles to nothing
 │   ├── Sensors.cpp                # BNO055 IMU, PA1010D GPS, SW420 vibration
 │   ├── ServoController.cpp        # PCA9685 smooth servo interpolation
 │   ├── camtest.cpp                # -e camtest: SCCB probe, capture, mean brightness
