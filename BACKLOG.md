@@ -27,17 +27,20 @@ come apart:
 | 2 | ready, but cheap and low-value alone | a 2-minute confirmation, best folded into the next flash |
 | 5 | blocked *through* 3 | navigation cannot be verified without a trustworthy heading |
 | **4b** | **ready, needs the owl** | gaze smoothing, square crop, field of view |
-| **6** | items 1–2 written, **item 1 needs a flash** | item 3 stays blocked (no Flask here); item 4 is mechanical |
+| **6** | items 1–2 **done and flashed** | item 3 stays blocked (no Flask here); items 4–5 open |
 
 So the dependency chain 0→5 is stalled at 3 until the IMU arrives. Step 6 was
 called "the rainy-day list" when it was written; while the part is in the post it
-became the main road, and on 2026-08-31 its two laptop-only items were done — the
-supervisor test doubles (item 2) and the `main.cpp` split (item 1).
+became the main road, and on 2026-08-31 its two laptop-only items were done and
+the firmware one was flashed and verified on the owl — supervisor test doubles
+(item 2) and the `main.cpp` split (item 1). Step 2 was folded into that same
+flash and is ticked.
 
-**That shifts the next session's job from writing to verifying.** The split
-touches the production image and has only been proven to *build*; item 1 lists
-exactly what to watch for at the next flash, and it is worth folding Step 2 into
-that same flash. After that, 4b is the remaining owl-side work.
+**4b is now the only unblocked work, and it needs the owl.** One of its four
+items got a partial answer for free: the HAPPY→AWE arc was observed in
+telemetry, so what remains there is a judgement call about how it *looks*, not
+whether it fires. The 4-tap OTA path is the one thing the verification flash
+could not reach — it needs physical taps.
 
 > **"Step" here, "Phase" elsewhere — they are different things.** These Steps are
 > this session's task order. The `Phase 1..4` you will see in `rpi-brain/brain/`
@@ -109,7 +112,7 @@ suspect until re-measured. Telemetry that day read `imu.cal
 {sys:0 gyro:3 accel:1 mag:0}` with `restored:false`, consistent with the erased
 NVS — Step 3 is still outstanding and now needs the offset re-derived too.
 
-### Step 2 — Validate the reassembly  `[ ]`
+### Step 2 — Validate the reassembly  `[x]` DONE 2026-08-31
 
 Do this *before* investing in calibration: it catches a connector disturbed in
 Step 1 in seconds, rather than after twenty minutes of figure-eights.
@@ -126,6 +129,29 @@ one.** This step used to say "expect `0x10`, `0x28`, `0x40`", which Step 3 below
 makes impossible: the BNO055 holds SCL low and has to be replaced. Read a
 missing `0x28` here as confirmation of Step 3, and re-diagnose only if `0x10` or
 `0x40` also vanish — that would mean the bus is down for a *different* reason.
+
+**Result 2026-08-31**, folded into the Step 6 item 1 verification flash:
+
+    {"type":"hardware_check","vcc_mv":0,"psram":true,"lcd_left":true,
+     "lcd_right":true,"servo":true,"gps":true,"imu":false,"vibration":false,
+     "camera":true,"i2c_found":"[10,40]","all_ok":false}
+
+`i2c_found` is exactly `[10,40]` as predicted — Step 3 confirmed, bus otherwise
+healthy. PSRAM, both LCDs and the camera all pass, so nothing in Step 1's
+reassembly was disturbed. Two fields need reading carefully rather than as
+faults:
+
+* **`vcc_mv: 0` is a bug in the check, not a dead rail.** It reads
+  `analogRead(5)`, and its comment claims GPIO5 is the XIAO's 5 V sense — but
+  `config.h` has `LCD_SCK 5`. GPIO5 is the shared LCD clock in this harness, so
+  the reading can never mean anything. Pre-existing (the line is unchanged since
+  before the split); logged as Step 6 item 5. Use `-e powerprobe` for a real
+  rail reading.
+* **`vibration: false`** is the crude idle-level probe
+  (`digitalRead(VIBRATION_PIN) == HIGH`), which depends on where the SW-420's
+  sensitivity pot sits — see the open-collector note in AGENTS.md. The pulse
+  counter is the trustworthy signal, and it read a correct `0` at rest in the
+  same session.
 
 ### Step 3 — The BNO055 holds SCL low and must be replaced  `[ ]`
 
@@ -234,7 +260,10 @@ applies to the head servo when it is wired up.
 input is square, so some of it is wasted on rescale. A 160×160 centre crop is
 square and captures more vertical extent. Five-minute experiment.
 
-**Look at the new INTERACTING arc.** Changed 2026-08-30: a ~1 s `HAPPY` burst on
+**Look at the new INTERACTING arc.** *Partly answered 2026-08-31: the arc
+fires — telemetry's `eye` field went `happy` → `awe` about a second after entry,
+on the owl. What is still unseen is how it LOOKS on a 160 px panel, which is the
+part that motivated the change.* Changed 2026-08-30: a ~1 s `HAPPY` burst on
 entry (`INTERACT_GREET_MS`) and then `AWE` held, instead of `HAPPY` pinned for
 the whole state — sustained `HAPPY` has `botRise 62` and reads as an eye
 squeezed shut while the owl is visibly tracking you. Builds clean on all 11
@@ -267,7 +296,7 @@ IMU yaw increases clockwise.
 item 3 has a real prerequisite. Each entry states what it costs to *verify*: on
 this list that varies far more than the work itself does.
 
-1. **`src/main.cpp` split** — `[~]` CODE DONE 2026-08-31, **NOT YET FLASHED**.
+1. **`src/main.cpp` split** — `[x]` DONE 2026-08-31, **flashed and verified**.
 
    934 lines became four files: `main.cpp` (202, wiring only), `behavior.cpp`
    (state machine + OTA mode), `protocol.cpp` (the NDJSON contract),
@@ -277,29 +306,41 @@ this list that varies far more than the work itself does.
    loops are one `i2cScan()` template taking the reporting as a callback. See
    SPEC-001 Decisions.
 
-   Bonus: the hardware check is no longer linked into the production image,
-   which cut **3,844 bytes of flash and 168 bytes of RAM**.
+   The hardware check is no longer linked into the production image:
+   **−3,844 bytes flash, −168 bytes RAM**.
 
-   **What has been verified: all 11 envs build, plus `-DHARDWARE_CHECK=1`, plus
-   a `config.h`-set `HARDWARE_CHECK 1` (that last one because the new header
-   switches on the macro, and it reaches it only through a transitive include —
-   `hardware_check.h` now includes `config.h` itself so it cannot silently
-   compile to nothing).** The move was also checked statement by statement
-   against the old file: every line that disappeared is accounted for by a
-   rename or by one of the two intended dedups.
+   **Verified on the owl, 2026-08-31** (all 11 envs build; then flashed):
 
-   **What has NOT been verified, and it is the part that matters.** This touches
-   the production image and "all envs build" is necessary, not sufficient. Still
-   to do on the owl:
+   | check | result |
+   |---|---|
+   | boot + telemetry | `{"type":"boot"}`, state settles to `idle`, eyes render |
+   | all 8 commands ack | pass, key order intact (`type` first) |
+   | `gaze` sends no ack | pass — still deliberately silent |
+   | unknown expression | falls back to NEUTRAL and still acks |
+   | malformed JSON | `{"type":"error","msg":"invalid_json"}` |
+   | face → `interacting` | confidence 0.999+, gaze tracks, `face.total` climbs |
+   | HAPPY → AWE arc | seen in telemetry: `eye` flips ~1 s after entry |
+   | `nav active=true` | → `navigating`, `navigation` block carries the angle |
+   | NAV self-timeout | back to `idle` ~5 s after the last refresh |
+   | `sleep` / `wake` | → `sleeping` (eye `sleeping`) → `idle` |
+   | `HARDWARE_CHECK=1` | one JSON line, `i2c_found:"[10,40]"` — see Step 2 |
 
-   - eyes render, telemetry arrives at ~535 ms, state settles to `idle`
-   - a face still drives `detecting → interacting` and the gaze follows
-   - every command still acks (`expression`, `servo`, `gaze`, `nav`, `sleep`,
-     `wake`, `blink`, `heartbeat`) — the ack path was the most-edited code here
-   - 4 taps still enter OTA mode, 1 tap still leaves it
-   - `HARDWARE_CHECK=1` still emits its one JSON line with `i2c_found` populated
-     — the scan is now a shared template, so this is a real regression risk
+   **No performance regression, measured against a control in the same
+   sitting** (the `facelab` lesson): the pre-refactor firmware was rebuilt,
+   flashed and measured back to back on the same owl.
 
+   | build | cadence min/mean/max | loop_hz min/mean/max |
+   |---|---|---|
+   | pre-refactor (934 lines) | 510 / **581** / 657 ms | 5.5 / 31.6 / 44.2 |
+   | refactored | 506 / **549** / 644 ms | 6.4 / **33.0** / 44.4 |
+
+   The refactored build is marginally *faster*, which is within noise — the
+   honest claim is "no regression", not "an improvement". An earlier 12 s sample
+   read 604 ms and looked like a regression against the ~535 ms in the docs; it
+   was just too short. Do not read a single short cadence sample as a signal.
+
+   **Still unseen:** the 4-tap OTA entry / 1-tap exit path. It needs physical
+   taps and was not exercised. Everything else in this table was.
 
 2. **Consolidate the three supervisor test doubles.** `[x]` DONE 2026-08-31.
    One `FakeSupervisor` in `tests/stubs.py`; the local `StubSupervisor` in
@@ -320,6 +361,27 @@ this list that varies far more than the work itself does.
 
    Lowest impact of the three: it changes no behaviour anyone can observe, it
    only retires a documented oddity.
+
+5. **The hardware check's `vcc_mv` can never be right.** Found 2026-08-31 while
+   verifying item 1. `runHardwareCheck()` opens with
+   `analogRead(5)` and a comment claiming *"XIAO S3 senses the 5 V input on
+   D4 = GPIO5 = ADC1_CH4"* — but `config.h` has `#define LCD_SCK 5`. GPIO5 is
+   the **shared LCD clock** in this harness, so the reading is meaningless; it
+   returned `0` on hardware.
+
+   This is the *second* time this line has been wrong in the same way: the
+   comment records that it used to read GPIO7, "which is NOT ADC-capable on the
+   S3, so it always returned 0". It was moved off GPIO7 onto a pin that was
+   already spoken for, and the symptom (a constant 0) is identical, which is
+   why the fix looked like it had worked.
+
+   Cheap and low-risk to fix, but **decide what it should read first** — on the
+   XIAO S3 the ADC1 pins are GPIO1–10 and this harness has most of them
+   committed. `-e powerprobe` already gives a trustworthy rail reading from a
+   minimal image, so the honest options are to point this at a genuinely free
+   ADC1 pin, or to drop the field and let the JSON say nothing rather than say
+   `0`. Reporting a wrong number is worse than reporting none — a `vcc_mv` of
+   `0` reads as a dead rail.
 
 4. **Mechanical assembly** — enclosure, servo attachment for ears/head/wings,
    LCD bezels. Not blocked by anything here, and not really comparable to the

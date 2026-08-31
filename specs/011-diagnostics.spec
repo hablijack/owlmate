@@ -117,6 +117,15 @@ Diagnostics that changed a conclusion, and what they cost:
 
 ## Open
 
+* `[ ]` **`runHardwareCheck()`'s `vcc_mv` reads a pin that is not the rail.**
+  `analogRead(5)` against a comment claiming GPIO5 is the XIAO's 5 V sense,
+  while `config.h` defines `LCD_SCK 5` — GPIO5 is the shared LCD clock. Measured
+  0 on hardware 2026-08-31. Note the shape of this defect: the line previously
+  read GPIO7, which is not ADC-capable and *also* always returned 0, so moving
+  it produced no change in symptom and looked like a fix. A constant 0 here has
+  now survived two different wrong pins. `-e powerprobe` is the reading to
+  trust. See BACKLOG Step 6 item 5.
+
 * `facelab/` — a standalone project used to prove esp-dl before touching the
   firmware. It has served its purpose but is kept as a reference for the
   dual-framework setup. Its build artefacts (~1.2 GB) are gitignored.

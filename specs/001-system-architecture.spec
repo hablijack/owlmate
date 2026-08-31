@@ -71,6 +71,14 @@ one-diagnostic-one-file pattern the ten diagnostic envs already follow. It was
 the last diagnostic linked into every production image; removing it cut 3,844
 bytes of flash and 168 bytes of RAM.
 
+Flashed and verified on the owl the same day, including a **control measured in
+the same sitting**: the pre-refactor firmware was rebuilt, flashed and measured
+back to back against the refactored one. Cadence 581 ms mean before, 549 ms
+after; loop rate 31.6 Hz mean before, 33.0 Hz after. The split costs nothing.
+That control mattered — a 12 s sample of the refactored build alone read 604 ms
+against the ~535 ms in these specs and looked like a regression, and a 20 s
+sample of the same build read 549 ms. A short cadence sample is not a signal.
+
 **All audio lives on the RPi.** The ESP32 has no audio pins in this build; the
 MAX98357A amp hangs off the Pi's I2S bus.
 
