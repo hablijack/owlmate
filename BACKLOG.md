@@ -300,15 +300,13 @@ this list that varies far more than the work itself does.
    arrives at ~535 ms, state settles to `idle`, and `HARDWARE_CHECK=1` still
    emits its one JSON line.
 
-2. **Consolidate the three supervisor test doubles.** `tests/stubs.py:168`
-   `FakeSupervisor`, plus a near-identical local `StubSupervisor` in
-   `test_navigation.py:47` and `test_navigation_webui.py:34`. Every new
-   supervisor method has to be added in all three — that is how it was noticed.
-   A duplication defect in the test suite itself (SPEC-012 R-012.2).
-
-   Less impact than item 1, but the **best ratio on this list**: laptop-only, no
-   hardware, and the 177-test suite verifies it completely. Worth doing first as
-   a warm-up, because it makes that suite a more trustworthy check for item 1.
+2. **Consolidate the three supervisor test doubles.** `[x]` DONE 2026-08-31.
+   One `FakeSupervisor` in `tests/stubs.py`; the local `StubSupervisor` in
+   `test_navigation.py` and `test_navigation_webui.py` are gone, along with the
+   `nav_start`/`nav_stop` monkey-patch in `test_navigation_speech.py`. 177 tests
+   still pass. They had already drifted — only the web-UI copy carried the nav
+   delegation, and it lacked the `navigation is None` guard the real supervisor
+   has. See SPEC-012 Decisions for the one parameter (`last`) that needed care.
 
 3. **`render_template` instead of `render_template_string`** in `web_ui.py:159`.
    **Still blocked, and the block is the entire point.** It has to be done on a

@@ -165,18 +165,56 @@ def FakeTelemetry(state="interacting", face_detected=True, confidence=0.9,
     )
 
 
+# Sentinel for FakeSupervisor(last=...): tells "caller said nothing, build a
+# default frame" apart from an explicit last=None ("no telemetry yet").
+_UNSET = object()
+
+
 class FakeSupervisor:
-    """Stand-in for Supervisor: exposes .last (telemetry), .audio, and the
-    Phase-4 auto-sleep surface (last_activity / register_activity /
-    check_auto_sleep) so the policy can be unit-tested without real hardware."""
-    def __init__(self, state="interacting", face_detected=True, audio=None,
-                 auto_sleep_enabled=False, after_s=60.0):
-        self.last = FakeTelemetry(state=state, face_detected=face_detected)
+    """Stand-in for Supervisor, for every test that needs one.
+
+    Mirrors the real `Supervisor` surface the other modules actually call:
+    `.last` / `.last_state` / `.serial` / `.audio` / `.locations` /
+    `.navigation`, the sound cue (`play_sound`), the state query
+    (`current_state`), the auto-sleep policy (`register_activity` /
+    `check_auto_sleep`), the sleep/wake commands and the nav delegation
+    (`nav_start` / `nav_stop`).
+
+    There were three of these until 2026-08-31 -- this one plus a local
+    `StubSupervisor` in test_navigation.py and another in
+    test_navigation_webui.py -- so every method added to Supervisor had to be
+    mirrored in three files, and each copy had quietly drifted (only one
+    guarded `navigation is None`, and the two `sleep()` copies logged to
+    different places). One double, one place to update. See SPEC-012 R-012.2.
+
+    `last` defaults to a frame built from `state`/`face_detected`, which is
+    what the speech tests need -- the face gate reads `supervisor.last.face`.
+    Pass `last=None` for "no telemetry has arrived yet", which is what the real
+    Supervisor starts with and what the navigation tests were written against.
+
+    Be deliberate about which you ask for: FakeTelemetry's defaults are a VALID
+    fix with a CALIBRATED heading, so the default frame is one staleness check
+    away from making the controller aim the moment it is started. (Checked
+    2026-08-31: today it does NOT, because `timestamp=0.0` is stale against
+    wall-clock -- the suite passes either way. That is luck, not a guarantee.)
+    """
+
+    def __init__(self, serial=None, state="interacting", face_detected=True,
+                 audio=None, auto_sleep_enabled=False, after_s=60.0,
+                 last=_UNSET):
+        self.serial = serial
+        self.last = (FakeTelemetry(state=state, face_detected=face_detected)
+                     if last is _UNSET else last)
         self.last_state = state
         # Commands this fake supervisor was asked to send. (These used to be
         # appended to the telemetry object itself, which nothing ever read.)
         self.commands = []
         self.audio = audio if audio is not None else FakeAudio()
+        # The real Supervisor builds these in __init__; here the tests that
+        # exercise navigation attach them, and the rest leave them None -- so
+        # nav_start/nav_stop must survive that, exactly as the real ones do.
+        self.locations = None
+        self.navigation = None
         self.auto_sleep_enabled = auto_sleep_enabled
         self.auto_sleep_after_s = after_s
         self.last_activity = 0.0
@@ -227,12 +265,26 @@ class FakeSupervisor:
                 self.sleep()
 
     def sleep(self):
+        """Mirrors Supervisor.sleep(): the command goes out over the serial."""
         self.commands.append(("sleep", "sleep"))
-        return True
+        return self.serial.sleep() if self.serial else True
 
     def wake(self):
+        """Mirrors Supervisor.wake()."""
         self.commands.append(("wake", "wake"))
-        return True
+        return self.serial.wake() if self.serial else True
+
+    def nav_start(self, name):
+        """Mirrors Supervisor.nav_start(), guard included."""
+        if self.navigation is None:
+            return False
+        return self.navigation.start(name)
+
+    def nav_stop(self, reason="command"):
+        """Mirrors Supervisor.nav_stop(), guard included."""
+        if self.navigation is None:
+            return False
+        return self.navigation.stop(reason)
 
 
 def make_config(**overrides):

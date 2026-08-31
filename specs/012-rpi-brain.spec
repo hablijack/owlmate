@@ -51,6 +51,29 @@ inside `Speech`, so the web UI could not fuzzy-match at all although it works
 with the same store. `Supervisor.sleep()` hand-rolled a raw NDJSON dict because
 `SerialHandler` had `wake()` but no `sleep()`.
 
+**One supervisor test double.** `tests/stubs.py` `FakeSupervisor` is the only
+one, as of 2026-08-31. There were three — it plus a local `StubSupervisor` in
+each of `test_navigation.py` and `test_navigation_webui.py` — so every method
+added to `Supervisor` had to be mirrored in three files, a direct R-012.2
+violation inside the test suite. They had already drifted: only the web-UI copy
+carried `nav_start`/`nav_stop`, and it omitted the `navigation is None` guard
+the real one has, while the two `sleep()` copies logged to different places
+(`self.commands` vs `serial.commands`). The merged double mirrors the real
+`Supervisor` method for method, so drift shows up as an `AttributeError` rather
+than as three copies quietly disagreeing.
+
+`test_navigation_speech.py` had monkey-patched `nav_start`/`nav_stop` onto the
+double for the same reason; the double provides them now, so that is gone too.
+
+The one parameter worth care is `last`. It defaults to a frame (the speech face
+gate reads `supervisor.last.face`), but the navigation tests pass `last=None`,
+which is what the real `Supervisor` starts with. `FakeTelemetry`'s defaults are
+a *valid* fix with a *calibrated* heading, so the default frame is one staleness
+check away from making the controller aim as soon as it is started. Measured
+2026-08-31: today it does not, because `timestamp=0.0` is stale against
+wall-clock and the suite passes with either value — that is luck, and the
+docstring says so rather than claiming the tests depend on it.
+
 **The page is a file, not a string.** `brain/templates/index.html`, ~430 lines,
 rendered with `render_template_string` from a module-level load. It was a Python
 raw-string literal in `web_ui.py` until 2026-08-27 (which was 746 lines; it is
@@ -132,11 +155,6 @@ assembled from the real type cannot drift.
 
 ## Open
 
-* `[ ]` **Three supervisor test doubles.** `tests/stubs.py` `FakeSupervisor`
-  plus a local `StubSupervisor` in each of `test_navigation.py` and
-  `test_navigation_webui.py`. Adding `current_state()` and `play_sound()` meant
-  editing all three, which is how it was noticed — a direct R-012.2 violation in
-  the test suite itself. Consolidate into one.
 * `[ ]` `render_template` instead of `render_template_string`, once someone can
   verify it on a deployment that has Flask installed.
 * `[ ]` The diagnostic panel added to the web UI (calibration counters, GPS fix,

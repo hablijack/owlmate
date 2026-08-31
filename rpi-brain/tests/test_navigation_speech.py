@@ -62,8 +62,9 @@ class TestSpeechNavigate(unittest.TestCase):
         for (name, lat, lon) in places:
             sup.locations.add(name, lat, lon)
         sup.navigation = Navigation(serial, sup, sup.locations, cfg)
-        sup.nav_start = lambda name: sup.navigation.start(name)
-        sup.nav_stop = lambda reason="command": sup.navigation.stop(reason)
+        # nav_start/nav_stop come from FakeSupervisor and delegate to
+        # .navigation, exactly as the real Supervisor does. They used to be
+        # monkey-patched on here because the double lacked them.
         return Speech(serial, sup, cfg), serial, sup
 
     # ------------------------------------------------------------------

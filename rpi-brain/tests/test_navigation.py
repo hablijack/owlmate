@@ -4,8 +4,8 @@ Navigation controller tests (real brain.Navigation, faked serial + supervisor).
 The controller is the RPi-side brain of the "guide me home" feature: given the
 live GPS fix + IMU heading (from a telemetry frame) and a destination from the
 locations store, it computes the head aim and streams it to the ESP32. Here the
-serial port is a FakeSerial (records commands) and the supervisor is a tiny
-stub (provides .last / .audio), so the logic under test is the real controller.
+serial port is a FakeSerial (records commands) and the supervisor is the shared
+FakeSupervisor from stubs.py, so the logic under test is the real controller.
 
 GPS geometry used throughout (see test_navigation_geo.py for the math):
   * destination 1 deg north of the owl (same lon)  -> bearing 0  (due north)
@@ -18,7 +18,8 @@ import sys
 import types
 import unittest
 
-from stubs import install_stub_modules, FakeAudio, FakeSerial, make_config
+from stubs import (install_stub_modules, FakeAudio, FakeSerial,
+                   FakeSupervisor, make_config)
 
 install_stub_modules()
 
@@ -44,24 +45,6 @@ def make_tel(state, face, vibration, t, gps_valid, lat, lon, yaw, calibrated):
     )
 
 
-class StubSupervisor:
-    """Just enough of the Supervisor for the Navigation controller."""
-    def __init__(self, serial, audio=None):
-        self.serial = serial
-        self.audio = audio if audio is not None else FakeAudio()
-        self.last = None
-        self.last_state = "interacting"
-
-    def play_sound(self, sound):
-        """The supervisor owns the amp; Navigation cues through it."""
-        return self.audio.play(sound) if self.audio else False
-
-    def current_state(self):
-        if self.last_state:
-            return self.last_state
-        return self.last.state if self.last else None
-
-
 def make_nav(serial, sup, cfg_overrides=None, locations_file=None):
     cfg = make_config()
     if cfg_overrides:
@@ -77,7 +60,7 @@ class TestNavigationStartStop(unittest.TestCase):
 
     def test_start_unknown_place_is_noop(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, _ = make_nav(serial, sup)
         self.assertFalse(nav.start("nowhere"))
         self.assertFalse(nav.is_active())
@@ -85,7 +68,7 @@ class TestNavigationStartStop(unittest.TestCase):
 
     def test_start_then_active(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup)
         store.add("home", 49.0, 11.0)
         self.assertTrue(nav.start("home"))
@@ -94,7 +77,7 @@ class TestNavigationStartStop(unittest.TestCase):
 
     def test_start_sends_nav_active_true(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup)
         store.add("home", 49.0, 11.0)
         sup.last = make_tel("interacting", True, False, 100.0, True, 48.0, 11.0, 0.0, True)
@@ -104,7 +87,7 @@ class TestNavigationStartStop(unittest.TestCase):
 
     def test_stop_sends_nav_active_false(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup)
         store.add("home", 49.0, 11.0)
         sup.last = make_tel("interacting", True, False, 100.0, True, 48.0, 11.0, 0.0, True)
@@ -116,14 +99,14 @@ class TestNavigationStartStop(unittest.TestCase):
 
     def test_stop_when_not_active_is_noop(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, _ = make_nav(serial, sup)
         self.assertFalse(nav.stop("test"))
         self.assertEqual(serial.commands, [])
 
     def test_start_replaces_previous(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup)
         store.add("home", 49.0, 11.0)
         store.add("zoo", 48.0, 12.0)
@@ -138,7 +121,7 @@ class TestNavigationStartStop(unittest.TestCase):
 
     def test_disabled_start_is_noop(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup, cfg_overrides={"enabled": False})
         store.add("home", 49.0, 11.0)
         self.assertFalse(nav.start("home"))
@@ -148,7 +131,7 @@ class TestNavigationStartStop(unittest.TestCase):
     def test_start_cues_start_sound(self):
         serial = FakeSerial()
         audio = FakeAudio()
-        sup = StubSupervisor(serial, audio=audio)
+        sup = FakeSupervisor(serial, audio=audio, last=None)
         nav, store = make_nav(serial, sup)
         store.add("home", 49.0, 11.0)
         sup.last = make_tel("interacting", True, False, 100.0, True, 48.0, 11.0, 0.0, True)
@@ -161,7 +144,7 @@ class TestNavigationAiming(unittest.TestCase):
 
     def test_points_north_when_facing_north(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup, cfg_overrides={"refresh_min_s": 0.0})
         store.add("north", 49.0, 11.0)
         sup.last = make_tel("interacting", True, False, 100.0, True, 48.0, 11.0, 0.0, True)
@@ -171,7 +154,7 @@ class TestNavigationAiming(unittest.TestCase):
 
     def test_points_east_when_facing_north(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup, cfg_overrides={"refresh_min_s": 0.0})
         store.add("east", 48.0, 12.0)
         sup.last = make_tel("interacting", True, False, 100.0, True, 48.0, 11.0, 0.0, True)
@@ -181,7 +164,7 @@ class TestNavigationAiming(unittest.TestCase):
 
     def test_points_south_when_facing_north(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup, cfg_overrides={"refresh_min_s": 0.0})
         store.add("south", 47.0, 11.0)
         sup.last = make_tel("interacting", True, False, 100.0, True, 48.0, 11.0, 0.0, True)
@@ -191,7 +174,7 @@ class TestNavigationAiming(unittest.TestCase):
 
     def test_aim_follows_heading(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup, cfg_overrides={"refresh_min_s": 0.0})
         store.add("east", 48.0, 12.0)
         # Facing east (yaw 90), destination ~due east (bearing ~89.6) -> aim ~0
@@ -202,7 +185,7 @@ class TestNavigationAiming(unittest.TestCase):
 
     def test_aim_sign_config_flips(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup, cfg_overrides={
             "refresh_min_s": 0.0, "aim_sign": -1,
             "head_min": -180, "head_max": 180})
@@ -214,7 +197,7 @@ class TestNavigationAiming(unittest.TestCase):
 
     def test_no_fix_keeps_last_aim(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup, cfg_overrides={"refresh_min_s": 0.0})
         store.add("north", 49.0, 11.0)
         # First a good fix (establishes an aim), then a frame with no fix.
@@ -229,7 +212,7 @@ class TestNavigationAiming(unittest.TestCase):
 
     def test_uncalibrated_imu_keeps_last_aim(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup, cfg_overrides={"refresh_min_s": 0.0})
         store.add("north", 49.0, 11.0)
         sup.last = make_tel("interacting", True, False, 100.0, True, 48.0, 11.0, 0.0, True)
@@ -243,7 +226,7 @@ class TestNavigationAiming(unittest.TestCase):
 
     def test_on_telemetry_noop_when_not_active(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup)
         store.add("north", 49.0, 11.0)
         sup.last = make_tel("interacting", True, False, 100.0, True, 48.0, 11.0, 0.0, True)
@@ -253,7 +236,7 @@ class TestNavigationAiming(unittest.TestCase):
 
     def test_rate_limit(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup, cfg_overrides={"refresh_min_s": 1.0})
         store.add("north", 49.0, 11.0)
         sup.last = make_tel("interacting", True, False, 100.0, True, 48.0, 11.0, 0.0, True)
@@ -276,7 +259,7 @@ class TestNavigationExit(unittest.TestCase):
 
     def test_arrival_stops_navigation(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup,
                               cfg_overrides={"refresh_min_s": 0.0, "arrive_m": 15.0})
         store.add("home", 48.0001, 11.0)   # ~11 m north -> inside 15 m
@@ -288,7 +271,7 @@ class TestNavigationExit(unittest.TestCase):
 
     def test_not_arrived_when_far(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup,
                               cfg_overrides={"refresh_min_s": 0.0, "arrive_m": 15.0})
         store.add("home", 49.0, 11.0)   # ~111 km away
@@ -298,7 +281,7 @@ class TestNavigationExit(unittest.TestCase):
 
     def test_self_timeout_stops_navigation(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup,
                               cfg_overrides={"refresh_min_s": 0.0, "timeout_s": 5.0})
         store.add("north", 49.0, 11.0)
@@ -318,7 +301,7 @@ class TestNavigationExit(unittest.TestCase):
 
     def test_status_reports_state(self):
         serial = FakeSerial()
-        sup = StubSupervisor(serial)
+        sup = FakeSupervisor(serial, last=None)
         nav, store = make_nav(serial, sup, cfg_overrides={"refresh_min_s": 0.0})
         store.add("north", 49.0, 11.0)
         sup.last = make_tel("interacting", True, False, 100.0, True, 48.0, 11.0, 0.0, True)

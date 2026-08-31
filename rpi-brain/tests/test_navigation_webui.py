@@ -6,8 +6,8 @@ app.view_functions keyed by the view's function name, and request.get_json
 returns {} -- so these tests call the view functions directly with a stubbed
 request body (supervisor.request patched) and assert on the returned dict.
 
-The serial + supervisor are fakes (FakeSerial / a stub supervisor), so no
-hardware is needed. The locations store is pointed at a temp file.
+The serial + supervisor are fakes (FakeSerial / the shared FakeSupervisor from
+stubs.py), so no hardware is needed. The locations store is a temp file.
 """
 
 import os
@@ -17,7 +17,7 @@ import tempfile
 import types
 import unittest
 
-from stubs import install_stub_modules, FakeSerial, FakeAudio, make_config
+from stubs import install_stub_modules, FakeSerial, FakeSupervisor, make_config
 
 install_stub_modules()
 
@@ -31,46 +31,9 @@ from brain.web_ui import WebUI  # noqa: E402
 _orig_get_json = webui_mod.request.get_json
 
 
-class StubSupervisor:
-    """Just enough of the Supervisor for the WebUI (last, audio, nav)."""
-    def __init__(self, serial, audio=None):
-        self.serial = serial
-        self.audio = audio if audio is not None else FakeAudio()
-        self.last = None
-        self.last_state = "interacting"
-
-    def play_sound(self, s):
-        if self.audio:
-            self.audio.play(s)
-        return True
-
-    def current_state(self):
-        if self.last_state:
-            return self.last_state
-        return self.last.state if self.last else None
-
-    def sleep(self):
-        self.serial.commands.append(("sleep", "sleep"))
-        return True
-
-    def wake(self):
-        self.serial.commands.append(("wake", "wake"))
-        return True
-
-    def nav_start(self, name):
-        if self.navigation is None:
-            return False
-        return self.navigation.start(name)
-
-    def nav_stop(self, reason="command"):
-        if self.navigation is None:
-            return False
-        return self.navigation.stop(reason)
-
-
 def make_webui(nav_enabled=True, locations_file=None):
     serial = FakeSerial()
-    sup = StubSupervisor(serial)
+    sup = FakeSupervisor(serial, last=None)
     cfg = make_config()
     cfg["navigation"]["enabled"] = nav_enabled
     if locations_file is not None:
