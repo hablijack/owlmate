@@ -261,6 +261,7 @@ esp32-s3-sense/                    # ESP32 firmware
 │   ├── kalibrieren.py             # Guided BNO055 calibration (figure-8 before static poses)
 │   ├── klopftest.py               # Live tap intervals against the OTA window
 │   ├── schnappschuss.py           # Decodes camsnap's JPEGs -- the camera-aim check
+│   ├── trefferquote.py            # Hit rate + face size + gaze-target interval (--live)
 │   └── preview_eyes.py            # Renders SHAPES[] to an HTML contact sheet, no flashing
 └── .pio/build/xiao_esp32s3/       # Build output (firmware.bin)
 
@@ -482,7 +483,7 @@ python main.py [config.yaml]   # Default config path
 | **State Machine** | ✅ Complete | 8 states on ESP32 (owns behavior): BOOT/IDLE/DETECTING/INTERACTING/SLEEPING/NAVIGATING/UPDATE/ERROR |
 | **NDJSON Protocol** | ✅ Complete | Telemetry (500ms) + commands (expression/servo/gaze/nav/wake/blink/heartbeat) |
 | **Navigation "guide me home"** | ✅ Implemented | RPi computes the compass bearing to a named destination and streams the head aim; ESP32 holds it in the NAVIGATING state (live compass). Start via voice ("Bring mich nach Home") or web UI; exit via spoken keyword, web UI, arrival, or timeout. See `specs/013-navigation.spec`. On-hardware `aim_sign` verification pending (BACKLOG Step 5) |
-| **Face Detection (ESP32)** | ✅ Complete | esp-dl **v3** `HumanFaceDetect` (managed IDF component, *not* the old `HumanFaceDetectMSR01`), OV3660 QVGA RGB565BE, `set_vflip(1)` mandatory, 48 ms inference (~21 fps), gaze offsets + state transitions on-device. Detection is currently more sporadic in the firmware than in the isolated `facelab/` project — see `BACKLOG.md` |
+| **Face Detection (ESP32)** | ✅ Complete | esp-dl **v3** `HumanFaceDetect` (managed IDF component, *not* the old `HumanFaceDetectMSR01`), OV3660 QVGA RGB565BE, `set_vflip(1)` mandatory, ~170-200 ms inference on the owl (**not** the 48 ms measured in `facelab/`), gaze offsets + state transitions on-device. Hit rate is 100 % at a normal seating distance; it is dominated by face size in frame, and glasses cost about a third of it — see `specs/009-face-detection.spec` |
 | **OTA Update Mode** | ✅ Complete | 4-tap vibration → SoftAP `RobotOwl-Update` + `/update` HTTP page (HTTPUpdateServer); one tap exits; dual-bank ota_0/ota_1; standalone boot (5s USB wait) |
 | **Face Detection (RPi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
 | **Web UI (RPi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and BNO055 calibration counters, and a map place-picker for navigation. Page lives in `brain/templates/index.html` |

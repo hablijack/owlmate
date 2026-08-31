@@ -60,7 +60,33 @@ nearest person, and the one to follow.
 
 ## Verified facts
 
-* Inference **48 ms**, stable over 212 frames → **~21 frames/s**. (The README
+* **Glasses cost a third of the detections.** Measured 2026-08-31, same
+  lighting, minutes apart: with photochromic glasses **65 %** hit rate, without
+  them **100 %**. The reported score stayed 0.96 either way — when it finds the
+  face it is confident; it simply finds it less often. These models lean on the
+  eye region, and a darkened lens removes it. Because the lenses darken with
+  sunlight, this makes the hit rate drift over the day with no code change, and
+  it is a likely co-cause of readings previously blamed on distance alone.
+* **Hit rate is dominated by face size in frame, and that is a seating
+  distance.** Measured 2026-08-31 on one owl within one hour: **31 %** at 16 %
+  of crop width, **100 %** at 31 %. Nothing in the firmware changed between
+  those two readings. Before diagnosing detection, measure where the person
+  actually is — `tools/trefferquote.py`.
+* **Auto-exposure meters the whole frame.** `FaceDetector_Init()` sets only
+  `vflip`/`hmirror`; everything else is an esp32-camera default. A bright window
+  in frame therefore darkens the face even when the window lies outside
+  `CAM_DETECT_CROP_DIV`'s crop, because the exposure decision is made on the
+  full frame. Untested lever: `set_ae_level()` / `set_aec2()`.
+
+* **Tracking collapses the render rate to ~6 fps, and that is the dominant
+  "the eyes feel dead" cause.** Measured 2026-08-31 on hardware, twice, by two
+  different methods: `loop_hz` is 29-44 Hz at idle but **5.8 Hz mean (1.9-11.1)
+  while a face is being tracked at a 100 % hit rate**. Inference blocks the main
+  loop, so during tracking every loop iteration *is* a detection cycle and the
+  eyes redraw at the detection rate. Nothing in the eye code can fix this; see
+  BACKLOG "Inference on the second core".
+* ~~Inference **48 ms**, stable over 212 frames → **~21 frames/s**.~~ MEASURED
+  FALSE on the owl 2026-08-31, see Falsified. (The README
   previously projected ~25 fps for the old v1 model; this is comparable.)
 * Detection scores 0.58–1.00.
 * End to end in the real firmware: `face.total` climbing, confidence 0.61–0.87,
@@ -71,6 +97,32 @@ nearest person, and the one to follow.
   model actually loads on the first `run()`. Normal, not a failure.
 
 ## Falsified
+
+* **"Inference is 48 ms / ~21 fps."** That figure came from the `facelab`
+  prototype and is not true of the owl. Measured 2026-08-31 on hardware: a
+  detection cycle is **~170-200 ms**, and it is not even constant — it depends
+  on how much the coarse stage finds. With a clean, well-lit face the loop ran
+  at **5 Hz**; with a face the detector struggled on (darkened glasses) it ran
+  at **11 Hz**, because a *failed* inference is a *fast* inference. So a better
+  picture is more expensive to process. This is the second time a `facelab`
+  number has been trusted without re-measuring it here; see the note about its
+  hit rate below.
+* **"`FACE_DETECT_INTERVAL_MS` throttles the detection rate."** It is a floor,
+  not a rate, and it is not the limit. Measured 2026-08-31: 100 -> 0 moved the
+  gaze update from 190 ms to 171 ms (19 ms) while dropping the render rate from
+  **40 Hz to 6 Hz**, because the inference blocks the main loop. Reverted.
+* **"The permissive MSR threshold costs speed."** Plausible — every candidate it
+  passes must be refined by MNP — and measured false. 2026-08-31, same sitting,
+  same distance:
+
+  | `FACE_SCORE_THRESHOLD_MSR` | attempts | hit rate | usable gaze target |
+  |---|---|---|---|
+  | **0.1** | 5.0 Hz | **100 %** | **200 ms** |
+  | 0.3 | 5.7 Hz | 85 % | 207 ms |
+  | 0.5 | 6.0 Hz | 31 % | 528 ms |
+
+  Raising it barely speeds the inference and collapses the hit rate, so the
+  *usable* rate only gets worse. 0.1 is already correct.
 
 * **"The camera orientation does not matter for detection."** It is the single
   most important fact in this spec. These models find **upright faces only**; a

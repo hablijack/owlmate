@@ -76,6 +76,7 @@ private:
     uint8_t _blinkSpeed;
     bool _blinking;
     uint32_t _lastBlink;
+    uint32_t _blinkStart;   // Beginn des laufenden Lidschlags (ms)
     uint32_t _nextBlinkTime;
 
     // Dirty-flag rendering: skip the full redraw when the visible

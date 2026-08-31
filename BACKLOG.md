@@ -36,7 +36,13 @@ the firmware one was flashed and verified on the owl — supervisor test doubles
 (item 2) and the `main.cpp` split (item 1). Step 2 was folded into that same
 flash and is ticked.
 
-**4b is now the only unblocked work, and it needs the owl.** One of its four
+**The next real step is Step 6 item 2 — inference on the second core.** It was
+written on 2026-08-31 after a long session established, by measurement, that the
+eyes render at **6 fps while tracking** and that this — not the gaze code, not
+the `main.cpp` split, not exposure — is why they look dead. 4b's gaze smoothing
+is blocked behind it; attempting the filter first has already cost one session.
+
+**4b's remaining items need the owl.** One of its four
 items got a partial answer for free: the HAPPY→AWE arc was observed in
 telemetry, so what remains there is a judgement call about how it *looks*, not
 whether it fires. The 4-tap OTA path is the one thing the verification flash
@@ -249,21 +255,39 @@ right. The v1 knobs (`resize_scale`, `top_k`) do not exist in esp-dl v3.
 
 Small, laptop-plus-owl items left over from 2026-08-29. None is blocking.
 
-**Smooth the gaze.** The eyes follow the raw per-frame face position with no
-deadband and no filtering. Harmless while detection was sporadic; at the 100 %
-hit rate now achieved it is likely to look twitchy. Adafruit's MEMENTO shoulder
-robot uses a centre deadzone, 2 px hysteresis and a proportional step of 0.4 —
-see the Reference block in `specs/009-face-detection.spec`. The same control law
-applies to the head servo when it is wired up.
+**Smooth the gaze.** `[!]` BLOCKED on Step 6 item 2, and attempting it again
+before that is unblocked will waste another session. Tried on hardware
+2026-08-31 in four variants — Adafruit's deadband + proportional step, a
+time-constant filter, a distance-dependent snap/smooth split, and a pure
+threshold — and **every one was rejected as either jittery or laggy**. The
+reason was only found afterwards: the eyes render at **6 fps while tracking**,
+so the filter itself was being sampled six times a second. No control law
+produces smooth motion at that frame rate.
+
+The measured signal, for whoever picks this up: the tremble is ~1.1 px of iris
+travel per sample, a slow head movement is also ~1 px per sample, and new
+positions arrive only ~5 times a second — so at the *current* sample rate noise
+and slow movement are literally the same signal and cannot be separated.
+Adafruit's `SERVO_HYSTERESIS 2` is wrong here regardless: it was chosen for a
+servo with a far larger range, and this iris travels only +-18 px total, so 2 px
+is wider than the entire signal at a normal seating distance.
+
+Do the second-core offload first. At ~40 fps a short interpolation should read
+as natural eye movement; the same law applies to the head servo when wired.
 
 **Try a square detection crop.** The crop is 160×120, still 4:3; the model's
 input is square, so some of it is wasted on rescale. A 160×160 centre crop is
 square and captures more vertical extent. Five-minute experiment.
 
-**Look at the new INTERACTING arc.** *Partly answered 2026-08-31: the arc
-fires — telemetry's `eye` field went `happy` → `awe` about a second after entry,
-on the owl. What is still unseen is how it LOOKS on a 160 px panel, which is the
-part that motivated the change.* Changed 2026-08-30: a ~1 s `HAPPY` burst on
+**Look at the new INTERACTING arc.** `[x]` ANSWERED 2026-08-31, and it was
+wrong. The greeting read on hardware as *"a horizontal line before the happy
+eyes"*: `HAPPY` carries `botRise 62` against a `halfH` of 42, so its centre
+column is only **22 px** tall — a deep crescent, which renders as a shut eye.
+That is the very reason sustained `HAPPY` was replaced by `AWE` the day before;
+the one-second greeting kept it and so kept the defect. Now `SURPRISED`
+(40x47, no botRise/topSag/slant = 94 px of open eye, the widest in the table) —
+"I just noticed you" is a widening, not a squeeze. Still worth a look on the
+panel, but the reported defect is fixed.* Changed 2026-08-30: a ~1 s `HAPPY` burst on
 entry (`INTERACT_GREET_MS`) and then `AWE` held, instead of `HAPPY` pinned for
 the whole state — sustained `HAPPY` has `botRise 62` and reads as an eye
 squeezed shut while the owl is visibly tracking you. Builds clean on all 11
@@ -342,7 +366,54 @@ this list that varies far more than the work itself does.
    **Still unseen:** the 4-tap OTA entry / 1-tap exit path. It needs physical
    taps and was not exercised. Everything else in this table was.
 
-2. **Consolidate the three supervisor test doubles.** `[x]` DONE 2026-08-31.
+2. **Inference on the second core — the eyes render at 6 fps while tracking.**
+   `[ ]` NEW 2026-08-31, and now the highest-impact item on this list.
+
+   **The measurement.** `loop_hz` is 29-44 Hz at idle and **5.8 Hz mean
+   (1.9-11.1) while tracking a face at a 100 % hit rate**. Taken twice by two
+   methods (pyserial, which reboots the board, and `cat`, which does not), on a
+   warm owl with 9 minutes of uptime. `FaceDetector_Detect()` blocks `loop()`
+   for ~170-200 ms, so during tracking each loop iteration *is* a detection
+   cycle and the eyes redraw at the detection rate.
+
+   **Why it matters more than it sounds.** Six frames per second is a
+   slideshow, and it is the state the owl is in whenever someone is looking at
+   it. An entire session on 2026-08-31 went into gaze smoothing before anyone
+   measured this — every filter was itself being sampled at 6 fps, which is why
+   each variant read as either jittery or laggy and none could be both smooth
+   and immediate. Ruled out by measurement in that session, so do not
+   re-diagnose them: the `main.cpp` split (A/B'd on hardware, felt identical),
+   the gaze code (the pre-session original felt equally slow), camera exposure
+   (face measures brighter than frame average, 0.2 % clipping), the serial
+   connection and the reset.
+
+   **The shape.**
+
+       core 1 (ARDUINO_RUNNING_CORE=1)  loop(): protocol, state machine,
+                                        eyes, servos, telemetry — free-running
+       core 0 (idle today; WiFi only in UPDATE mode)
+                                        capture -> inference -> publish
+
+   `xTaskCreatePinnedToCore` on core 0, and a safe handoff of `faceResult` —
+   a mutex or a double-buffer swap. A race here would be an intermittent bug of
+   exactly the kind this project loses days to.
+
+   **Expected**: render 6 -> ~40 Hz during tracking; gaze targets 5 -> 6-10 Hz.
+   Both are *hypotheses* — measure `loop_hz` and hit rate before and after,
+   with `tools/trefferquote.py`, and with the owner actually in front of the
+   camera.
+
+   **Unknowns to settle while doing it**: how much of the ~170 ms is CPU versus
+   waiting on the camera (if capture-bound, the detection rate gains less);
+   esp-dl's stack and PSRAM needs on a new task; the watchdog on a core running
+   flat out; and core 0 contention during OTA update mode (detection is
+   disabled there, so probably none).
+
+   **Only after this is it worth revisiting gaze smoothing.** At 40 fps a short
+   interpolation would read as natural eye movement rather than lag. At 6 fps
+   nothing does. See `specs/009-face-detection.spec`.
+
+3. **Consolidate the three supervisor test doubles.** `[x]` DONE 2026-08-31.
    One `FakeSupervisor` in `tests/stubs.py`; the local `StubSupervisor` in
    `test_navigation.py` and `test_navigation_webui.py` are gone, along with the
    `nav_start`/`nav_stop` monkey-patch in `test_navigation_speech.py`. 177 tests
@@ -350,7 +421,7 @@ this list that varies far more than the work itself does.
    delegation, and it lacked the `navigation is None` guard the real supervisor
    has. See SPEC-012 Decisions for the one parameter (`last`) that needed care.
 
-3. **`render_template` instead of `render_template_string`** in `web_ui.py:159`.
+4. **`render_template` instead of `render_template_string`** in `web_ui.py:159`.
    **Still blocked, and the block is the entire point.** It has to be done on a
    machine that actually has Flask; this one does not (`import flask` fails),
    which is precisely the condition under which the split was originally made
@@ -383,7 +454,7 @@ this list that varies far more than the work itself does.
    `0`. Reporting a wrong number is worse than reporting none — a `vcc_mv` of
    `0` reads as a dead rail.
 
-4. **Mechanical assembly** — enclosure, servo attachment for ears/head/wings,
+6. **Mechanical assembly** — enclosure, servo attachment for ears/head/wings,
    LCD bezels. Not blocked by anything here, and not really comparable to the
    above: it is the only item that changes what the owl physically is.
 
@@ -406,6 +477,7 @@ wrong; run the lot only after mechanical work.
 | firmware | flash `xiao_esp32s3`, watch telemetry | no LCD errors, ~535 ms cadence, `idle` at rest |
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
+| detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
 | RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 177 tests pass |
 | firmware/RPi drift | `cd rpi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 

@@ -251,18 +251,29 @@ void update() {
         }
 
         case State::INTERACTING: {
-            // Two beats instead of one frozen face: a brief HAPPY in reaction
-            // to noticing someone, then AWE for as long as we keep tracking.
+            // Two beats instead of one frozen face: a brief SURPRISED in
+            // reaction to noticing someone, then AWE for as long as we keep
+            // tracking.
             //
-            // AWE rather than HAPPY is deliberate. HAPPY carries botRise 62,
-            // the deepest crescent in the whole table, and a deep crescent
-            // renders as a CLOSED eye. This is the state in which the owl
-            // follows a face, so a squeezed-shut eye contradicts the behaviour.
-            // AWE has no botRise, no topSag and no slant, and its row was
+            // The greeting was HAPPY until 2026-08-31, and that was the same
+            // mistake twice. HAPPY carries botRise 62 against a halfH of 42,
+            // so its centre column is only 22 px tall -- a deep crescent, which
+            // reads as a SHUT eye. That is exactly why sustained HAPPY was
+            // replaced by AWE the day before; the one-second greeting kept it
+            // and therefore kept the defect. Seen on hardware and reported as
+            // "a horizontal line before the happy eyes".
+            //
+            // SURPRISED is the right beat anyway: 40x47 with no botRise, no
+            // topSag and no slant -- 94 px of open eye, the widest in the
+            // table. "I just noticed you" is a widening, not a squeeze. It
+            // also contrasts with AWE (42x42, round) so the two beats stay
+            // distinguishable.
+            //
+            // AWE for the sustained state: no botRise, no topSag, no slant,
             // widened to 42x42 at roundness 3.2 -- +40% area over NEUTRAL and
             // ROUND where every other mood is a taller oval, so the change is
             // visible across a room rather than only side by side.
-            applyExpression(millis() < greetUntil ? EyeExpression::HAPPY
+            applyExpression(millis() < greetUntil ? EyeExpression::SURPRISED
                                                   : EyeExpression::AWE);
             if (faceResult.detected) {
                 lastFaceSeen = millis();

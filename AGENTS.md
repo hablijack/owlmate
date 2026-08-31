@@ -292,7 +292,7 @@ what was changed between two measurements before positing a hardware fault.
 ### Face detection: esp-dl v3, and the camera is mounted upside down
 
 **Ported into the firmware.** `[env:xiao_esp32s3]` builds as `framework = arduino, espidf` so it can
-pull esp-dl as a managed IDF component (`src/idf_component.yml`); 48 ms inference, ~21 fps.
+pull esp-dl as a managed IDF component (`src/idf_component.yml`).
 The diagnostic envs deliberately stay on plain Arduino via the `[arduino_base]` section — putting them
 in espidf mode would take their builds from ~1.5 s to minutes.
 
@@ -303,6 +303,31 @@ exists**, so delete the generated one after changing defaults or nothing happens
 
 **Never flash `firmware.factory.bin` at 0x0** — it spans past 0x9000 and wipes the NVS partition,
 taking the BNO055 calibration with it. Flash bootloader/partitions/boot_app0/firmware separately.
+
+**Inference blocks the main loop, and that is what makes the eyes look dead.**
+Measured 2026-08-31: `loop_hz` is 29-44 Hz at idle and **5.8 Hz while tracking a
+face at a 100 % hit rate** — the eyes redraw about six times a second exactly
+when they are supposed to look alive. A detection cycle is **~170-200 ms** on
+this owl, *not* the 48 ms recorded from `facelab`, and it is not even constant:
+a *successful* inference is the slow one, because more candidates reach the
+refinement stage. Two consequences, both learned the hard way:
+
+- **Do not tune eye animation before checking `loop_hz` during tracking.** A
+  whole session was spent adjusting a gaze filter that was itself being sampled
+  at 6 fps. No time constant, deadband or threshold can produce smooth motion at
+  that frame rate.
+- The fix is structural (move inference to core 0 — see `BACKLOG.md`), not a
+  constant.
+
+**Measuring the owl changes it, in two ways that have both produced wrong
+conclusions.** `pyserial` asserts DTR/RTS on open and **reboots the board**, so
+every capture starts from a fresh boot; plain `cat /dev/cu.usbmodem*` does
+**not** and lets you watch a running owl (verified 2026-08-31 — uptime kept
+climbing across two connects). And the owner has to be *in front of the camera*
+for any detection number to mean anything: several readings of "0 hits" and
+"31 %" were nobody standing there, or standing further away, not a fault.
+`tools/trefferquote.py` reports hit rate, face size and the gaze-target interval
+in one go, and `--live` prints a running view.
 
 Seven things that cost time and will again if forgotten:
 

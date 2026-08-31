@@ -72,6 +72,22 @@ explicitly first or is packaged as a script the user starts themselves.
 
 ## Verified facts
 
+* **`pyserial` reboots the owl on connect; `cat` does not.** Opening the port
+  with pyserial asserts DTR/RTS and resets the board, so every capture starts
+  3.5 s after a fresh boot. `timeout N cat /dev/cu.usbmodem*` leaves it running —
+  verified 2026-08-31 by watching `uptime` keep climbing across two connects
+  (447 s -> 455 s). This matters whenever the question is about steady-state
+  behaviour rather than boot: on 2026-08-31 a whole hypothesis ("the reset is
+  the confound") was raised and then *disproved* only because the non-invasive
+  method existed to check it. The owl's own tools should prefer `cat` for
+  observation and pyserial only when a fresh boot is wanted.
+* **A detection measurement with nobody in front of the camera reads as a
+  fault.** Several readings on 2026-08-31 (0 hits, 31 %) were the owner being
+  absent or further away, not a defect. `tools/trefferquote.py` prints the state
+  and face size alongside the rate so this is visible in the output rather than
+  inferred. Its `--live` mode exists because the person watching the owl and the
+  person reading the terminal are often not in the same room.
+
 Diagnostics that changed a conclusion, and what they cost:
 
 * `dualtest` — ~200 lines, one flash. Proved both panels work and killed a

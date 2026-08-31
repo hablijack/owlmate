@@ -27,6 +27,7 @@ Eyes::Eyes(GC9D01& left, GC9D01& right)
       _blinkSpeed(3),
       _blinking(false),
       _lastBlink(0),
+      _blinkStart(0),
       _nextBlinkTime(millis() + BLINK_GAP_MIN_MS),
       _dirty(true),
       _lastExpr(EyeExpression::NEUTRAL),
@@ -73,6 +74,7 @@ void Eyes::blink(uint8_t speed) {
     _blinkSpeed = constrain(speed, 1, 5);
     _blinking = true;
     _blinkProgress = 0;
+    _blinkStart = millis();
 }
 
 void Eyes::render() {
@@ -86,11 +88,23 @@ void Eyes::render() {
 
     // Update blink animation. Total duration = 2 * _blinkSpeed ticks
     // (close over _blinkSpeed ticks, then reopen over _blinkSpeed ticks).
+    // _blinkProgress wird aus der VERSTRICHENEN ZEIT abgeleitet und nicht je
+    // Aufruf hochgezaehlt. Als Zaehler haengte die Dauer direkt an der
+    // Bildrate, und die schwankt hier zwischen 6 und 44 Hz (die Inferenz
+    // blockiert die Schleife): derselbe Lidschlag dauerte damit 136 ms oder
+    // 952 ms, und im langsamen Fall stand das Auge 159 ms lang GESCHLOSSEN -
+    // als waagerechter Strich sichtbar. Gemessen 2026-08-31.
+    //
+    // Alles darunter (currentOpenness, der Sprungtest) rechnet unveraendert
+    // mit _blinkProgress weiter; nur das Fortschalten aendert sich.
     if (_blinking) {
-        _blinkProgress++;
-        if (_blinkProgress > 2 * _blinkSpeed) {
+        const uint32_t half = (uint32_t)_blinkSpeed * BLINK_TICK_MS;
+        const uint32_t elapsed = now - _blinkStart;
+        if (elapsed > 2 * half) {
             _blinking = false;
             _blinkProgress = 0;
+        } else {
+            _blinkProgress = (uint8_t)(elapsed / BLINK_TICK_MS);
         }
     }
 

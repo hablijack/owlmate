@@ -174,6 +174,47 @@
 // navigation.aim_sign auf der RPi-Seite.
 #define EYE_GAZE_SIGN_X (-1)
 
+// Kein Blickfilter, und das ist gemessen so gewollt.
+//
+// Die Iris folgt der Gesichtsposition jedes Treffers unmittelbar. Sie zittert
+// dadurch um etwa 1 px, weil der Detektor bei ruhigem Gegenueber leicht
+// unterschiedliche Kaesten meldet. Am 2026-08-31 wurde genau dagegen ein Tag
+// lang gefiltert - Totband, Zeitkonstante, Schwelle - und JEDE Variante wurde
+// am fertigen Kopf als "laeuft hinterher" verworfen. Der Grund ist keine
+// schlechte Einstellung, sondern die Abtastrate:
+//
+//   neue Gesichtsposition alle ~200 ms (5 Hz, durch die Inferenz begrenzt)
+//   Rauschen je Abtastung          ~1 px
+//   LANGSAME Kopfbewegung          ~1 px je Abtastung
+//
+// Bei 5 Abtastungen je Sekunde sind Rauschen und langsame Bewegung dasselbe
+// Signal. Was das eine entfernt, verzoegert das andere um ein bis zwei
+// Abtastungen - 200 bis 400 ms, und das faellt staerker auf als das Zittern.
+// Ein lebendiger Blick war dem Besitzer wichtiger als ein ruhiger.
+//
+// Gemessen und WIDERLEGT, bitte nicht wiederholen:
+//   * FACE_DETECT_INTERVAL_MS 100 -> 0: 19 ms schneller, kostet 85 % Bildrate
+//     (40 -> 6 Hz)
+//   * FACE_SCORE_THRESHOLD_MSR 0.1 -> 0.3 -> 0.5: Inferenz kaum schneller
+//     (5,0 -> 6,0 Hz), Trefferquote 100 -> 85 -> 31 %, nutzbares Blickziel
+//     also 200 -> 207 -> 528 ms. 0,1 ist bereits richtig.
+//
+// Der einzige echte Hebel ist, die Inferenz auf den zweiten Kern zu legen.
+// Erst mit deutlich mehr Abtastungen kann ein Filter ruhig UND schnell sein.
+// Siehe BACKLOG.md und specs/009-face-detection.spec.
+
+// Dauer EINES Blinzelschritts in Millisekunden. Die Lidkurve laeuft ueber
+// 2 * BLINK_SPEED Schritte (schliessen, oeffnen), speed 3 also 6 Schritte =
+// 150 ms - ein menschlicher Lidschlag.
+//
+// War bis 2026-08-31 ein reiner Zaehler je gerendertem Bild und damit an
+// dieselbe schwankende Bildrate gekoppelt wie oben: bei 44 Hz dauerte der
+// Lidschlag 136 ms, bei 6,3 Hz aber 952 ms, davon 159 ms mit GESCHLOSSENEM
+// Auge. Das ist der "waagerechte Strich", der auf Hardware zu sehen war. Der
+// Wert 25 ms ist so gewaehlt, dass das Verhalten bei 40 Hz unveraendert
+// bleibt - dort wurde die Blinzelkadenz seinerzeit eingestellt.
+#define BLINK_TICK_MS 25
+
 // ============================================================================
 // Vibration Sensor (SW420)
 // Wired to D2 = GPIO3. (The RIGHT eye's DC sits on D3 = GPIO4 -- see LCD_DC_R
