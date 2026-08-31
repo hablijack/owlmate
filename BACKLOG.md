@@ -398,10 +398,32 @@ this list that varies far more than the work itself does.
    a mutex or a double-buffer swap. A race here would be an intermittent bug of
    exactly the kind this project loses days to.
 
-   **Expected**: render 6 -> ~40 Hz during tracking; gaze targets 5 -> 6-10 Hz.
-   Both are *hypotheses* — measure `loop_hz` and hit rate before and after,
-   with `tools/trefferquote.py`, and with the owner actually in front of the
-   camera.
+   **The premise is no longer a hypothesis — it was tested 2026-08-31.**
+   `FACE_DETECT_INTERVAL_MS` was raised 100 -> 300 purely to trade gaze updates
+   for render frames, and the owner judged it from the panel:
+
+   | interval | gaze target | render rate | verdict |
+   |---|---|---|---|
+   | 100 | every 180 ms | 5.8 Hz | "slow, not alive" |
+   | 300 | every 411 ms | **29 Hz** | **"smoother, more alive — even though it lags"** |
+
+   So liveliness is made of *render rate*, and it is worth paying tracking
+   latency for it. The offload gives both, which is why it is worth the
+   concurrency work. 300 is committed as an interim compromise; revert it to
+   100 once this task lands.
+
+   **It also explains the intermittency.** With interval 300 the loop free-runs
+   at ~40 Hz and then stops dead for ~170 ms inside `FaceDetector_Detect()` —
+   measured as `6 3 24 42 21 31 35 32 42 33 41 43 28 42 33 10 40 ...`. The eyes
+   are smooth for 300 ms and frozen for 170 ms, about twice a second, and
+   whether it is noticed depends on whether the owner was moving during a
+   freeze. That is the long-unexplained "sometimes realtime, sometimes it lags
+   a lot". Offloading removes the stall entirely rather than shortening it.
+
+   **Expected**: render 6 -> ~40 Hz *without* the periodic freeze; gaze targets
+   5 -> 6-10 Hz. The second number is still a hypothesis — measure `loop_hz`
+   and hit rate before and after with `tools/trefferquote.py`, owner in front
+   of the camera.
 
    **Unknowns to settle while doing it**: how much of the ~170 ms is CPU versus
    waiting on the camera (if capture-bound, the detection rate gains less);

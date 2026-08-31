@@ -337,7 +337,26 @@
 #ifndef FACE_DETECTION_ENABLED
 #define FACE_DETECTION_ENABLED 1
 #endif
-#define FACE_DETECT_INTERVAL_MS 100   // min ms between detection runs
+// Mindestabstand zwischen zwei Erkennungslaeufen. KEIN Ratenregler - die
+// Inferenz selbst braucht ~170 ms, dieser Wert kommt oben drauf.
+//
+// 300 statt 100, und das ist ein bewusst getauschter Kompromiss, am
+// 2026-08-31 auf Hardware gegeneinander bewertet:
+//
+//   100: neues Blickziel alle 180 ms, Bildrate 5,8 Hz  -> Augen fast dauernd
+//        eingefroren, wirkt tot
+//   300: neues Blickziel alle 411 ms, Bildrate 29 Hz   -> Augen laufen fluessig,
+//        folgen aber traeger. Vom Besitzer als deutlich lebendiger bewertet
+//
+// Denn die Inferenz BLOCKIERT die Hauptschleife. Bei 100 ms steckt fast jede
+// Runde in der Erkennung; bei 300 ms laeuft die Schleife 300 ms frei bei ~40 Hz
+// und steht dann ~170 ms still. Das ergibt ein sichtbares Stocken etwa zweimal
+// je Sekunde - beschrieben als "mal echtzeitnah, mal haengt es".
+//
+// Beides ist nur ein Notbehelf: der Tausch verschwindet, sobald die Inferenz
+// auf dem zweiten Kern laeuft (BACKLOG Step 6 Punkt 2). Dann gibt es beides,
+// und dieser Wert kann zurueck auf 100.
+#define FACE_DETECT_INTERVAL_MS 300
 
 // esp-dl v3 knobs. NOTE the old MSR01 parameters (top_k, resize_scale) do not
 // exist in v3 -- the model handles its own preprocessing. What remains are the
