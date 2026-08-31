@@ -465,8 +465,8 @@ this list that varies far more than the work itself does.
 3. **Consolidate the three supervisor test doubles.** `[x]` DONE 2026-08-31.
    One `FakeSupervisor` in `tests/stubs.py`; the local `StubSupervisor` in
    `test_navigation.py` and `test_navigation_webui.py` are gone, along with the
-   `nav_start`/`nav_stop` monkey-patch in `test_navigation_speech.py`. 179 tests
-   still pass. They had already drifted — only the web-UI copy carried the nav
+   `nav_start`/`nav_stop` monkey-patch in `test_navigation_speech.py`. All 179 then-existing
+   tests still pass. They had already drifted — only the web-UI copy carried the nav
    delegation, and it lacked the `navigation is None` guard the real supervisor
    has. See SPEC-012 Decisions for the one parameter (`last`) that needed care.
 
@@ -552,7 +552,7 @@ wrong; run the lot only after mechanical work.
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
 | detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
-| RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 179 tests pass |
+| RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 184 tests pass |
 | firmware/RPi drift | `cd rpi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
@@ -570,11 +570,105 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` blocked
 
 ---
 
+## Refactoring pass — 2026-08-31 (code smells)
+
+Six small cleanups, no behaviour change intended. All 11 PlatformIO envs build,
+the `-DHARDWARE_CHECK=1` variant builds, 184 RPi tests pass, `check_docs.py`
+passes. Nothing here needed the owl.
+
+**The falsified inference figure was still asserted as current in four places.**
+`FaceDetector.h`/`.cpp` had been corrected when the number was overturned; these
+had not, and one of them was reasoning from it: `config.h`'s note above
+`FACE_DETECT_INTERVAL_MS` justified the value with "die Inferenz braucht ohnehin
+~180 ms". Also `src/main.cpp`, `src/vision.cpp` and
+`rpi-brain/brain/serial_handler.py` (`FaceDetection.capture_ms`). All now say
+48-91 ms (mean 66), directly measured. This is the failure mode AGENTS.md warns
+about by name — the figure reached *six* files, not three, and the two that were
+fixed made the remaining four look fixed too.
+
+**Every telemetry frame was JSON-parsed twice.** `SerialHandler._handle_message`
+decodes the line to dispatch on `type`, then called `parse_telemetry(line)`,
+which decoded the same bytes again — on the foreground read loop. Split into
+`_telemetry_from_dict(data)` (the builder) with `parse_telemetry(str)` kept as
+the string entry point the tests use. Verified by counting `json.loads` calls
+through `_handle_message`: 2 before, 1 after, same parsed frame.
+
+**Three timeout paths out of DETECTING / INTERACTING / NAVIGATING** each
+repeated `transitionTo(IDLE)` + `setGaze(0,0)` + `setCenter()`, in two different
+orders — which reads as though the order mattered somewhere. Now one
+`returnToIdle()` in `behavior.cpp`'s anonymous namespace. Deliberately NOT used
+by `setNavTarget(active=false)`: that path recentres only `CH_HEAD` and leaves
+the ears and wings alone.
+
+**`web_ui.py`'s `_ear_wing_angle()` returned `CENTER` 38 lines before `CENTER`
+existed** — legal only because a function body is not evaluated until call time,
+and it read as a bug on every pass. Moved below the constants. `api_head` used a
+bare `0` where its two siblings used `CENTER`.
+
+**`Sensors.cpp`: an orphaned comment and three fragile initialisers.** The
+NVS-calibration comment sat above the *vibration* section, 15 lines from the
+`imuPrefs` it describes. And `ImuData data = {0, 0, 0, false, 0, 0, 0, 0, false}`
+was a positional 9-field aggregate init that had to be kept in the struct's field
+order by hand: correct as written, silently wrong the moment anyone inserts a
+field into `ImuData`. Now `ImuData data{}` (likewise `GpsData`, `VibrationData`).
+
+**`api_telemetry` builds its payload from the dataclass now**, not from 50
+hand-copied field accesses. `dataclasses.asdict(t)` walks the whole frozen tree,
+so the page can no longer fall behind the protocol. The old version had drifted
+in BOTH directions: it omitted `timestamp`, `uptime`, `loop_hz`, the `update`
+block and all five face diagnostics (`attempts`, `capture_ms`, `infer_ms`,
+`stack_free`, plus the firmware's `navigation` echo), while sending
+`face.confidence`/`gaze_x`/`gaze_y` that no part of the page reads.
+
+Three deliberate deviations from a plain asdict, all in `_telemetry_payload`'s
+docstring: `eye`/`uptime` keep their wire names (asdict would emit
+`eye_expression`/`uptime_ms` and silently blank both displays); `update.password`
+is dropped, because this route has no authentication and a password-shaped field
+is not something to add as a side effect of a refactor; and the firmware's
+`navigation` moves to `navigation_esp32`.
+
+**That last one was a latent name collision nobody had noticed.** `navigation`
+means two different things on the two sides — the firmware's echo (`active`,
+`angle`: is the head really held where we told it?) and the RPi controller's
+status (`target`, `bearing`, `distance_m`, `aim`), which is what the Navigate
+card renders. The hand-written payload only ever had the controller's copy, so
+assignment order hid it; asdict brought both into one dict and made the clash
+visible.
+
+**Note on why this is NOT the inbound `_*_FIELDS` case.** It looks like the same
+defect and it is not: R-010.5 ("every field sent must be parsed") is an INBOUND
+rule, and the page is entitled to render a subset. There was no live bug — the
+template read exactly what the API sent. The justification here is only that it
+is less code that cannot go stale.
+
+**The German comments in the firmware are INTENDED, and this is now written
+down.** A translation pass was proposed during this refactoring and **the owner
+ruled it out on 2026-08-31: it stays exactly as it is.** The policy and the
+reasoning now live in `AGENTS.md` ("A note on language"), which is the single
+owner; `specs/000-index.spec` points at it instead of restating it.
+
+Recorded here only because the proposal happened and the measurement is worth
+keeping: it is **~350 German comment lines across 11 files**, not the "~100
+across six" first estimated — `config.h` 113 of 385, `FaceDetector.cpp` 61 of
+81, `vision.cpp` 27 of 31, `Eyes.cpp` 30 of 87.
+
+**Two documents had it backwards.** `AGENTS.md` said "keep new code/docs
+English" and `specs/000-index.spec` said "documentation and code comments are
+English" — both written when it was nearly true, both quietly inverted since,
+and between them they made a deliberate choice read as accumulated drift. That
+is the same rot pattern as the "Current state" block this file's own guidance
+warns about: a convention stated once, true when written, never re-checked.
+**Do not reopen this as a cleanup.** There is no partial version to do either —
+the "mixed-language files" slice (`main.cpp`, `protocol.cpp`, `GC9D01.cpp`,
+`Sensors.h`) was part of the same rejected proposal.
+
+---
+
 ## Refactoring pass — 2026-08-27
 
 The 2026-08-26 tree was committed and then refactored. Eight commits, no
 behaviour change intended anywhere; all seven PlatformIO envs build and the RPi
-suite went from 104 to 179 tests.
+suite went from 104 to 179 test methods.
 
 **Dead code removed:** `Eyes::fillTriangle`, `Eyes::markDirty`,
 `GC9D01::drawRect`, `GC9D01::drawCircle`, `Sensors::_vibBurstStart`, a discarded

@@ -52,7 +52,7 @@ void task(void*) {
         // multiplizieren.
         result.stack_free = (uint32_t)uxTaskGetStackHighWaterMark(nullptr);
 
-        // Unter der Sperre nochmal pruefen: waehrend der ~180 ms Inferenz kann
+        // Unter der Sperre nochmal pruefen: waehrend der 48-91 ms Inferenz kann
         // der UPDATE-Modus begonnen haben. Ohne diese zweite Pruefung landete
         // ein Treffer von VOR dem Abschalten noch danach im Ergebnis.
         portENTER_CRITICAL(&mux);

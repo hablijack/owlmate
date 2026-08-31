@@ -86,6 +86,10 @@ commit messages.
   look mirrored, `pio run -e dualtest -t upload` settles it in 30 seconds.
 * `esp32-s3-sense/include/config.h` is the authority for pins and timing
   constants. A spec that contradicts it is out of date; fix the spec.
-* Documentation and code comments are English. Scripts under
-  `esp32-s3-sense/tools/` speak German to the user on purpose — they are read
-  live while working on the hardware.
+* **Language is mixed on purpose.** These specs, `README.md`, `BACKLOG.md` and
+  `AGENTS.md` are English. The firmware's comments, the `tools/` scripts and the
+  diagnostic envs' serial output are largely German, and that is a settled
+  decision rather than drift — do not translate them. `AGENTS.md` owns the full
+  policy and the reasoning ("A note on language"); this line deliberately does
+  not restate it, because the previous version of it said code comments were
+  English and had quietly become the opposite of the truth.

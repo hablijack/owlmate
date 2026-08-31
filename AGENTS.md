@@ -16,11 +16,43 @@ Those symlinks and any per-tool config directories are gitignored on purpose, so
 the repository itself stays tool-agnostic. Create whichever one you need after
 cloning.
 
-A note on language: this file, `README.md` and `BACKLOG.md` are English. The
-helper scripts under `esp32-s3-sense/tools/` talk to the user in **German** —
-that is deliberate, the owner is a native speaker and those scripts are read
-live while working on hardware. Keep new user-facing tooling German and new
-code/docs English.
+## A note on language — the mixed languages are INTENDED
+
+This file, `README.md`, `BACKLOG.md` and `specs/` are English: they are the
+documents a reader who does not speak German has to be able to follow, and the
+protocol contract between the two halves of the machine lives in them.
+
+**Everything else may be German, and much of it is.** The owner is a native
+speaker. Two categories are deliberately German:
+
+* **The helper scripts under `esp32-s3-sense/tools/`** and the serial output of
+  the diagnostic envs in `src/` — read live, at the bench, while holding a
+  soldering iron.
+* **Comments inside the firmware.** `include/config.h` is 113 of its 385 comment
+  lines German, `lib/FaceDetector/FaceDetector.cpp` 61 of 81, `src/vision.cpp`
+  27 of 31, `lib/Eyes/Eyes.cpp` 30 of 87 — roughly 350 lines across 11 files,
+  measured 2026-08-31.
+
+**This is a decision, not drift, and it is settled.** Confirmed with the owner
+on 2026-08-31 after a refactoring pass proposed translating it. Do not "fix" it:
+
+* **Do not translate existing comments**, individually or in a sweep. The German
+  is concentrated in the newest and most densely annotated code — vision,
+  FaceDetector, config — which is exactly where the hard-won measurements and
+  the "do not re-derive this" warnings live. Those notes are read under time
+  pressure, by the person who wrote them, in their first language.
+* **A mistranslated measurement note is this repo's most expensive error class,
+  and nothing can catch it.** `tools/check_docs.py` compares numbers quoted in
+  docs against `config.h`; it cannot compare prose meaning. A sweep would put
+  ~350 unverifiable edits on the notes that exist to stop repeat diagnoses.
+* **Mixed language inside one file is fine.** `src/main.cpp` and
+  `src/protocol.cpp` carry a handful of German lines in otherwise-English code.
+  That is not a defect and needs no cleanup.
+
+For **new** comments, write whichever language makes the note clearest — German
+is expected in firmware and bench tooling. English is required only where a
+non-German reader must follow it: the four steering docs, `specs/`, and anything
+describing the NDJSON wire contract.
 
 ## What this is
 
@@ -124,7 +156,7 @@ taking the BNO055 calibration with it. Flash the pieces separately:
 ### RPi brain (`rpi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (179 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (184 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
@@ -542,10 +574,16 @@ So it is enforced, not requested:
 python3 tools/check_docs.py        # or just run the RPi suite, which includes it
 ```
 
-172 checks: specs indexed both ways, every spec keeps its skeleton, every
+187 checks: specs indexed both ways, every spec keeps its skeleton, every
 `Step N` reference resolves, every path named in a steering doc exists, numbers
 quoted in docs match `config.h`, **every `**D<n>**` row in `WIRING.md` matches
 the firmware pin map**, and quoted expression/test counts are real.
+
+**That total moves on its own, so do not read a change in it as a regression.**
+Checks are *generated* — one per file path cited in a steering doc, one per
+constant quoted from `config.h` — so merely mentioning a new file in this file
+adds one. What matters is that it reports 0 failures. (It said 172 until
+2026-08-31, when nobody had re-run it against the prose in a while.)
 
 Before finishing any change, ask:
 

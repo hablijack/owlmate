@@ -33,6 +33,25 @@ Reason: the two inputs that drive the interesting transitions — a face and a t
 — are both sensed on the ESP32. Putting the decision on the RPi would mean a
 serial round trip per frame and an owl that goes inert whenever the Pi reboots.
 
+**Leaving a state for IDLE is one named operation.** The three timeout paths out
+of `DETECTING`, `INTERACTING` and `NAVIGATING` each repeated
+`transitionTo(IDLE)` + `eyes.setGaze(0,0)` + `servos.setCenter()`, and did so in
+two different orders — which reads as though the order were load-bearing
+somewhere. It is not: `setGaze()` only marks the framebuffer dirty and
+`setCenter()` only writes servo *targets*, which `ServoController::update()`
+later acts on. They are now one `returnToIdle()` private to `behavior.cpp`.
+
+Deliberately **not** used by `setNavTarget(active=false)`: that path recentres
+only `CH_HEAD` and leaves the ears and wings wherever the supervisor put them,
+whereas `setCenter()` centres all five. The two look interchangeable and are not.
+
+**Sensor structs are value-initialised, never positionally.** `Sensors::getImu()`
+opened with `ImuData data = {0, 0, 0, false, 0, 0, 0, 0, false}` — a nine-element
+list that had to be kept in `ImuData`'s field order by hand. It was correct as
+written and would have gone silently wrong the first time anyone inserted a field
+into the struct, shifting every value after it. `ImuData data{}` is equivalent
+today and cannot rot (likewise `GpsData`, `VibrationData`).
+
 **The RPi is a supervisor, not a second brain.** It logs telemetry, watches for
 staleness, and sends: policy (`sleep`/`wake`), *temporary* overrides
 (`expression`, `gaze` — 3 s, `EXPRESSION_OVERRIDE_MS`), and navigation aim

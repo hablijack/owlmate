@@ -3,10 +3,6 @@
 #include <Adafruit_GPS.h>
 #include <Preferences.h>
 
-// Calibration offsets are persisted in NVS. The BNO055 forgets its calibration
-// on every power cycle, and navigation refuses to aim until imu.calibrated is
-// true (rpi-brain/brain/navigation.py), so without this the figure-8 dance
-// would be a prerequisite of every single boot.
 // --- Vibration: Flankenzaehler im Interrupt --------------------------------
 // Der SW-420 liefert Impulsbuendel mit ~1 kHz (auf Hardware gemessen, siehe
 // config.h). Den Pegel im Telemetrie-Takt abzufragen kann das prinzipiell nicht
@@ -21,6 +17,10 @@ static void IRAM_ATTR vibrationIsr() {
     vibPulsesTotal++;
 }
 
+// Calibration offsets are persisted in NVS. The BNO055 forgets its calibration
+// on every power cycle, and navigation refuses to aim until imu.calibrated is
+// true (rpi-brain/brain/navigation.py), so without this the figure-8 dance
+// would be a prerequisite of every single boot.
 static Preferences imuPrefs;
 static const char* IMU_NVS_NS = "owl-imu";
 static const char* IMU_NVS_KEY = "bno-offsets";
@@ -158,7 +158,10 @@ bool Sensors::begin() {
 }
 
 ImuData Sensors::getImu() {
-    ImuData data = {0, 0, 0, false, 0, 0, 0, 0, false};
+    // Value-initialised, NOT a positional {0,0,0,false,...} list: that list
+    // had to be kept in the struct's field order by hand (see Sensors.h), and
+    // inserting a field would have silently shifted every value after it.
+    ImuData data{};
 
     if (!_imuReady) return data;
 
@@ -231,7 +234,7 @@ ImuData Sensors::getImu() {
 }
 
 GpsData Sensors::getGps() {
-    GpsData data = {0, 0, 0, 0, false};
+    GpsData data{};
 
     if (!_gpsReady) return data;
 
@@ -317,7 +320,7 @@ uint32_t Sensors::vibrationPulseTotal() const {
 
 // Reiner Lesezugriff - keine Nebenwirkungen, mehrfach pro Runde unbedenklich.
 VibrationData Sensors::getVibration() {
-    VibrationData data;
+    VibrationData data{};
     data.detected = _vibState;
     data.lastDetected = _vibLastEvent;
     data.count = _vibCount;

@@ -12,6 +12,7 @@ stubs.py), so no hardware is needed. The locations store is a temp file.
 
 import os
 import re
+import shutil
 import sys
 import tempfile
 import types
@@ -336,6 +337,100 @@ class TestMapPickerDegradesOffline(unittest.TestCase):
                           f"unpinned CDN asset:\n{tag}")
             self.assertIn("crossorigin", tag,
                           f"SRI needs crossorigin to be enforced:\n{tag}")
+
+
+class TestTelemetryPayloadCannotDrift(unittest.TestCase):
+    """Every Telemetry field must reach /api/telemetry.
+
+    Not a protocol requirement -- R-010.5 governs PARSING what the firmware
+    sends, and the page is entitled to render a subset. This guards the weaker
+    property that made the hand-written payload worth replacing: whatever the
+    RPi has parsed is offered to the page, so adding a firmware field never
+    needs a third edit here. The old 50-line version had already drifted, and it
+    drifted silently -- an absent key is `undefined` in JS, which renders as an
+    empty span rather than an error.
+    """
+
+    def _payload(self, telemetry=None):
+        """The payload as the HTTP layer sees it.
+
+        Deliberately through app.view_functions, NOT through the private
+        _telemetry_payload helper: against the previous hand-written
+        implementation, importing that helper raised ImportError, so all five of
+        these "failed" without ever evaluating an assertion. A guard that cannot
+        run against the defect it describes is not a guard (SPEC-012 R-012.5).
+        Going through the route makes them meaningful for either implementation.
+        """
+        from brain.serial_handler import Telemetry
+        ui, serial, sup = make_webui(locations_file=self.path)
+        sup.last = Telemetry() if telemetry is None else telemetry
+        return ui.app.view_functions["api_telemetry"]()
+
+    def test_every_top_level_telemetry_field_is_present(self):
+        import dataclasses
+        from brain.serial_handler import Telemetry
+
+        payload = self._payload()
+        # The two fields whose wire name differs from the attribute name, and
+        # the one deliberately renamed to resolve a collision with the RPi
+        # controller's own `navigation` status. See _telemetry_payload.
+        aliases = {"eye_expression": "eye", "uptime_ms": "uptime",
+                   "navigation": "navigation_esp32"}
+        missing = [f.name for f in dataclasses.fields(Telemetry)
+                   if aliases.get(f.name, f.name) not in payload]
+        self.assertEqual([], missing,
+                         "Telemetry fields absent from /api/telemetry: %s" % missing)
+
+    def test_the_face_diagnostics_reach_the_page(self):
+        """The four fields that exist to make an invisible failure visible.
+
+        total/attempts separate "detects badly" from "rarely gets to run";
+        capture_ms/infer_ms separate waiting on the camera from computing. All
+        four were parsed by the RPi and then dropped on the way to the page.
+        """
+        face = self._payload()["face"]
+        for key in ("total", "attempts", "capture_ms", "infer_ms", "stack_free"):
+            self.assertIn(key, face, key)
+
+    def test_loop_hz_and_uptime_reach_the_page(self):
+        payload = self._payload()
+        self.assertIn("loop_hz", payload)
+        self.assertIn("uptime", payload)
+        self.assertNotIn("uptime_ms", payload)   # wire name, not the attribute
+
+    def test_softap_password_is_not_published(self):
+        """The endpoint has no authentication; don't hand out the AP password.
+
+        Everything else in `update` is fine to show -- it is what the operator
+        needs to reach /update -- but the password is not added to an
+        unauthenticated route as a side effect of a refactor.
+        """
+        payload = self._payload()
+        self.assertIn("update", payload)
+        self.assertNotIn("password", payload["update"])
+        self.assertIn("ssid", payload["update"])
+
+    def test_controller_navigation_wins_the_navigation_key(self):
+        """`navigation` must stay the RPi controller's status, not the firmware's.
+
+        The page's Navigate card reads target/bearing/distance_m/aim off
+        t.navigation. The firmware sends a NavigationState of its own under the
+        same name; it is published as `navigation_esp32` so the two cannot be
+        confused for one another.
+        """
+        from brain.serial_handler import Telemetry, NavigationState
+        d = self._payload(Telemetry(
+            state="navigating",
+            navigation=NavigationState(active=True, angle=-12.5)))
+        self.assertIn("target", d["navigation"])          # controller's shape
+        self.assertEqual(-12.5, d["navigation_esp32"]["angle"])  # firmware's echo
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="owl-webui-payload-")
+        self.path = os.path.join(self.dir, "locations.json")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

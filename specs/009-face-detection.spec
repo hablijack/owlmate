@@ -149,6 +149,18 @@ nearest person, and the one to follow.
   `facelab`-is-not-a-control lesson learned two days earlier, and a correct
   lesson made a wrong conclusion look well-supported.
 
+  **Postscript, 2026-08-31: correcting a wrong number in some of its homes made
+  the rest look corrected.** The figure had reached **six** files, not the three
+  `AGENTS.md` counted. `FaceDetector.h` and `FaceDetector.cpp` were fixed when it
+  was overturned, and that was enough to make the topic feel closed — a later
+  sweep found `~180 ms` still stated as current in `src/main.cpp`,
+  `src/vision.cpp`, `include/config.h` and `rpi-brain/brain/serial_handler.py`.
+  The `config.h` one was the one that mattered: it was the stated *justification*
+  for `FACE_DETECT_INTERVAL_MS`, so a dead number was still doing live work. When
+  a measurement is overturned, grep for it and fix every copy in the same
+  sitting; a partial correction is harder to spot than no correction, because the
+  files most likely to be read are the ones already fixed.
+
   **Still unexplained, and left open deliberately:** the recorded 5.8 Hz at
   `FACE_DETECT_INTERVAL_MS` 100 does not follow from a 66 ms inference and a
   ~35 ms iteration, which predict ~17 Hz. The interval-300 reading *was*

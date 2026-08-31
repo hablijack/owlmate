@@ -10,6 +10,7 @@ each action). There is NO authentication: only expose this on a trusted
 local network.
 """
 
+import dataclasses
 import logging
 import os
 import threading
@@ -21,16 +22,6 @@ from brain.serial_handler import SerialHandler, Telemetry
 from brain.supervisor import Supervisor
 
 logger = logging.getLogger(__name__)
-
-
-def _ear_wing_angle(direction: str, up: float, down: float) -> float:
-    """Map a UI direction to an absolute servo angle for a single-axis part
-    (ear or wing). 'center' returns 0; unknown directions default to center."""
-    if direction == "up":
-        return up
-    if direction == "down":
-        return down
-    return CENTER
 
 
 # Servo channel indices (must match esp32-s3-sense/include/config.h).
@@ -62,6 +53,21 @@ EAR_DOWN = 35
 WING_UP = -40
 WING_DOWN = 40
 CENTER = 0
+
+
+def _ear_wing_angle(direction: str, up: float, down: float) -> float:
+    """Map a UI direction to an absolute servo angle for a single-axis part
+    (ear or wing). 'center' returns 0; unknown directions default to center.
+
+    Defined BELOW the angle constants it reads, not above them: it referenced
+    CENTER 38 lines before that name existed, which only worked because the
+    body is not evaluated until call time. It read as a bug on every pass.
+    """
+    if direction == "up":
+        return up
+    if direction == "down":
+        return down
+    return CENTER
 
 # Expressions offered in the UI. GENERATED from NAMES[] in
 # esp32-s3-sense/lib/Eyes/Eyes.cpp -- see brain/expressions.py and
@@ -132,6 +138,50 @@ def _load_template() -> str:
 TEMPLATE = _load_template()
 
 
+# Two Telemetry attributes whose PYTHON name is not their WIRE name. The page has
+# read `eye` and `uptime` since it existed; a plain asdict() emits
+# `eye_expression` and `uptime_ms` and would silently blank both displays.
+_PAYLOAD_RENAMES = (("eye_expression", "eye"), ("uptime_ms", "uptime"))
+
+
+def _telemetry_payload(t: Telemetry) -> dict:
+    """One telemetry frame as a JSON-able dict, derived from the dataclass.
+
+    dataclasses.asdict() walks the whole frozen tree, so this CANNOT fall behind
+    the protocol: a new firmware field is one row in serial_handler's _*_FIELDS
+    table plus one dataclass field, and it shows up here for free.
+
+    This was ~50 lines of hand-copied field accesses, and it had already drifted
+    in BOTH directions -- omitting loop_hz, uptime and all four face diagnostics
+    while sending face.confidence/gaze_x/gaze_y that no part of the page reads.
+    Unlike the inbound tables this is not a protocol requirement (R-010.5 is
+    about parsing what the firmware sends); it is simply less code that cannot
+    go stale.
+
+    Three deliberate deviations from a plain asdict():
+
+    * `eye` / `uptime` keep their wire names -- see _PAYLOAD_RENAMES.
+    * `update.password` is dropped. This endpoint has no authentication, and
+      while the page could legitimately show the SoftAP credentials, adding a
+      password-shaped field to an unauthenticated route is not a change to make
+      as a side effect of a refactor. UPDATE_AP_SSID/PASSWORD are compile-time
+      constants in esp32-s3-sense/include/config.h if the page ever wants them.
+    * `navigation` is moved to `navigation_esp32`. The name means two different
+      things on the two sides: on the wire it is the FIRMWARE's echo (is the head
+      really being held at the angle we sent?), while in this payload it is the
+      RPi controller's status, which is what the Navigate card renders (target,
+      bearing, distance_m, aim). The route sets the controller's copy after
+      this, so before asdict the firmware's copy was shadowed by assignment
+      order alone -- nobody had noticed the two were colliding.
+    """
+    payload = dataclasses.asdict(t)
+    for src, dst in _PAYLOAD_RENAMES:
+        payload[dst] = payload.pop(src)
+    payload.get("update", {}).pop("password", None)
+    payload["navigation_esp32"] = payload.pop("navigation", None)
+    return payload
+
+
 class WebUI:
     """Flask app for manually testing owl features over the LAN."""
 
@@ -164,54 +214,7 @@ class WebUI:
             t: Telemetry = self.supervisor.last
             if t is None:
                 return jsonify({"state": None})
-            payload = {
-                "state": t.state,
-                "firmware": t.firmware,
-                "eye": t.eye_expression,
-                "servos": t.servos,
-                "face": {
-                    "detected": t.face.detected,
-                    "confidence": t.face.confidence,
-                    "gaze_x": t.face.gaze_x,
-                    "gaze_y": t.face.gaze_y,
-                    # Cumulative hits: `detected` is an instantaneous 2 Hz
-                    # sample and misses sporadic detection entirely.
-                    "total": t.face.total,
-                },
-                # IMU + GPS were absent from this payload entirely, so the page
-                # could not show heading, position, or WHY navigation was
-                # refusing to aim. The calibration counters are the actionable
-                # part: navigation needs gyro >= 3 and mag >= 3, and `mag` only
-                # rises during a figure-8 -- which you cannot perform while
-                # reading a serial log.
-                "imu": {
-                    "yaw": t.imu.yaw,
-                    "pitch": t.imu.pitch,
-                    "roll": t.imu.roll,
-                    "calibrated": t.imu.calibrated,
-                    "cal": {
-                        "sys": t.imu.cal.sys,
-                        "gyro": t.imu.cal.gyro,
-                        "accel": t.imu.cal.accel,
-                        "mag": t.imu.cal.mag,
-                        "restored": t.imu.cal.restored,
-                    },
-                },
-                "gps": {
-                    "valid": t.gps.valid,
-                    "latitude": t.gps.latitude,
-                    "longitude": t.gps.longitude,
-                    "satellites": t.gps.satellites,
-                },
-                "vibration": {
-                    "detected": t.vibration.detected,
-                    "count": t.vibration.count,
-                    # Raw ISR edge count since boot. Constant at rest; rising
-                    # on a motionless owl means interference or too sensitive a
-                    # pot. The only way to tell a quiet sensor from a dead one.
-                    "pulses": t.vibration.pulses,
-                },
-            }
+            payload = _telemetry_payload(t)
             # Phase 3: surface what the owl last heard (and how recently) so the
             # page can display it. Omitted entirely when speech is disabled, so
             # the payload is unchanged for deployments that don't use speech.
@@ -245,7 +248,8 @@ class WebUI:
             # The head only pans left/right (no up/down tilt), so those are the
             # only directions offered. Any other value falls back to center.
             direction = (request.get_json(silent=True) or {}).get("direction", "center")
-            angle = HEAD_LEFT if direction == "left" else HEAD_RIGHT if direction == "right" else 0
+            angle = (HEAD_LEFT if direction == "left"
+                     else HEAD_RIGHT if direction == "right" else CENTER)
             ok = self.serial.set_servo(CH_HEAD, angle)
             return jsonify({"ok": ok, "channel": CH_HEAD, "angle": angle})
 

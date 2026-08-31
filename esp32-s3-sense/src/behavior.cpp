@@ -65,6 +65,22 @@ void applyGaze(float stateGx, float stateGy) {
     }
 }
 
+// Leave for IDLE and put head and eyes back to rest.
+//
+// The three timeout paths out of DETECTING, INTERACTING and NAVIGATING all end
+// exactly this way, and did so in two different orders -- which reads as though
+// the order were load-bearing somewhere. It is not: setGaze() only marks the
+// framebuffer dirty and setCenter() only moves the servo TARGETS (see
+// ServoController::update()), so nothing here is sequenced against anything.
+//
+// Deliberately NOT used by setNavTarget(active=false): that path recentres only
+// the head (CH_HEAD), leaving the ears and wings where the supervisor put them.
+void returnToIdle() {
+    behavior::transitionTo(State::IDLE);
+    eyes.setGaze(0, 0);
+    servos.setCenter();
+}
+
 }  // namespace
 
 const char* stateToString(State state) {
@@ -247,9 +263,7 @@ void update() {
                 transitionTo(State::INTERACTING);
             } else if (millis() - lastFaceSeen > DETECT_TIMEOUT_MS) {
                 // Nothing found: give up and go back to idle.
-                transitionTo(State::IDLE);
-                eyes.setGaze(0, 0);
-                servos.setCenter();
+                returnToIdle();
             }
             break;
         }
@@ -284,9 +298,7 @@ void update() {
                 applyGaze(faceResult.gaze_x, faceResult.gaze_y);
             } else if (millis() - lastFaceSeen > INTERACT_TIMEOUT_MS) {
                 // Face lost: return to idle.
-                transitionTo(State::IDLE);
-                eyes.setGaze(0, 0);
-                servos.setCenter();
+                returnToIdle();
             }
             break;
         }
@@ -307,9 +319,7 @@ void update() {
             applyExpression(EyeExpression::SEARCHING);
             servos.setAngle(CH_HEAD, navTargetAngle);
             if (millis() - navSince > NAV_TIMEOUT_MS) {
-                transitionTo(State::IDLE);
-                servos.setCenter();
-                eyes.setGaze(0, 0);
+                returnToIdle();
             }
             break;
         }

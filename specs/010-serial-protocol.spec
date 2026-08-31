@@ -100,6 +100,24 @@ One row plus one dataclass field is now the whole cost of a new field (R-010.6).
 than propagating `None` into the supervisor or raising into the read loop
 (R-010.7). An explicit JSON `null` is treated as absent for the same reason.
 
+**R-010.5 governs the INBOUND direction only, and that needed saying.** It says
+every field the *firmware* sends must be parsed by the RPi. It says nothing about
+what the RPi then re-publishes on `/api/telemetry`, and the web page is entitled
+to render a subset. On 2026-08-31 the hand-written web payload was mistaken for a
+violation of this requirement and nearly got the inbound fix — a `_*_FIELDS`
+table — applied to a problem that was not the same shape. It was replaced with
+`dataclasses.asdict()` instead, on the much weaker and honest grounds of "less
+code that cannot go stale". See SPEC-012.
+
+**One decode per line.** `_handle_message` decodes the line to dispatch on its
+`type`, so it builds the frame from the already-decoded dict
+(`_telemetry_from_dict`) rather than handing the string back to
+`parse_telemetry()`, which decoded the same bytes a second time — on the
+foreground read loop, for every telemetry frame since the dispatcher was added.
+`parse_telemetry(str)` remains as the string entry point the contract tests use.
+Verified by counting `json.loads` calls through `_handle_message`: 2 before, 1
+after, identical parsed frame.
+
 **Parsed frames are frozen dataclasses** (R-010.8). This was documented here and
 in `AGENTS.md` well before it was true; it became true on 2026-08-27. Deriving a
 modified frame is `dataclasses.replace`, which is also what the wire does — the

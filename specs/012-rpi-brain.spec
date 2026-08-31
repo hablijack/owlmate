@@ -94,6 +94,34 @@ try/except so a missing template degrades to "running without the web UI"
 (R-012.3). `_load_template()` raises a message naming deployment and
 `rsync --exclude` rather than a bare `FileNotFoundError` (R-012.4).
 
+**The web payload is derived from the dataclass, not hand-copied.** `/api/telemetry`
+built its JSON from ~50 lines of explicit field accesses; it is now
+`dataclasses.asdict(t)` plus three documented deviations. This is NOT an R-010.5
+obligation — that rule is about parsing what the firmware sends, and a page may
+render a subset — so the justification is only R-012.2: one fact, one place.
+
+It had drifted in **both** directions, which is what a hand-copied mirror does:
+it omitted `timestamp`, `uptime`, `loop_hz`, the whole `update` block and five
+face diagnostics (`attempts`, `capture_ms`, `infer_ms`, `stack_free`, and the
+firmware's own `navigation`), while publishing `face.confidence`/`gaze_x`/`gaze_y`
+that no part of the page reads.
+
+The three deviations, each for a different reason:
+* `eye` and `uptime` keep their **wire** names. `asdict` emits the attribute
+  names `eye_expression`/`uptime_ms`, and the page has read the wire names since
+  it existed — the failure mode is a blank span, not an error.
+* `update.password` is **dropped**. The route has no authentication (R-012.3's
+  LAN-only premise), and a password-shaped field is not something to publish as a
+  side effect of a refactor. `UPDATE_AP_SSID`/`PASSWORD` are compile-time
+  constants if the page ever wants them deliberately.
+* the firmware's `navigation` becomes `navigation_esp32`, because **the name
+  meant two different things and asdict made them collide.** On the wire it is
+  the firmware's echo (`active`, `angle` — is the head really held where we told
+  it?); in this payload it is the `Navigation` controller's status (`target`,
+  `bearing`, `distance_m`, `aim`), which is what the Navigate card renders. The
+  hand-written version only ever carried the controller's copy, so assignment
+  order concealed the clash rather than resolving it.
+
 **Test doubles are built from the real types where possible.** `FakeTelemetry`
 in `tests/stubs.py` constructs the real frozen dataclasses. It used to be
 hand-rolled `SimpleNamespace`s, i.e. a fourth mirror of the wire format, and it
@@ -102,7 +130,8 @@ assembled from the real type cannot drift.
 
 ## Verified facts
 
-* 174 tests, up from 104 before the pass. `tests/test_protocol.py` (39) and
+* 174 tests at the close of that pass, up from 104 before it (184 as of
+  2026-08-31). `tests/test_protocol.py` (39) and
   `tests/test_expressions.py` (11) are new; neither area had any coverage.
 * `web_ui.py` 746 → ~360 lines; `brain/templates/index.html` 429 lines, verified
   byte-for-byte identical to the extracted literal (20,257 characters).
@@ -128,6 +157,19 @@ assembled from the real type cannot drift.
   This is SPEC-011's "a diagnostic whose output cannot differ between the healthy
   and broken case is worse than none", one floor up: it applies to tests as much
   as to hardware probes.
+* **"The test failed against the old code, so it is a real guard." A second
+  instance of R-012.5, 2026-08-31 — and it failed for the wrong reason.** Five
+  new tests were written to pin the telemetry payload against exactly the drift
+  described above. Run against the previous implementation, all five "failed" —
+  with `ImportError: cannot import name '_telemetry_payload'`, because they
+  reached for the new private helper. Not one assertion was ever evaluated, so
+  they demonstrated only that the helper was new. **Watching a test go red is not
+  enough; the red has to come from the assertion.** Rewritten to go through
+  `app.view_functions["api_telemetry"]` — the seam the HTTP layer actually
+  calls — they fail on the assertion and name the gap:
+  `['timestamp', 'uptime_ms', 'loop_hz', 'update', 'navigation']` absent, and
+  `face` missing `attempts`. Then they pass. A guard aimed at a private helper
+  can only ever test code that already exists.
 * **"Importing a module in a test means the module is tested."** Seven test
   modules imported `serial_handler`, which reads as coverage in any grep or
   dependency graph. They imported the dataclasses to build fixtures;
@@ -144,7 +186,7 @@ assembled from the real type cannot drift.
 
 ## Acceptance
 
-1. `cd rpi-brain && python3 tests/run_tests.py` — 174 tests pass.
+1. `cd rpi-brain && python3 tests/run_tests.py` — 184 tests pass.
 2. `grep -rn 'getattr(supervisor, "audio"' brain/` returns nothing, and
    `supervisor.py` is the only module touching `Audio` (R-012.1).
 3. Deleting `brain/templates/index.html` makes the brain log

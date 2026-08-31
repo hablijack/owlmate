@@ -46,9 +46,13 @@ class FaceDetection:
     # How long the last detection cycle took, split into the two costs that
     # cannot be traded off against each other while only their sum is known:
     # capture_ms is WAITING for a camera frame, infer_ms is computing (crop +
-    # esp-dl run). ~170-200 ms together. Since 2026-08-31 the cycle runs on the
-    # ESP32's core 0, so it no longer bounds loop_hz -- these two say whether a
-    # higher detection rate is even reachable.
+    # esp-dl run). Measured on hardware 2026-08-31: capture_ms is 0 in EVERY
+    # sample (fb_count=2 always has a frame ready), so the cycle is 100 %
+    # compute -- 48 ms with no face, 48-91 ms (mean 66) with one. The
+    # ~170-200 ms this comment used to claim was never measured, only divided
+    # out of loop_hz, which charged the detector for the eye render. Since
+    # 2026-08-31 the cycle runs on the ESP32's core 0, so it no longer bounds
+    # loop_hz -- these two say whether a higher detection rate is reachable.
     capture_ms: int = 0
     infer_ms: int = 0
     # Low-water mark of the ESP32 core-0 detection task's stack, in bytes.
@@ -379,18 +383,27 @@ class SerialHandler:
         hardware_check, or malformed JSON. Callers treat that as "not for me",
         not as an error.
 
-        Field-by-field transcription lives in the _*_FIELDS tables above; this
-        function only handles the frame's shape. Two sections are
-        PRESENCE-flagged rather than value-flagged: the firmware emits `update`
-        and `navigation` only while in that state, so the section merely being
-        there is what means active.
+        This is the string entry point. `_handle_message` has already decoded
+        the line to dispatch on its `type`, so it calls _telemetry_from_dict
+        directly: routing through here made every telemetry frame pay for a
+        SECOND json.loads of the same bytes, on the foreground read loop.
         """
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
             logger.warning("Failed to parse telemetry: %s", e)
             return None
+        return self._telemetry_from_dict(data)
 
+    def _telemetry_from_dict(self, data) -> Optional[Telemetry]:
+        """Build a Telemetry from an already-decoded frame, or None.
+
+        Field-by-field transcription lives in the _*_FIELDS tables above; this
+        function only handles the frame's shape. Two sections are
+        PRESENCE-flagged rather than value-flagged: the firmware emits `update`
+        and `navigation` only while in that state, so the section merely being
+        there is what means active.
+        """
         if not isinstance(data, dict) or data.get("type") != "telemetry":
             return None
 
@@ -442,7 +455,7 @@ class SerialHandler:
         msg_type = data.get("type")
 
         if msg_type == "telemetry":
-            telemetry = self.parse_telemetry(line)
+            telemetry = self._telemetry_from_dict(data)
             if telemetry:
                 logger.debug(
                     f"Telemetry: state={telemetry.state}, "

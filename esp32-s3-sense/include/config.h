@@ -360,7 +360,8 @@
 //        folgen aber traeger. Vom Besitzer als deutlich lebendiger bewertet
 //
 // Dieser Tausch existiert nicht mehr, deshalb steht der Wert wieder auf 100.
-// ACHTUNG bei einer weiteren Senkung: die Inferenz braucht ohnehin ~180 ms, der
+// ACHTUNG bei einer weiteren Senkung: die Inferenz braucht ohnehin 48-91 ms
+// (Mittel 66, am 2026-08-31 direkt gemessen - siehe FaceDetector.h), der
 // Abstand kommt oben drauf. 100 -> 0 kauft also hoechstens 100 ms Blickalter,
 // laesst Kern 0 aber dauerhaft am Anschlag laufen (Cache- und PSRAM-Konkurrenz
 // mit dem Rendern auf Kern 1, plus IDLE0 knapp am Task-Watchdog vorbei).
