@@ -103,11 +103,20 @@ nearest person, and the one to follow.
   `29 29 29 27 27 29 29 29 29 21 29 29 25 28 28 …`. Judge this change on the
   sequence and on the count of samples below 15 Hz, never on the mean. At idle
   the mean does move, 40.8 → 55.8 Hz, because there the loop is otherwise free.
-* **A detection cycle is 48-91 ms and is 100 % compute — the camera is never
+* **The attempt rate is `infer_ms` + `FACE_DETECT_INTERVAL_MS`, and that now
+  reconciles exactly.** Measured 2026-08-31 with the owner in frame: mean
+  `infer_ms` 81 ms + the task's 100 ms inter-cycle delay = 181 ms, against
+  `tools/trefferquote.py` reporting attempts at **5.5 Hz** and a new gaze target
+  every **181 ms**. The core-0 task computes, then sleeps the interval, so the
+  interval is added to the inference rather than overlapping it — which is why
+  halving the inference does not double the attempt rate. Note this does NOT
+  resolve the open question below: that one is about the render rate on the old
+  blocking firmware, a different architecture.
+* **A detection cycle is 48-114 ms and is 100 % compute — the camera is never
   waited on.** Measured directly 2026-08-31 via `face.capture_ms` /
   `face.infer_ms` rather than inferred from `loop_hz`. `capture_ms` was **0 in
   every sample**: `fb_count=2` with `CAMERA_GRAB_WHEN_EMPTY` always has a frame
-  ready. `infer_ms` is 48 ms with no face in frame and 48-91 ms (mean 66) with
+  ready. `infer_ms` is 48 ms with no face in frame and 48-114 ms with
   one — a *successful* inference is the slower one, because more candidates
   reach the refinement stage.
 * **Moving to core 0 costs ~3 ms of inference and buys back the whole block.**
@@ -132,7 +141,7 @@ nearest person, and the one to follow.
   in this file.** Written 2026-08-31; overturned the same day by direct
   measurement. The 48 ms was right all along: with `face.infer_ms` reporting
   the time around `detector->run()` itself, a cycle is **48 ms** with no face
-  and **48-91 ms** with one.
+  and **48-114 ms** with one.
 
   The error was in how ~170-200 ms was obtained. Nobody timed the inference.
   It was derived from `loop_hz` — 5.8 Hz while tracking, therefore 172 ms per
@@ -161,8 +170,23 @@ nearest person, and the one to follow.
   sitting; a partial correction is harder to spot than no correction, because the
   files most likely to be read are the ones already fixed.
 
+  **Second postscript, same day — and it lands on the replacement number.** The
+  `48-91 ms (mean 66)` written into those six files was one sitting's sample
+  presented as a range. A capture minutes later on the same owl, with the owner
+  in frame at **31 % frame fill and a 100 % hit rate**, measured **58-114 ms
+  (mean 81)** — past the stated upper bound. Nothing regressed: this is the
+  mechanism SPEC-009 already describes, that a *successful* inference is the slow
+  one because more candidates survive the proposal stage and reach refinement. So
+  the cost tracks the face's apparent size, and one distance cannot yield a
+  bound. All six homes now say **48-114 ms, explicitly an observed envelope**.
+
+  The lesson is not about esp-dl. Twice in one day a number was corrected and the
+  correction inherited the original's flaw — quoting one sitting as if it
+  generalised. **Write a measurement together with the condition that produced
+  it**, or the next reader keeps the number and drops the circumstance.
+
   **Still unexplained, and left open deliberately:** the recorded 5.8 Hz at
-  `FACE_DETECT_INTERVAL_MS` 100 does not follow from a 66 ms inference and a
+  `FACE_DETECT_INTERVAL_MS` 100 does not follow from a 48-114 ms inference and a
   ~35 ms iteration, which predict ~17 Hz. The interval-300 reading *was*
   reproduced exactly on 2026-08-31 (30.2 Hz mean, dips to 11), so that half of
   the record is sound; the interval-100 reading was never re-taken on the old
@@ -312,11 +336,11 @@ face sitting at the model's size limit, not of a threshold or a race.
   always has a frame waiting. Switching grab modes cannot buy time that is not
   being spent. It could still change frame *age*, but nothing points there.
 * **The render is now the larger cost during tracking, not the inference.**
-  48-91 ms of inference on core 0 against a ~35 ms loop iteration on core 1,
+  48-114 ms of inference on core 0 against a ~35 ms loop iteration on core 1,
   and it is the latter that sets the 28-29 Hz the eyes draw at. Anything that
   wants a higher render rate belongs in SPEC-003, not here.
 * **`FACE_DETECT_INTERVAL_MS` has not been re-tuned since the offload.** It is
-  back to 100 as a floor between cycles, which with a 48-91 ms inference puts
+  back to 100 as a floor between cycles, which with a 48-114 ms inference puts
   attempts at ~6 Hz. Lowering it would let core 0 run flat out for a gaze
   target maybe 30 % sooner, at the cost of permanent cache and PSRAM
   contention with the renderer — the 3 ms already measured is what that costs

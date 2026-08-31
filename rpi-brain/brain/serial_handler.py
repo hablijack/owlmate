@@ -48,7 +48,11 @@ class FaceDetection:
     # capture_ms is WAITING for a camera frame, infer_ms is computing (crop +
     # esp-dl run). Measured on hardware 2026-08-31: capture_ms is 0 in EVERY
     # sample (fb_count=2 always has a frame ready), so the cycle is 100 %
-    # compute -- 48 ms with no face, 48-91 ms (mean 66) with one. The
+    # compute -- 48 ms with no face. With one, the cost tracks the face's
+    # apparent SIZE (more candidates survive the proposal stage and reach
+    # refinement): 48-91 ms (mean 66) at a smaller size, 58-114 ms (mean 81) at
+    # 31 % frame fill with a 100 % hit rate, both 2026-08-31 on the same owl.
+    # 48-114 ms is the observed envelope, not a bound. The
     # ~170-200 ms this comment used to claim was never measured, only divided
     # out of loop_hz, which charged the detector for the eye render. Since
     # 2026-08-31 the cycle runs on the ESP32's core 0, so it no longer bounds

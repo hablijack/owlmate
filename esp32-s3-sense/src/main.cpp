@@ -174,7 +174,7 @@ void loop() {
     protocol::poll();
 
     // Pick up whatever the core-0 detection task has found. This is a ~40-byte
-    // copy under a spinlock, not an inference: the 48-91 ms of esp-dl work
+    // copy under a spinlock, not an inference: the 48-114 ms of esp-dl work
     // happens on the other core (see include/vision.h). Until 2026-08-31
     // FaceDetector_Detect() was called right here, which froze the eyes for the
     // whole inference -- 5.8 Hz render while tracking a face.

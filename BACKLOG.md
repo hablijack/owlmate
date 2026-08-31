@@ -596,14 +596,41 @@ passes.
 | `sleep` / `wake` | → `sleeping` (eye `sleeping`) → `idle` |
 | malformed JSON | `{"type":"error","msg":"invalid_json"}` |
 
-**Not verified, and why.** Face *hits* need the owner in front of the camera
-(`face.total` was 0 — nobody there, which is not a fault). The `DETECTING`/
-`INTERACTING` timeout paths through `returnToIdle()` need a face to enter the
-states at all, so only the `NAVIGATING` one was exercised — it is the same three
-lines. And `Sensors::getImu()`'s `ImuData data{}` is unreachable while
-`_imuReady` is false, so that one initialiser waits on the replacement BNO055;
-the `GpsData`/`VibrationData` equivalents are exercised every telemetry frame and
-report correctly.
+**Detection measured with the owner in frame**, same flash, 30 s via
+`cat` + `tools/trefferquote.py --datei`:
+
+| | reading |
+|---|---|
+| hit rate | **100 %** — 168 hits of 168 attempts |
+| attempts | 5.5 Hz |
+| new gaze target | every **181 ms** (documented: 181) |
+| `loop_hz` | 17.3 / **28.8** / 39.2, sequence flat at 29-33 |
+| visible stalls | **0 of 57** samples under 15 Hz |
+| face width | 33-73 px (mean 49) of 160 = **31 % of the crop**, well clear of the ~20 % sporadic floor |
+| `stack_free` | 5584 of 8192 bytes |
+
+**And it overturned the number this very pass had just corrected.** `infer_ms`
+came back **58-114 ms (mean 81)** — past the `48-91 ms (mean 66)` written into
+six files an hour earlier. Not a regression: it is the mechanism SPEC-009 already
+describes, a *successful* inference being the slow one because more candidates
+reach refinement, so the cost tracks the face's apparent size. All six homes now
+say **48-114 ms and call it an observed envelope, not a bound**. See SPEC-009's
+second postscript — twice in one day a corrected number inherited the original's
+flaw, quoting one sitting as though it generalised.
+
+**One thing reconciled exactly:** attempts = `infer_ms` + `FACE_DETECT_INTERVAL_MS`
+= 81 + 100 = 181 ms -> 5.5 Hz, matching the reported gaze cadence to the
+millisecond. The core-0 task computes and *then* sleeps the interval, so the two
+add rather than overlap. (This does **not** settle SPEC-009's open question about
+5.8 Hz — that one is the render rate on the old blocking firmware.)
+
+**Still not verified, and why.** The `DETECTING`/`INTERACTING` timeout paths
+through `returnToIdle()` need the face to *leave* frame, which this capture did
+not do; only the `NAVIGATING` path was exercised — the same three lines, but not
+the same path. And `Sensors::getImu()`'s `ImuData data{}` is unreachable while
+`_imuReady` is false, so that initialiser waits on the replacement BNO055; the
+`GpsData`/`VibrationData` equivalents run every telemetry frame and report
+correctly.
 
 **The falsified inference figure was still asserted as current in four places.**
 `FaceDetector.h`/`.cpp` had been corrected when the number was overturned; these

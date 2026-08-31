@@ -33,8 +33,17 @@ typedef struct {
     // Auf Hardware gemessen 2026-08-31, und beide Zahlen waren eine
     // Ueberraschung: capture_ms ist in JEDER Abtastung 0 - der Treiber haelt
     // mit fb_count=2 immer ein Bild bereit, gewartet wird nie. Der Durchlauf
-    // ist also zu 100 % Rechenzeit, und die betraegt 48 ms ohne Gesicht und
-    // bis 91 ms (Mittel 66) mit einem. Die frueher notierten ~170-200 ms waren
+    // ist also zu 100 % Rechenzeit, und die betraegt 48 ms ohne Gesicht.
+    //
+    // MIT Gesicht haengt sie an der Gesichtsgroesse IM BILD, nicht an einer
+    // festen Zahl: je groesser, desto mehr Kandidaten ueberleben die
+    // Vorschlagsstufe und erreichen die Verfeinerung. Zwei Messungen am
+    // 2026-08-31, dieselbe Eule: 48-91 ms (Mittel 66) bei kleinerem Gesicht,
+    // und 58-114 ms (Mittel 81) bei 31 % Bildanteil mit 100 % Trefferquote.
+    // 48-114 ms ist der beobachtete RAHMEN, keine Obergrenze - die erste
+    // Messung wurde als Grenze notiert und war es nicht.
+    //
+    // Die frueher notierten ~170-200 ms waren
     // nie direkt gemessen, sondern aus loop_hz erschlossen - und darin steckte
     // das Augenzeichnen mit drin. Siehe specs/009-face-detection.spec.
     uint16_t capture_ms;
