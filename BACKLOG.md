@@ -574,7 +574,36 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` blocked
 
 Six small cleanups, no behaviour change intended. All 11 PlatformIO envs build,
 the `-DHARDWARE_CHECK=1` variant builds, 184 RPi tests pass, `check_docs.py`
-passes. Nothing here needed the owl.
+passes.
+
+**Flashed and verified on the owl, 2026-08-31** (four pieces separately, never
+`firmware.factory.bin` at 0x0; `partitions.bin` ends at 0x8c00, clear of NVS):
+
+| check | result |
+|---|---|
+| boot, no LCD error | `System ready`, state settles to `idle`, eye `neutral` |
+| missing BNO055 is non-fatal | warns and continues; **not** `ERROR` (Step 3 part still absent) |
+| `imu` block absent, not zeroed | R-010.4 working — absence is visible, not guessed |
+| `loop_hz` at idle | min/mean/max **29.2 / 58.2 / 61.8** against the `delay(16)` ceiling of 62.5; sequence is flat 62s with a few dips, no stall |
+| `face.infer_ms` | **48 ms** with no face — corroborates the figure this pass propagated, on the same owl |
+| `face.capture_ms` | 0, as documented: the camera is never waited on |
+| `face.attempts` | 198 in 32 s ≈ 6.2 Hz, matching the documented 6.0 |
+| `face.stack_free` | 5584 of 8192 bytes — ~2.6 KB used, healthy margin |
+| camera | PID `0x3660`, `vflip=1`, detection enabled |
+| **`returnToIdle()` on the NAV timeout** | `nav active=true` → `navigating` + eye `searching` + `navigation{active,angle:30}`; refresh stopped → back to `idle` + eye `neutral` after ~5 s (`NAV_TIMEOUT_MS`) |
+| all 8 commands ack | pass, incl. unknown expression → `neutral` and still acked |
+| `gaze` sends no ack | pass — still deliberately silent |
+| `sleep` / `wake` | → `sleeping` (eye `sleeping`) → `idle` |
+| malformed JSON | `{"type":"error","msg":"invalid_json"}` |
+
+**Not verified, and why.** Face *hits* need the owner in front of the camera
+(`face.total` was 0 — nobody there, which is not a fault). The `DETECTING`/
+`INTERACTING` timeout paths through `returnToIdle()` need a face to enter the
+states at all, so only the `NAVIGATING` one was exercised — it is the same three
+lines. And `Sensors::getImu()`'s `ImuData data{}` is unreachable while
+`_imuReady` is false, so that one initialiser waits on the replacement BNO055;
+the `GpsData`/`VibrationData` equivalents are exercised every telemetry frame and
+report correctly.
 
 **The falsified inference figure was still asserted as current in four places.**
 `FaceDetector.h`/`.cpp` had been corrected when the number was overturned; these
