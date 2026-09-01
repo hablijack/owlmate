@@ -24,8 +24,8 @@ traced without a continuity check.
 
 | Board PAD | GPIO | Purpose | Cable | Connect To |
 |:---------:|:----:|---------|:-----:|------------|
-| **D0** | GPIO 1 | I2C SDA | — | BNO055 IMU + PA1010D GPS + PCA9685 Servo Driver |
-| **D1** | GPIO 2 | I2C SCL | — | BNO055 IMU + PA1010D GPS + PCA9685 Servo Driver |
+| **D0** | GPIO 1 | I2C SDA | — | LSM303AGR IMU + PA1010D GPS + PCA9685 Servo Driver |
+| **D1** | GPIO 2 | I2C SCL | — | LSM303AGR IMU + PA1010D GPS + PCA9685 Servo Driver |
 | **D2** | GPIO 3 | Vibration sensor (SW420) | — | SW420 signal pin (DO) |
 | **D4** | GPIO 5 | LCD SPI SCK (shared) | yellow | Both LCDs: CLK |
 | **D8** | GPIO 7 | LCD SPI MOSI (shared) | white | Both LCDs: DIN |
@@ -51,7 +51,7 @@ Both panels also take **VCC (red) → 3.3 V**, **GND (black) → GND** and
 
 | Rail | Devices to combine |
 |------|-------------------|
-| **3.3V** | BNO055 IMU, **PA1010D GPS**, PCA9685 Servo Driver, both LCDs (logic + backlight) |
+| **3.3V** | LSM303AGR IMU, **PA1010D GPS**, PCA9685 Servo Driver, both LCDs (logic + backlight) |
 | **5V (optional)** | Servo motor supply (recommended: external 5V for servos, not the Pi rail) |
 | **GND** | Everything — all I2C devices, both LCDs, vibration sensor, servo driver, GPS |
 
@@ -61,22 +61,99 @@ Both panels also take **VCC (red) → 3.3 V**, **GND (black) → GND** and
 
 ## 📡 Raspberry Pi Connection — Direct Native USB (no cable)
 
+> **⚠️ NOT YET BUILT as of 2026-09-01.** Everything else in this file is the
+> harness as physically wired; this section is the *planned* link, documented
+> ahead of time because the pad identification was verified against Seeed's
+> schematic and netlist (see below) and is worth not re-deriving. Delete this
+> notice once the four wires exist.
+>
+> **Why this link is needed at all:** the IMU sits in the owl's head, and
+> mounting it means closing the head, which makes the XIAO's USB-C connector
+> inaccessible. Without a soldered USB path there would be no serial telemetry
+> once assembled — and `tools/kalibrieren.py` needs it. (Firmware updates alone
+> would survive via OTA, 4 taps → SoftAP `RobotOwl-Update` → `/update`.)
+
 The firmware runs **USB CDC** (`ARDUINO_USB_CDC_ON_BOOT=1`, `ARDUINO_USB_MODE=1`), so `Serial` maps to the chip's **native USB**. Instead of a USB-C cable, solder the XIAO's **backside D+/D− pads** directly to the Raspberry Pi 4's USB pads for a compact, cable-free link (perfect for embedding both boards in the owl body).
 
 `Serial` appears on the Pi as **`/dev/ttyACM0`** (USB 2.0 Full-Speed, 12 Mbps CDC).
 
 ### Wire mapping
 
-| XIAO ESP32-S3 (backside pad) | Raspberry Pi 4 (USB pads) | Wire colour | Notes |
-|:-----------------------------:|:------------------------|:-----------:|-------|
-| **DP** (USB D+) | USB **D+** | Green | twist together |
-| **DN** (USB D−) | USB **D−** | White | twist together |
-| **5V / VBUS** | USB **5V** | Red | powers the XIAO, any USB port works |
-| **GND** | USB **GND** | Black | mandatory, common ground |
+| XIAO ESP32-S3 | Raspberry Pi 4 (USB pads) | Wire colour | Notes |
+|:--------------|:------------------------|:-----------:|-------|
+| **`TP8`** — bottom pad, net `ESP_USB_D+` (GPIO20) | USB **D+** | Green | twist with D− |
+| **`TP7`** — bottom pad, net `ESP_USB_D−` (GPIO19) | USB **D−** | White | twist with D+ |
+| **`5V`** — **edge castellation** (net `VBUS`) | USB **5V** | Red | powers the XIAO, any USB port works |
+| **`GND`** — **edge castellation** (or bottom pad `TP1`) | USB **GND** | Black | mandatory, common ground |
+
+Only the **data pair** needs the fiddly bottom pads. `5V` and `GND` are ordinary
+edge castellations sitting next to each other, and the edge `5V` pad is
+electrically the *same net* as the USB-C connector's VBUS (`U9` pad 14 =
+`VBUS`), so there is no reason to hunt for a bottom pad for power.
+
+Standard USB cable colours are red = VBUS, black = GND, green = D+, white = D−,
+so cutting up a known-good USB cable gives you a correctly twisted data pair for
+free — **but meter the colours, cheap cables lie.**
 
 ### Locating the pads
 
-- **XIAO side:** confirmed — the **D+ / D−** pads are on the **backside** of the XIAO, next to the USB-C connector. Also on that edge: the **5V** and **GND** pads. Quick sanity check before soldering: with the board unpowered, measure continuity between each pad and the matching USB-C pin (D+ ↔ D+, D− ↔ D−).
+- **XIAO side:** the backside carries **eight test pads in a 2×4 grid**, 2.54 mm
+  pitch, sitting behind the USB-C connector. Read out of Seeed's KiCad netlist
+  for the Sense v1.5, so these are designators and nets, not guesses:
+
+  Viewed **from the bottom** with the USB-C connector at the top (so the `5V`
+  castellation column appears on the **left**):
+
+  ```
+               USB-C
+     ┌──────────────────────┐
+  5V │●                    ●│ D0
+     │      TP4  TP3        │
+  GND│●                    ●│ D1
+     │      TP1  TP6        │
+  3V3│●                    ●│ D2
+     │      TP5  TP2        │
+  D10│●                    ●│ D3
+     │      TP8  TP7        │
+  D9 │●     D+   D−        ●│ D4
+  D8 │●                    ●│ D5
+  D7 │●                    ●│ D6
+     └──────────────────────┘
+  ```
+
+  | pad | net | use |
+  |:---:|:----|:----|
+  | `TP7` | `ESP_USB_D−` | **solder D− here** |
+  | `TP8` | `ESP_USB_D+` | **solder D+ here** |
+  | `TP1` | `GND` | usable ground |
+  | `TP6` | `EN` | ☠️ chip enable — bridging to GND resets the board |
+  | `TP4` | IO40 / `CAM_SDA` | ☠️ **camera I²C — in use** |
+  | `TP5` | IO39 / `CAM_SCL` | ☠️ **camera I²C — in use** |
+  | `TP3` | IO41 / `PDM_DATA` | ☠️ microphone — in use |
+  | `TP2` | IO42 / `PDM_CLK` | ☠️ microphone — in use |
+
+  **The data pair is the row FURTHEST from the USB-C connector**, roughly level
+  with the `D10`/`D3` castellations, and `D+` is on the same side as
+  `5V`/`GND`/`3V3`. The six pads you must not bridge are only 2.54 mm away —
+  `TP4`/`TP5` are the camera's I²C lines (`GPIO40`/`GPIO39` in `config.h`), so a
+  slip there kills face detection, not the USB link.
+
+- **Identify the pads by RESISTANCE, not continuity.** `R3` and `R4` are **22 Ω**
+  in series between the USB-C connector and the ESP32, and `TP7`/`TP8` sit on the
+  **chip side** of them. So with the board unpowered:
+  - `TP7` → USB-C pin **A7/B7** reads **≈22 Ω**
+  - `TP8` → USB-C pin **A6/B6** reads **≈22 Ω**
+  - `TP1` → edge `GND` reads **0 Ω**
+
+  A beep-test looking for 0 Ω on the data pads will report "wrong pad" on the
+  *correct* pad. The 22 Ω reading is a positive fingerprint — use it, it is the
+  one check that does not depend on reading the mirror image correctly.
+
+- **Tapping at `TP7`/`TP8` bypasses those 22 Ω resistors.** They are series
+  termination for signal integrity; over a short lead at USB full-speed
+  (12 Mbps) their absence is fine, and tapping the connector pads instead is far
+  harder for no real gain. `C1`/`C2` on these lines are marked **DNP** and there
+  is no ESD array or common-mode choke, so nothing protective is being skipped.
 - **Pi 4 side:** the Pi 4 has **4 USB-A ports** on the right edge (2× USB 3.0 using the blue ports, 2× USB 2.0 using the black ports). All four are behind the same VL805 hub, so any of them works. The solder pads are the **through-hole pads on the underside of the PCB**, directly below each USB connector.
   - **Pick a USB 2.0 (black) port.** The USB 3.0 (blue) ports still carry the D+/D− lines, but the connector has 9 pins and the super-speed pairs sit right beside the signal pads — much easier to bridge accidentally. A black port's 4 pads are: **VBUS, D−, D+, GND** (verify order with a multimeter).
   - Mark the chosen port and **never plug anything into it** afterwards.
@@ -88,16 +165,24 @@ The firmware runs **USB CDC** (`ARDUINO_USB_CDC_ON_BOOT=1`, `ARDUINO_USB_MODE=1`
 2. Use short **30–32 AWG** silicone or enameled (magnet) wire. Cut four lengths of ~3–6 cm.
 3. **Twist the DP + DN pair** tightly together (~3–6 twists/cm) and keep them far from the 5V and GND wires — this preserves the USB differential signal.
 4. **Common ground is critical**: GND must be joined between the two boards (do not rely on a shared supply only).
-5. Solder **one wire at a time**, then re-check with a multimeter: no shorts between DP/DN, DP↔5V, or DN↔GND.
+5. Solder **one wire at a time**, then re-check with a multimeter: no shorts
+   between `TP7`/`TP8`, `TP8`↔5V, `TP7`↔GND — and none to the neighbouring
+   `TP2`–`TP6`, especially the two camera I²C pads.
 6. Add a blob of hot glue over the joints to relieve strain.
 
 ### Powering the XIAO
 
 - With this method the XIAO is powered from the **Pi's 5V rail** via the USB VBUS wire; its onboard regulator produces 3.3V.
-- Do **not** also plug a USB-C cable into the XIAO while the direct solder link is live.
+- Do **not** also plug a USB-C cable into the XIAO while the direct solder link
+  is live. This is not mere caution: the edge `5V` pad and the connector's VBUS
+  are **literally the same net** with no isolation diode between them, so you
+  would tie two 5 V supplies together *and* put two USB hosts on one device's
+  data lines.
 - Servos draw high current — power the PCA9685 motor rail from a **separate 5V supply with a common GND**, not from the Pi's rail.
 
-> ⚠️ If the Pi doesn't enumerate the XIAO (`/dev/ttyACM0` missing), first check **DP/DN swap** (most common), then GND continuity, then wire length. Re-check contrast with a normal USB-C cable to isolate firmware vs. solder issues.
+> ⚠️ If the Pi doesn't enumerate the XIAO (`/dev/ttyACM0` missing), first check a
+> **`TP7`/`TP8` swap** (most common — D+/D− reversed simply never enumerates),
+> then GND continuity, then wire length. Re-check contrast with a normal USB-C cable to isolate firmware vs. solder issues.
 
 ---
 
@@ -146,11 +231,12 @@ espeak-ng "hello owl"         # should speak through the speaker
 
 | Device | Address | SDA → D0 | SCL → D1 |
 |--------|:-------:|:--------:|:--------:|
-| BNO055 IMU | 0x28 | ✅ | ✅ |
+| LSM303AGR IMU (accel) | 0x19 | ✅ | ✅ |
+| LSM303AGR IMU (magnetometer) | 0x1E | ✅ | ✅ |
 | PA1010D GPS | 0x10 | ✅ | ✅ |
 | PCA9685 Servo Driver | 0x40 | ✅ | ✅ |
 
-All three share the same bus — no conflict since each has a unique address.
+All four share the same bus — no conflict since each has a unique address. Note the IMU is **two** devices on one breakout: a missing 0x1E with 0x19 present means the board is there but the magnetometer is mute.
 
 ---
 
@@ -198,8 +284,8 @@ The old `gpsSerial.begin(..., 1, 2)` on the I2C pins has been removed, so GPIO 1
 
 ## 🔌 Connection Count Summary
 
-1. **SDA** → D0 (branches to BNO055 + GPS + PCA9685)
-2. **SCL** → D1 (branches to BNO055 + GPS + PCA9685)
+1. **SDA** → D0 (branches to LSM303AGR + GPS + PCA9685)
+2. **SCL** → D1 (branches to LSM303AGR + GPS + PCA9685)
 3. **3.3V** → all 3.3V devices (common rail)
 4. **GND** → all devices (common rail)
 5. **Vibration signal** → D3

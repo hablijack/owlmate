@@ -37,9 +37,9 @@ FULL_FRAME = {
     "eye": "happy",
     "imu": {
         "pitch": 1.5, "roll": -2.5, "yaw": 210.25, "calibrated": True,
-        # Per-sensor calibration progress (0..3). The firmware sends these so a
-        # figure-8 dance can be guided; see Sensors::getImu().
-        "cal": {"sys": 2, "gyro": 3, "accel": 1, "mag": 3, "restored": True},
+        # Magnetometer calibration state. The firmware sends these so the
+        # calibration turn can be guided; see Sensors::getImu().
+        "cal": {"axes": 2, "heading_ok": True, "restored": True},
     },
     "gps": {
         "valid": True, "latitude": 49.5, "longitude": 10.75,
@@ -167,21 +167,21 @@ class TestDiagnosticFields(unittest.TestCase):
     a missing feature -- it makes a fault look like normal operation.
     """
 
-    def test_imu_calibration_counters(self):
-        # Navigation refuses to aim until mag/gyro reach 3, so without these the
-        # web UI cannot tell you WHY it is refusing, or guide the figure-8.
+    def test_imu_calibration_state(self):
+        # Navigation refuses to aim while imu.calibrated is false, so without
+        # these the web UI cannot tell you WHY it is refusing, or guide the
+        # calibration turn.
         t = parse(FULL_FRAME)
-        self.assertEqual(t.imu.cal.sys, 2)
-        self.assertEqual(t.imu.cal.gyro, 3)
-        self.assertEqual(t.imu.cal.accel, 1)
-        self.assertEqual(t.imu.cal.mag, 3)
+        self.assertEqual(t.imu.cal.axes, 2)
+        self.assertTrue(t.imu.cal.heading_ok)
         self.assertTrue(t.imu.cal.restored)
 
     def test_imu_calibration_defaults_when_absent(self):
         imu = dict(FULL_FRAME["imu"])
         imu.pop("cal")
         t = parse(frame(imu=imu))
-        self.assertEqual(t.imu.cal.mag, 0)
+        self.assertEqual(t.imu.cal.axes, 0)
+        self.assertFalse(t.imu.cal.heading_ok)
         self.assertFalse(t.imu.cal.restored)
         # The rest of the IMU section must still parse.
         self.assertAlmostEqual(t.imu.yaw, 210.25)
@@ -269,7 +269,7 @@ class TestDiagnosticFields(unittest.TestCase):
 
     def test_diagnostic_fields_default_to_zero(self):
         t = parse(frame(imu=None, vibration=None, face=None, loop_hz=None))
-        self.assertEqual(t.imu.cal.gyro, 0)
+        self.assertEqual(t.imu.cal.axes, 0)
         self.assertEqual(t.vibration.pulses, 0)
         self.assertEqual(t.face.total, 0)
         self.assertEqual(t.face.attempts, 0)
@@ -346,7 +346,7 @@ class TestFramesAreImmutable(unittest.TestCase):
         t = parse(FULL_FRAME)
         for obj, attr in ((t.face, "detected"), (t.imu, "yaw"),
                           (t.gps, "valid"), (t.vibration, "count"),
-                          (t.imu.cal, "mag"), (t.navigation, "angle")):
+                          (t.imu.cal, "axes"), (t.navigation, "angle")):
             with self.assertRaises(dataclasses.FrozenInstanceError):
                 setattr(obj, attr, 0)
 

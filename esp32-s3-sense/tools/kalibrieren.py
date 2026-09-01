@@ -1,15 +1,31 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Live-Assistent fuer die BNO055-Kalibrierung der Roboter-Eule.
+"""Live-Assistent fuer die Magnetometer-Kalibrierung der Roboter-Eule.
 
-Einmal ausfuehren, danach liegen die Offsets im NVS-Flash der ESP32 und werden
-bei jedem Boot wiederhergestellt ("IMU: restored calibration offsets from
-flash"). Nur noetig, wenn der Sensor getauscht/neu montiert wurde oder das
-NVS geloescht wurde.
+Einmal ausfuehren, danach liegen die Hartmagnet-Offsets im NVS-Flash der ESP32
+und werden bei jedem Boot wiederhergestellt ("IMU: Hartmagnet-Offsets aus dem
+Flash: ..."). Nur noetig, wenn der Sensor getauscht/neu montiert wurde, das NVS
+geloescht wurde, oder sich die magnetische Umgebung der Eule geaendert hat.
 
-Liest die Telemetrie der ESP32 mit und fuehrt Schritt fuer Schritt durch die
-Kalibrierung. Die Phasen wechseln automatisch, sobald der jeweilige Zaehler
-auf 3 steht -- es gibt keine festen Zeiten.
+SEIT 2026-09-01 IST DAS EIN ANDERES VERFAHREN. Vorher sass ein BNO055 in der
+Eule, der vier eigene Kalibrierzaehler (sys/gyro/accel/mag) hatte und ein
+vierphasiges Programm brauchte, bei dem die Reihenfolge zwingend war: die
+liegende Acht MUSSTE vor den Ruhelagen kommen, weil anhaltende Bewegung den
+accel-Zaehler wieder auf 0 zurueckwarf.
+
+DAS IST ALLES WEG. Der LSM303AGR hat kein Gyroskop, keine interne Fusion und
+keine Zaehler - er liefert nur zwei Rohvektoren, und alles andere rechnet die
+Firmware (lib/OwlImu). Zu kalibrieren ist deshalb nur noch EINE Sache: der
+konstante Magnetfeldversatz, den die Eule selbst erzeugt (Lautsprecher, Servos,
+Schrauben). Das braucht genau eine langsame Volldrehung und hat keine
+Reihenfolge mehr.
+
+WARUM 2 VON 3 ACHSEN GENUEGT: das Erdfeld hat hier etwa 49 uT bei ~66 Grad
+Neigung, also nur ~20 uT waagerechten Anteil. Eine Drehung um die Hochachse
+ueberstreicht damit die zwei WAAGERECHTEN Achsen voll und die senkrechte gar
+nicht. 2/3 ist bei einer waagerechten Drehung das Maximum, nicht ein
+Teilerfolg - fuer den Kompass reicht es. 3/3 gaebe es nur, wenn man die Eule
+zusaetzlich ueber Kopf dreht.
 
 Start:  ~/.platformio/penv/bin/python kalibrieren.py
 Abbruch: Strg-C
@@ -40,60 +56,39 @@ def find_port():
 
 
 BAUD = 115200
+# Ab so vielen abgedeckten Achsen ist der Kurs brauchbar - dieselbe Schwelle,
+# die die Firmware fuer imu.calibrated benutzt (siehe MAG_CAL_MIN_SPAN_UT und
+# OwlImu::fuse()).
+ZIEL_ACHSEN = 2
 
 B = "\033[1m"; R = "\033[0m"; G = "\033[32m"; Y = "\033[33m"; C = "\033[36m"
 
-# REIHENFOLGE IST WICHTIG: die Bewegungsphase (mag) kommt VOR der Ruhephase
-# (accel). Der accel-Zaehler faellt bei anhaltender Bewegung auf 0 zurueck --
-# macht man die Acht zuletzt, zerstoert sie die gerade erreichte
-# accel-Kalibrierung wieder. Umgekehrt bleibt mag stabil, wenn die Eule
-# anschliessend still gehalten wird. (Genau in diese Falle sind wir am
-# 2026-08-26 gelaufen: accel stand nach der Acht wieder auf 0/3.)
-PHASEN = [
-    ("gyro", "GYROSKOP",
-     ["Eule ganz RUHIG stehen lassen. Nicht anfassen.",
-      "Dauert nur ein paar Sekunden."]),
-    ("mag", "MAGNETOMETER  (Bewegung)",
-     ["Eule in der Luft in einer langsamen",
-      "liegenden ACHT bewegen und dabei um alle",
-      "Achsen mitdrehen. Das ist der laengste Teil.",
-      "Abstand halten von Laptop / Lautsprechern /",
-      "Metall - die verzerren das Magnetfeld."]),
-    ("accel", "BESCHLEUNIGUNGSSENSOR  (Ruhe)",
-     ["Jetzt NICHT mehr schwenken. Eule in ca. 6",
-      "LAGEN bringen und jede ~5 s voellig still",
-      "halten - am besten auf dem Tisch ABSETZEN:",
-      "  aufrecht / auf den Kopf / linke Seite /",
-      "  rechte Seite / Schnabel hoch / Schnabel runter",
-      "mag bleibt dabei stabil auf 3."]),
-    ("sys", "SYSTEM",
-     ["Fast fertig. Eule ruhig halten, bis der",
-      "letzte Zaehler einrastet.",
-      "sys schwankt normalerweise - das ist kein",
-      "Fehler, es ist ein Live-Konfidenzwert."]),
+ANLEITUNG = [
+    "Eule LANGSAM einmal ganz um die Hochachse drehen -",
+    "eine Volldrehung in etwa 20-30 Sekunden. Ruhig",
+    "weiterdrehen, auch nach der ersten Runde.",
+    "",
+    "Abstand halten von Laptop / Lautsprechern / Metall -",
+    "die verzerren das Magnetfeld und kalibrieren einen",
+    "Fehler mit ein, der hinterher nicht mehr da ist.",
+    "",
+    "Die Eule darf dabei auf dem Tisch stehen bleiben.",
 ]
 
 
-def balken(werte):
-    teile = []
-    for name in ("sys", "gyro", "accel", "mag"):
-        v = werte.get(name, 0)
-        farbe = G if v >= 3 else (Y if v > 0 else "")
-        teile.append("%s%s[%s%s] %d/3%s" % (farbe, name.ljust(6),
-                                            "#" * v, "." * (3 - v), v, R))
+def balken(achsen, heading_ok, restored):
+    farbe = G if achsen >= ZIEL_ACHSEN else (Y if achsen > 0 else "")
+    teile = ["%sAchsen [%s%s] %d/3%s" % (farbe, "#" * achsen,
+                                         "." * (3 - achsen), achsen, R)]
+    teile.append("Kurs %s%s%s" % (G if heading_ok else Y,
+                                  "ok " if heading_ok else "-- ", R))
+    if restored:
+        teile.append("(Offsets aus dem Flash)")
     return "   ".join(teile)
 
 
-def kopf(nr, titel, zeilen):
-    print()
-    print("%s%s== Phase %d/%d: %s ==%s" % (C, B, nr, len(PHASEN), titel, R))
-    for z in zeilen:
-        print("   " + z)
-    print()
-
-
 def main():
-    print("%s%sBNO055 Kalibrierung - Roboter-Eule%s" % (B, C, R))
+    print("%s%sMagnetometer-Kalibrierung (LSM303AGR) - Roboter-Eule%s" % (B, C, R))
     PORT = find_port()
     if not PORT:
         print("FEHLER: kein serieller Port gefunden.")
@@ -109,10 +104,17 @@ def main():
     s.reset_input_buffer()
     print("Verbunden. Warte auf Telemetrie ...")
 
-    werte = {"sys": 0, "gyro": 0, "accel": 0, "mag": 0}
-    phase = 0
+    print()
+    print("%s%s== So geht es ==%s" % (C, B, R))
+    for z in ANLEITUNG:
+        print("   " + z)
+    print()
+
+    achsen = 0
+    heading_ok = False
+    restored = False
     gespeichert = False
-    kopf(1, PHASEN[0][1], PHASEN[0][2])
+    gesehen = False
     begonnen = time.time()
     letzte_ausgabe = 0.0
 
@@ -125,56 +127,66 @@ def main():
 
             if "IMU:" in text:
                 print("\n%s%s>> %s%s" % (B, G, text, R))
-                if "saved" in text:
+                if "gespeichert" in text:
                     gespeichert = True
 
             if not text.startswith('{"type":"telemetry"'):
                 continue
             try:
-                cal = json.loads(text)["imu"]["cal"]
+                imu = json.loads(text)["imu"]
+                cal = imu["cal"]
             except Exception:
+                # Kein imu-Objekt = Sensor nicht bereit. Die Firmware laesst
+                # das Objekt dann bewusst ganz weg.
                 continue
 
-            for k in werte:
-                werte[k] = cal.get(k, 0)
+            achsen = int(cal.get("axes", 0))
+            heading_ok = bool(cal.get("heading_ok", False))
+            restored = bool(cal.get("restored", False))
 
             jetzt = time.time()
             if jetzt - letzte_ausgabe > 0.4:
-                sys.stdout.write("\r   %s   (%3ds)" % (balken(werte),
-                                                       int(jetzt - begonnen)))
+                sys.stdout.write("\r   %s   (%3ds)" % (
+                    balken(achsen, heading_ok, restored), int(jetzt - begonnen)))
                 sys.stdout.flush()
                 letzte_ausgabe = jetzt
 
-            # Phase abgeschlossen? Naechste Anleitung zeigen.
-            while phase < len(PHASEN) and werte[PHASEN[phase][0]] >= 3:
-                print("\n%s%s   ✓ %s fertig (%d/3)%s"
-                      % (B, G, PHASEN[phase][1], werte[PHASEN[phase][0]], R))
-                phase += 1
-                if phase < len(PHASEN):
-                    kopf(phase + 1, PHASEN[phase][1], PHASEN[phase][2])
-
-            if all(v >= 3 for v in werte.values()):
+            if achsen >= ZIEL_ACHSEN and not gesehen:
+                gesehen = True
                 print("\n")
-                print("%s%s=========================================%s" % (B, G, R))
-                print("%s%s  KALIBRIERUNG KOMPLETT - alles auf 3/3  %s" % (B, G, R))
-                print("%s%s=========================================%s" % (B, G, R))
-                if gespeichert:
-                    print("Offsets sind im Flash gespeichert.")
-                else:
+                print("%s%s=============================================%s" % (B, G, R))
+                print("%s%s  GENUG GEDREHT - %d von 3 Achsen abgedeckt   %s"
+                      % (B, G, achsen, R))
+                print("%s%s=============================================%s" % (B, G, R))
+                if not gespeichert:
                     print("Warte kurz auf die Speicher-Meldung ...")
                     ende = time.time() + 5
                     while time.time() < ende and not gespeichert:
                         l2 = s.readline()
-                        if l2 and "saved" in l2.decode("utf-8", "replace"):
+                        if l2 and "gespeichert" in l2.decode("utf-8", "replace"):
                             gespeichert = True
-                    print("Gespeichert." if gespeichert else
-                          "Keine Speicher-Meldung gesehen (evtl. schon vorher gespeichert).")
+                print("Offsets sind im Flash." if gespeichert else
+                      "Keine Speicher-Meldung gesehen (evtl. schon vorher gespeichert).")
                 print()
                 print("Ab jetzt startet die Eule bei jedem Boot kalibriert.")
-                print("Der Kompass (yaw) ist jetzt nutzbar.")
-                break
+                if heading_ok:
+                    print("Der Kompass (yaw) ist jetzt nutzbar.")
+                else:
+                    print("%sKurs noch nicht brauchbar - steht der Schnabel"
+                          " zu steil?%s" % (Y, R))
+                print()
+                print("%sACHTUNG - das ist noch nicht der ganze Weg zum"
+                      " richtigen Kurs:%s" % (Y, R))
+                print("   Die Kalibrierung macht den Kurs STABIL, nicht"
+                      " automatisch RICHTIG.")
+                print("   Solange der Einbau-Anteil von IMU_HEADING_OFFSET_DEG"
+                      " nicht gemessen ist,")
+                print("   ist yaw um die Montagedrehung verschoben. Siehe"
+                      " specs/006 Open.")
+                print()
+                print("Weiterdrehen verbessert die Offsets noch; Strg-C beendet.")
     except KeyboardInterrupt:
-        print("\nAbgebrochen. Stand: %s" % balken(werte))
+        print("\nBeendet. Stand: %s" % balken(achsen, heading_ok, restored))
     finally:
         s.close()
     return 0

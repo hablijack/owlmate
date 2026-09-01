@@ -13,7 +13,9 @@
 //      scanned, including SDA/SCL swapped -- a very common wiring slip.
 //   4. Does a 9-clock bus-recovery pulse train change anything?
 //
-// Expected devices: BNO055 @ 0x28, PA1010D GPS @ 0x10, PCA9685 @ 0x40.
+// Expected devices: PA1010D GPS @ 0x10, LSM303AGR accel @ 0x19 + magnetometer
+// @ 0x1E, PCA9685 @ 0x40. The IMU is TWO devices on one breakout -- half of it
+// answering is a meaningful result, so both are listed separately.
 // ============================================================================
 #if defined(I2CTEST_ACTIVE)
 
@@ -36,8 +38,9 @@ static const PinPair PAIRS[] = {
     {6, 2, "D1/D5 swapped"},
 };
 
-static const uint8_t EXPECTED[] = {0x10, 0x28, 0x40};
-static const char* EXPECTED_NAME[] = {"PA1010D GPS", "BNO055 IMU", "PCA9685 servo"};
+static const uint8_t EXPECTED[] = {0x10, 0x19, 0x1E, 0x40};
+static const char* EXPECTED_NAME[] = {"PA1010D GPS", "LSM303AGR accel",
+                                      "LSM303AGR mag", "PCA9685 servo"};
 
 // ---------------------------------------------------------------------------
 // Bit-banged I2C. Open-drain emulation: "release" = INPUT_PULLUP (line floats

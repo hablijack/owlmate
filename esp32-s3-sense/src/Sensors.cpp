@@ -1,5 +1,5 @@
 #include "Sensors.h"
-#include <Adafruit_BNO055.h>
+#include "imu_config.h"
 #include <Adafruit_GPS.h>
 #include <Preferences.h>
 
@@ -17,24 +17,30 @@ static void IRAM_ATTR vibrationIsr() {
     vibPulsesTotal++;
 }
 
-// Calibration offsets are persisted in NVS. The BNO055 forgets its calibration
-// on every power cycle, and navigation refuses to aim until imu.calibrated is
-// true (rpi-brain/brain/navigation.py), so without this the figure-8 dance
-// would be a prerequisite of every single boot.
+// Hard-iron offsets are persisted in NVS. Nothing about the magnetometer
+// survives a power cycle by itself, and navigation refuses to aim until
+// imu.calibrated is true (rpi-brain/brain/navigation.py), so without this the
+// calibration turn would be a prerequisite of every single boot.
+//
+// Three floats (x/y/z in microtesla), not the BNO055's opaque 22-byte offset
+// blob -- so the old key is not merely stale, it is a different shape. It is
+// deleted below if found, because a leftover `bno-offsets` in an NVS dump is
+// exactly the sort of thing that costs an hour at the bench.
 static Preferences imuPrefs;
 static const char* IMU_NVS_NS = "owl-imu";
-static const char* IMU_NVS_KEY = "bno-offsets";
+static const char* IMU_NVS_KEY = "mag-hardiron";
+static const char* IMU_NVS_KEY_OLD = "bno-offsets";
 
-static Adafruit_BNO055 bno = Adafruit_BNO055(28, ADDR_BNO055);
+static OwlImu owlImu;
 static Adafruit_GPS GPS(&Wire);
 
 // 9 Taktimpulse auf SCL, danach eine Stop-Bedingung: holt einen Slave aus einer
 // abgebrochenen Uebertragung zurueck und gibt den Bus wieder frei.
 //
-// Gebraucht, weil ein nicht antwortender BNO055 den Bus mit sich reisst. Ohne
-// diese Rettung faellt mit ihm auch GPS und Servotreiber aus - gemessen
-// 2026-08-28: nach fehlgeschlagenem IMU-Init meldete der PCA9685 "not found",
-// obwohl er nachweislich in Ordnung ist.
+// Gebraucht, weil ein nicht antwortender Slave den Bus mit sich reissen kann.
+// Ohne diese Rettung faellt mit ihm auch GPS und Servotreiber aus - gemessen
+// 2026-08-28 am damaligen BNO055: nach fehlgeschlagenem IMU-Init meldete der
+// PCA9685 "not found", obwohl er nachweislich in Ordnung ist.
 static void i2cBusRecover() {
     Wire.end();
     pinMode(I2C_SDA, INPUT_PULLUP);
@@ -58,26 +64,23 @@ static void i2cBusRecover() {
 bool Sensors::begin() {
     _imuReady = false;
     _gpsReady = false;
-    _calRestored = false;
     _calSaved = false;
 
-    // Initialize I2C bus (BNO055 + PA1010D GPS + PCA9685 share D0/D1)
+    // Initialize I2C bus (LSM303AGR + PA1010D GPS + PCA9685 share D0/D1)
     Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
     // Grosszuegiger Timeout, sonst reisst ein taktdehnender Slave den GANZEN
     // Bus mit sich (siehe I2C_TIMEOUT_MS in config.h). Muss nach begin()
     // stehen - begin() setzt den Wert zurueck.
     Wire.setTimeOut(I2C_TIMEOUT_MS);
 
-    // BNO055 IMU.
+    // LSM303AGR IMU: Beschleunigung @0x19 + LIS2MDL-Magnetometer @0x1E.
     //
-    // Expect a burst of ~18 `ESP_ERR_INVALID_STATE` log lines from the I2C HAL
-    // here, spanning roughly half a second. They are NOT a fault and the bus is
-    // NOT broken: in the IDF 5.x i2c_master driver that error code is what a
-    // plain slave NACK is reported as, and Adafruit_BNO055::begin() soft-resets
-    // the chip and then polls its ID (`while (read8(CHIP_ID) != BNO055_ID)`)
-    // while it reboots. Every poll before the chip answers NACKs and logs.
-    // A previous session read this noise as "the I2C bus is dead" -- it is not.
-    if (!bno.begin()) {
+    // Kein Fehlerburst mehr an dieser Stelle. Der BNO055 davor hat sich beim
+    // Init selbst zurueckgesetzt und dann seine ID gepollt, waehrend er neu
+    // startete - ~18 NACKs ueber ~490 ms, bei JEDEM Boot, die eine Sitzung
+    // lang fuer einen defekten Bus gehalten wurden. Der LSM303AGR antwortet
+    // sofort. Ein NACK-Burst hier ist jetzt also ein echter Fehler.
+    if (!owlImu.begin(owlImuConfigFromHeader(), &Wire)) {
         // NICHT fatal. Der IMU haengt am selben Bus wie GPS und Servotreiber;
         // ihn zum Boot-Abbruch zu machen heisst, wegen eines fehlenden
         // Kompasses auch Kamera, Gesichtserkennung, Servos und GPS aufzugeben.
@@ -87,42 +90,36 @@ bool Sensors::begin() {
         //
         // Die Telemetrie laesst das Objekt "imu" dann weg, was auf der RPi-Seite
         // bereits als "Geraet nicht vorhanden" gilt.
-        Serial.println(F("WARNING: BNO055 not responding - continuing without IMU"));
+        //
+        // OwlImu::begin() hat oben schon gesagt, WELCHE Haelfte fehlt und ob es
+        // nach dem falschen (blauen) LSM303DLHC aussieht.
+        Serial.println(F("WARNING: LSM303AGR not responding - continuing without IMU"));
         _imuReady = false;
         // Den Bus freiraeumen, den der gescheiterte Init hinterlassen hat -
         // sonst sind GPS und Servotreiber gleich mit verloren.
         i2cBusRecover();
     } else {
-        // NDOF (accel + gyro + MAGNETOMETER), not IMUPLUS. IMUPLUS fuses only accel
-        // and gyro, which means (a) there is no absolute magnetic reference, so yaw
-        // is a drifting relative heading rather than a compass bearing, and (b) the
-        // magnetometer calibration counter stays at 0 forever, so the "calibrated"
-        // flag below can never become true. Navigation treats imu.yaw as a true
-        // compass heading (see rpi-brain/brain/geo.py aim_angle), so it needs NDOF.
-        bno.setMode(OPERATION_MODE_NDOF);
-
-        // Tell the chip how it is physically mounted (bottom-PCB-up) so it fuses in
-        // the owl's frame rather than its own: roll/pitch then read ~0 when the owl
-        // is level, and yaw becomes a rotation about true vertical. See config.h.
-        bno.setAxisRemap((Adafruit_BNO055::adafruit_bno055_axis_remap_config_t)IMU_AXIS_REMAP_CONFIG);
-        bno.setAxisSign((Adafruit_BNO055::adafruit_bno055_axis_remap_sign_t)IMU_AXIS_REMAP_SIGN);
-
-        // Restore calibration offsets saved by a previous run, if any.
+        // Hartmagnet-Offsets aus einem frueheren Lauf einspielen, falls da.
         {
-            adafruit_bno055_offsets_t off;
-            if (imuPrefs.begin(IMU_NVS_NS, /*readOnly=*/true)) {
+            float off[3];
+            if (imuPrefs.begin(IMU_NVS_NS, /*readOnly=*/false)) {
                 if (imuPrefs.getBytesLength(IMU_NVS_KEY) == sizeof(off) &&
-                    imuPrefs.getBytes(IMU_NVS_KEY, &off, sizeof(off)) == sizeof(off)) {
-                    bno.setSensorOffsets(off);   // handles the CONFIG-mode switch
-                    _calRestored = true;
-                    Serial.println(F("IMU: restored calibration offsets from flash"));
+                    imuPrefs.getBytes(IMU_NVS_KEY, off, sizeof(off)) == sizeof(off)) {
+                    owlImu.setHardIron(off[0], off[1], off[2]);
+                    Serial.print(F("IMU: Hartmagnet-Offsets aus dem Flash: "));
+                    Serial.print(off[0], 1); Serial.print(' ');
+                    Serial.print(off[1], 1); Serial.print(' ');
+                    Serial.print(off[2], 1); Serial.println(F(" uT"));
+                }
+                // Einmalige Altlast: der BNO055-Offsetblock hat eine andere
+                // Form und wuerde am Bench nur verwirren.
+                if (imuPrefs.isKey(IMU_NVS_KEY_OLD)) {
+                    imuPrefs.remove(IMU_NVS_KEY_OLD);
+                    Serial.println(F("IMU: alten BNO055-Offsetschluessel entfernt"));
                 }
                 imuPrefs.end();
             }
         }
-
-        // Give BNO055 time to initialize
-        delay(100);
         _imuReady = true;
     }
 
@@ -157,78 +154,72 @@ bool Sensors::begin() {
     return true;
 }
 
+void Sensors::updateImu() {
+    if (!_imuReady) return;
+
+    // Bus lesen, filtern, Min/Max fuer die Kalibrierung mitschreiben. Begrenzt
+    // sich selbst auf IMU_SAMPLE_INTERVAL_MS, darf also im Schleifentakt
+    // gerufen werden.
+    owlImu.update();
+
+    // Beim ERSTEN Mal, dass die Drehung genug Achsen abgedeckt hat, die
+    // Offsets ins Flash schreiben - dann startet der naechste Boot kalibriert.
+    //
+    // Zwei Feinheiten, beide beim BNO055 gelernt:
+    //  * Der Wachposten macht das danach zu einem No-op, sonst schreibt jede
+    //    Sekunde ins Flash.
+    //  * Wurde in DIESEM Boot aus dem Flash restauriert, wird trotzdem
+    //    geschrieben, sobald eine frische Drehung bessere Offsets liefert -
+    //    aber nur einmal. Beim BNO055 musste dieser Fall komplett gesperrt
+    //    werden, weil setSensorOffsets() den Chip sofort 3/3/3/3 melden liess
+    //    und der Zweig dann bei jedem Boot feuerte. Hier gibt es dieses Problem
+    //    nicht: getHardIron() liefert nur etwas, wenn die Spanne in DIESEM Lauf
+    //    wirklich beobachtet wurde.
+    if (_calSaved) return;
+    float x, y, z;
+    if (!owlImu.getHardIron(x, y, z)) return;
+
+    float off[3] = {x, y, z};
+    if (imuPrefs.begin(IMU_NVS_NS, /*readOnly=*/false)) {
+        if (imuPrefs.putBytes(IMU_NVS_KEY, off, sizeof(off)) == sizeof(off)) {
+            _calSaved = true;
+            Serial.print(F("IMU: Kalibrierung gespeichert: "));
+            Serial.print(x, 1); Serial.print(' ');
+            Serial.print(y, 1); Serial.print(' ');
+            Serial.print(z, 1); Serial.println(F(" uT"));
+        }
+        imuPrefs.end();
+    }
+}
+
 ImuData Sensors::getImu() {
-    // Value-initialised, NOT a positional {0,0,0,false,...} list: that list
-    // had to be kept in the struct's field order by hand (see Sensors.h), and
-    // inserting a field would have silently shifted every value after it.
+    // REINER GETTER (siehe Sensors.h). Value-initialised, NOT a positional
+    // {0,0,0,false,...} list: that list had to be kept in the struct's field
+    // order by hand, and inserting a field would have silently shifted every
+    // value after it.
     ImuData data{};
 
-    if (!_imuReady) return data;
+    if (!_imuReady || !owlImu.ok()) return data;
 
-    sensors_event_t event;
-    bno.getEvent(&event);
-
-    // AXIS ORDER MATTERS. getVector(VECTOR_EULER) reads the BNO055's Euler
-    // register block, which starts at EUL_Heading_LSB and runs
-    // Heading, Roll, Pitch -- so orientation.x is HEADING (yaw), .y is ROLL and
-    // .z is PITCH. All three used to be wired up wrong here (pitch<-roll,
-    // roll<-heading, yaw<-pitch), which is why a level owl reported
-    // roll = 359.9 deg. Navigation consumes imu.yaw as a compass bearing, so
-    // that mix-up silently pointed the head using a pitch angle.
-    // Heading, shifted so that 0 means "the beak points at magnetic north".
-    data.yaw = event.orientation.x + IMU_HEADING_OFFSET_DEG;
-    if (data.yaw < 0.0f) data.yaw += 360.0f;
-    else if (data.yaw >= 360.0f) data.yaw -= 360.0f;
-    data.roll = event.orientation.y;
-    data.pitch = event.orientation.z;
-
-    // Check calibration status
-    uint8_t sys, gyro, accel, mag;
-    bno.getCalibration(&sys, &gyro, &accel, &mag);
-    data.calSys = sys;
-    data.calGyro = gyro;
-    data.calAccel = accel;
-    data.calMag = mag;
-    // Two different questions here, deliberately answered differently.
+    const OwlImuSample s = owlImu.read();
+    data.pitch = s.pitch;
+    data.roll = s.roll;
+    data.yaw = s.yaw;
+    // Zwei verschiedene Fragen, absichtlich verschieden beantwortet - genau die
+    // Unterscheidung, deren Fehlen beim BNO055 die Navigation dauerhaft
+    // blockiert hat (SPEC-006 Falsified).
     //
-    // (1) "Can the fused HEADING be trusted?" -- this is what navigation needs;
-    // rpi-brain/brain/navigation.py refuses to aim while it is false. Heading
-    // trust comes from the magnetometer and gyro. It must NOT include `sys`,
-    // which is a live fusion-confidence value that dips to 0 whenever the owl
-    // is moved, nor `accel`, whose counter falls back to 0 during any sustained
-    // motion (that is why the figure-8 for `mag` has to be done BEFORE the
-    // static poses for `accel`, not after). Requiring all four made this flag
-    // false in 0 of 23 frames on a fully calibrated, offset-restored sensor --
-    // navigation could never have engaged.
-    data.isCalibrated = (gyro >= 3 && mag >= 3);
-    data.calRestored = _calRestored;
-
-    // (2) "Are these offsets worth writing to flash?" -- a stricter, one-shot
-    // question, and all four must read 3. That is also exactly what Adafruit's
-    // getSensorOffsets() enforces internally before it will hand them over.
-    //
-    // The first time we reach a full calibration we persist the offsets, so the
-    // next boot starts calibrated. Cheap: the guard makes this a no-op
-    // afterwards. Two subtleties:
-    //  * The all-four gate below is REQUIRED, not just conservative:
-    //    Adafruit's getSensorOffsets() returns false unless isFullyCalibrated().
-    //  * Skip this entirely if we restored offsets at boot. Writing them back
-    //    would be a flash write on every single boot for no gain, because
-    //    setSensorOffsets() makes the chip report 3/3/3/3 immediately, so this
-    //    branch would otherwise fire on every run.
-    const bool offsetsWorthSaving = (sys >= 3 && gyro >= 3 && accel >= 3 && mag >= 3);
-    if (!_calSaved && !_calRestored && offsetsWorthSaving) {
-        adafruit_bno055_offsets_t off;
-        if (bno.getSensorOffsets(off)) {
-            if (imuPrefs.begin(IMU_NVS_NS, /*readOnly=*/false)) {
-                if (imuPrefs.putBytes(IMU_NVS_KEY, &off, sizeof(off)) == sizeof(off)) {
-                    _calSaved = true;
-                    Serial.println(F("IMU: calibration complete - offsets saved to flash"));
-                }
-                imuPrefs.end();
-            }
-        }
-    }
+    // (1) "Kann man dem Kurs trauen?" -> isCalibrated. Das braucht die
+    //     Navigation. Es sind ZWEI Bedingungen: es liegen Hartmagnet-Offsets
+    //     vor UND die Geometrie taugt gerade.
+    data.isCalibrated = s.haveOffsets && s.headingOk;
+    // (2) "Wie weit ist die Drehung?" -> magAxes, ein Fortschrittsbalken.
+    //     Der darf ruhig 0 sein, waehrend isCalibrated true ist: naemlich genau
+    //     dann, wenn die Offsets aus dem Flash kamen und in diesem Lauf noch
+    //     niemand gedreht hat. Das ist der Normalfall nach einem Neustart.
+    data.magAxes = s.magAxes;
+    data.headingOk = s.headingOk;
+    data.calRestored = s.calRestored;
 
     return data;
 }

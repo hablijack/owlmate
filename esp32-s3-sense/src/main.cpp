@@ -127,7 +127,7 @@ void setup() {
     // antwortender IMU meldet sich ueber isImuReady() und ist KEIN Grund, in
     // ERROR zu gehen: der Bus traegt auch GPS und Servotreiber, und die Augen,
     // die Kamera und die Gesichtserkennung haengen gar nicht daran. Bis
-    // 2026-08-28 riss ein stummer BNO055 die gesamte Eule mit in ERROR.
+    // 2026-08-28 riss ein stummer IMU die gesamte Eule mit in ERROR.
     if (!sensors.begin()) {
         Serial.println(F("ERROR: Sensors failed"));
         behavior::transitionTo(State::ERROR);
@@ -206,6 +206,15 @@ void loop() {
     // updateState() (60 Hz) und sendTelemetry() (2 Hz) die Flanken gegenseitig
     // weg.
     sensors.updateVibration();
+
+    // IMU auswerten: ebenfalls einmal pro Runde, und aus verwandtem Grund. Der
+    // LSM303AGR hat kein Gyroskop und rechnet nichts selbst - die Lage kommt
+    // allein aus der Beschleunigung, und die muss gefiltert werden. Ein
+    // Tiefpass braucht Abtastrate, im Telemetrietakt (2 Hz) gaebe es keine.
+    // updateImu() begrenzt sich selbst auf IMU_SAMPLE_INTERVAL_MS und faellt
+    // bei stummem Sensor in eine Pause, damit kein Fehlzugriff die Schleife
+    // mit I2C_TIMEOUT_MS belastet.
+    sensors.updateImu();
 
     // Parse incoming commands
     protocol::poll();

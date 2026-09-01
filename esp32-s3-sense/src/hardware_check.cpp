@@ -20,7 +20,9 @@
 //   LCDs        -> lcdLeft/Right.begin() (SPI; false = no display on the bus)
 //   PCA9685     -> I2C scan for 0x40 (the servo driver)
 //   GPS         -> I2C scan for 0x10 (PA1010D)
-//   BNO055 IMU  -> I2C scan for 0x28 + ready flag
+//   LSM303AGR   -> I2C scan for BOTH 0x19 (accel) and 0x1E (mag) + ready flag
+//                  Both must answer: they are two independent devices on one
+//                  breakout, and half a compass is not a compass.
 //   Vibration   -> SW420 idle level on VIBRATION_PIN (HIGH = pull-up intact)
 //   OV3660 cam  -> esp_camera frame grab (null = no camera / bad ribbon)
 //
@@ -38,7 +40,7 @@ void i2cScanToSerial() {
         any = true;
     });
     if (!any) Serial.print(F(" (none)"));
-    Serial.println(F("  <- GPS=0x10 IMU=0x28 servo=0x40"));
+    Serial.println(F("  <- GPS=0x10 accel=0x19 mag=0x1E servo=0x40"));
 }
 
 void runHardwareCheck() {
@@ -90,8 +92,8 @@ void runHardwareCheck() {
     // I2C bus scan: report every address that answers, then flag the peripherals
     // we specifically expect.
     Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
-    bool pcaSeen = false, gpsSeen = false, bnoSeen = false;
-    // Build a compact "[28,40,10]" string of every I2C address that answers.
+    bool pcaSeen = false, gpsSeen = false, accSeen = false, magSeen = false;
+    // Build a compact "[19,1e,40,10]" string of every I2C address that answers.
     String foundStr = "[";
     bool firstFound = true;
     i2cScan([&](uint8_t addr) {
@@ -100,7 +102,8 @@ void runHardwareCheck() {
         firstFound = false;
         if (addr == ADDR_PCA9685) pcaSeen = true;
         if (addr == ADDR_GPS) gpsSeen = true;
-        if (addr == ADDR_BNO055) bnoSeen = true;
+        if (addr == ADDR_LSM303_ACCEL) accSeen = true;
+        if (addr == ADDR_LSM303_MAG) magSeen = true;
     });
     foundStr += "]";
 
@@ -114,7 +117,8 @@ void runHardwareCheck() {
     }
 #endif
 
-    bool allOk = lcdL && lcdR && pcaSeen && gpsSeen && bnoSeen && imuReady && vibOk && camOk;
+    const bool imuSeen = accSeen && magSeen;
+    bool allOk = lcdL && lcdR && pcaSeen && gpsSeen && imuSeen && imuReady && vibOk && camOk;
 
     JsonDocument doc;
     doc["type"] = "hardware_check";
@@ -124,7 +128,12 @@ void runHardwareCheck() {
     doc["lcd_right"] = lcdR;
     doc["servo"] = pcaSeen;
     doc["gps"] = gpsSeen;
-    doc["imu"] = bnoSeen && imuReady;
+    doc["imu"] = imuSeen && imuReady;
+    // Getrennt gemeldet, weil "eine Haelfte antwortet" eine ganz andere
+    // Diagnose ist als "gar nichts antwortet": ein fehlendes 0x1E bei
+    // vorhandenem 0x19 heisst Platine da, Magnetometer stumm.
+    doc["imu_accel"] = accSeen;
+    doc["imu_mag"] = magSeen;
     doc["vibration"] = vibOk;
     doc["camera"] = camOk;
     doc["i2c_found"] = foundStr;
@@ -142,11 +151,11 @@ void runHardwareCheck() {
     //                                 / BLACK = panel not wired or I2C missing)
     //
     // (psramOk is already resolved above via psramFound().)
-    // NOTE: the right-eye "OK" gate is the I2C *bus* (all three expected
-    // devices answer), NOT the IMU's software "ready" flag. The BNO055 can be
-    // present on the bus (answers 0x28) yet still not report ready in this
-    // check window; we don't want a healthy panel painted black over that.
-    bool i2cOk = pcaSeen && gpsSeen && bnoSeen;
+    // NOTE: the right-eye "OK" gate is the I2C *bus* (all expected devices
+    // answer), NOT the IMU's software "ready" flag. The IMU can be present on
+    // the bus yet still not report ready in this check window; we don't want a
+    // healthy panel painted black over that.
+    bool i2cOk = pcaSeen && gpsSeen && imuSeen;
     bool lcdOk = lcdL && lcdR;
     (void)i2cOk;  // reported via the per-device fields above; kept for the note
 
@@ -183,7 +192,7 @@ void runHardwareCheck() {
     Serial.print(F(" gps="));
     Serial.print(gpsSeen ? "OK" : "--");
     Serial.print(F(" imu="));
-    Serial.println(bnoSeen ? "OK" : "--");
+    Serial.println(imuSeen ? "OK" : (accSeen ? "accel only" : (magSeen ? "mag only" : "--")));
 
     Serial.println(allOk
         ? F("HARDWARE CHECK: all peripherals detected")

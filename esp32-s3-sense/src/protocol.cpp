@@ -222,12 +222,23 @@ void sendTelemetry() {
         doc["imu"]["roll"] = imu.roll;
         doc["imu"]["yaw"] = imu.yaw;
         doc["imu"]["calibrated"] = imu.isCalibrated;
-        // Per-sensor calibration progress (0..3 each). yaw is not a usable
-        // compass bearing until mag reaches 3 -- wave the owl in a figure 8.
-        doc["imu"]["cal"]["sys"] = imu.calSys;
-        doc["imu"]["cal"]["gyro"] = imu.calGyro;
-        doc["imu"]["cal"]["accel"] = imu.calAccel;
-        doc["imu"]["cal"]["mag"] = imu.calMag;
+        // Calibration progress and the two reasons `calibrated` can be false.
+        // The three 0..3 counters the BNO055 sent (sys/gyro/accel) are GONE:
+        // the LSM303AGR has no gyro and no fusion engine, so those numbers had
+        // no referent. Do not synthesise replacements -- a number that looks
+        // like a measurement and is not one is this project's most expensive
+        // error class.
+        //
+        //   axes    0..3, magnetometer axes with enough span THIS RUN. The
+        //           progress bar of the calibration turn. A level full turn
+        //           reaches 2, only tumbling the owl reaches 3. May legitimately
+        //           be 0 while `calibrated` is true -- that is a fresh boot with
+        //           offsets restored from flash.
+        //   heading_ok  the current geometry yields a usable heading at all
+        //           (beak not near-vertical, field magnitude plausible).
+        //   restored  hard-iron offsets came back from NVS at boot.
+        doc["imu"]["cal"]["axes"] = imu.magAxes;
+        doc["imu"]["cal"]["heading_ok"] = imu.headingOk;
         doc["imu"]["cal"]["restored"] = imu.calRestored;
     }
 

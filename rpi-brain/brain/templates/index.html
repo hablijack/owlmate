@@ -384,19 +384,20 @@ async function poll() {
     const servoStr = servoNames.map((n,i) => `${n}:${(s[i]||0).toFixed(0)}\u00b0`).join('  ');
     const face = t.face
       ? `face:<b>${t.face.detected?'yes':'no'}</b> (${t.face.total||0} total)` : '';
-    // IMU: the four calibration counters are shown individually because
-    // navigation only needs gyro and mag at 3 -- sys and accel dip during any
-    // movement and are NOT a fault. "restored" means the offsets came back
-    // from flash, so the owl booted already calibrated.
+    // IMU (LSM303AGR since 2026-09-01). `axes` is how many magnetometer axes
+    // have seen enough span THIS RUN -- a level full turn reaches 2 of 3, which
+    // is enough. It can read 0 while calibrated is true: that is a boot with
+    // offsets restored from flash, not a fault. "heading_ok" is the other half
+    // of calibrated: the geometry currently yields a usable heading at all.
     let imuStr = '&ndash;';
     if (t.imu) {
       const c = t.imu.cal || {};
       const ok = t.imu.calibrated;
       imuStr = `yaw <b>${t.imu.yaw.toFixed(0)}&deg;</b> ` +
         `<span style="color:${ok?'#57ab5a':'#c9a227'}">` +
-        `${ok?'calibrated':'needs figure-8'}</span> ` +
-        `<span class="hint">(gyro ${c.gyro||0}/3 mag ${c.mag||0}/3 ` +
-        `&middot; sys ${c.sys||0} accel ${c.accel||0}` +
+        `${ok?'calibrated':'needs a slow full turn'}</span> ` +
+        `<span class="hint">(mag axes ${c.axes||0}/3` +
+        `${c.heading_ok?'':' &middot; heading unusable'}` +
         `${c.restored?' &middot; from flash':''})</span>`;
     }
     let gpsStr = '&ndash;';

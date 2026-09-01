@@ -5,10 +5,11 @@ useful part of this list: three of these tasks invalidate the work of another if
 done in the wrong sequence.
 
 **Why this order.** Any work that opens the owl's head comes before any
-calibration, because the BNO055 *and* the camera both live in there — disturbing
-the IMU invalidates both its calibration and `IMU_HEADING_OFFSET_DEG` (75.4°,
-which encodes 70.8° of measured mounting rotation). Calibrating first and then
-opening the head means calibrating twice. Likewise the camera extension goes in
+calibration, because the IMU *and* the camera both live in there — disturbing
+the IMU invalidates both its calibration and `IMU_HEADING_OFFSET_DEG`.
+Calibrating first and then opening the head means calibrating twice. As of
+2026-09-01 this is not hypothetical: the IMU has been replaced and is not yet
+mounted, so the remap and the heading offset are both waiting on that fitting. Likewise the camera extension goes in
 before any detection tuning: remounting changes the framing and may change
 `CAM_VFLIP`, so tuning against a camera that is about to move is wasted effort.
 Navigation cannot be verified until the heading is trustworthy.
@@ -23,14 +24,15 @@ come apart:
 | step | state | why |
 |---|---|---|
 | 0, 1, 4 | done | ticked above |
-| **3** | **BLOCKED on a part** | the BNO055 must be physically replaced; nothing else unblocks it |
+| **3** | **UNBLOCKED — part swapped, firmware ported 2026-09-01** | the LSM303AGR is in and integrated; what is left needs the owl in hand: mount the board, derive `IMU_REMAP_*`, calibrate, re-derive the heading offset |
 | 2 | ready, but cheap and low-value alone | a 2-minute confirmation, best folded into the next flash |
 | 5 | blocked *through* 3 | navigation cannot be verified without a trustworthy heading |
 | **4b** | **ready, needs the owl** | gaze smoothing (unblocked 2026-08-31), square crop, field of view |
 | **4c** | done | the ~12-minute slowdown: two causes found, fixed and verified 2026-08-31 |
 | **6** | items 1–3 **done and flashed** | item 4 stays blocked (no Flask here); items 5–6 open |
 
-So the dependency chain 0→5 is stalled at 3 until the IMU arrives. Step 6 was
+The dependency chain 0→5 was stalled at 3 until the IMU arrived; as of
+2026-09-01 it is stalled only on bench time, not on a part. Step 6 was
 called "the rainy-day list" when it was written; while the part is in the post it
 became the main road, and on 2026-08-31 its two laptop-only items were done and
 the firmware one was flashed and verified on the owl — supervisor test doubles
@@ -165,36 +167,74 @@ faults:
   counter is the trustworthy signal, and it read a correct `0` at rest in the
   same session.
 
-### Step 3 — The BNO055 holds SCL low and must be replaced  `[ ]`
+### Step 3 — IMU replaced with an LSM303AGR: mount it, then calibrate  `[~]` PART SWAPPED + FIRMWARE PORTED 2026-09-01
 
-**BLOCKED on hardware. Diagnosed 2026-08-28; recalibration cannot start until the
-part is swapped.**
+**The BNO055 is out and an Adafruit LSM303AGR is in.** The old blocker is gone:
+that chip ACKed its address and then held SCL low indefinitely (measured over
+**two seconds**), dragging GPS (`0x10`) and the PCA9685 (`0x40`) down with it. The
+new part does not stretch the clock at all — verified 2026-09-01 with
+`-e i2ctest`: both halves answer on the bit-banged **and** the driver scan, at
+100 **and** 400 kHz. The 30 kHz `I2C_FREQ` workaround `imuaxis` carried is
+removed.
 
-The chip ACKs its address after every power-up and then, on the first register
-access, **holds SCL low indefinitely** — measured at over **two seconds**, against
-a few hundred microseconds of legitimate clock stretching. While it is down it
-drags the whole bus with it, so GPS (`0x10`) and the PCA9685 (`0x40`) disappear
-too, and the owl used to boot straight into `ERROR`.
+**This was not a drop-in swap, and the firmware side is done.** The LSM303AGR is
+a 6-DOF part — accelerometer `0x19` + LIS2MDL magnetometer `0x1E`, **no gyroscope
+and no on-chip fusion**. Everything the BNO055 did in silicon is now in
+`lib/OwlImu`: software axis remap, roll/pitch from gravity, a tilt-compensated
+compass, hard-iron calibration, NVS persistence, and a backoff so a mute sensor
+cannot stall the main loop. Telemetry's `imu.cal` changed shape with it
+(`sys`/`gyro`/`accel`/`mag` → `axes`/`heading_ok`/`restored`) on both sides of the
+wire. All 11 envs build; the RPi suite and `check_docs.py` pass. Full record in
+`specs/006-imu-orientation.spec`.
 
-Everything else on that bus was eliminated by measurement first — wiring, ground,
-supply, pull-ups, the XIAO's pins, our firmware, the bus clock, and the two other
-devices. See `specs/005-i2c-bus.spec` **Falsified**, which lists five hypotheses
-that each died to a measurement; do not re-run them.
+**Watch out for the two Adafruit breakouts.** The blue `LSM303DLHC` and the black
+`LSM303AGR` share both I2C addresses and the accelerometer driver, but their
+**magnetometer register maps are completely different** — the DLHC library
+against an AGR returns a plausible-looking wrong heading rather than an error.
+`OwlImu::begin()` checks both `WHO_AM_I` registers so a swapped board fails at
+boot.
 
-**Mitigations already in the tree** (so the owl is usable meanwhile):
-* `I2C_TIMEOUT_MS` 250 ms — the master no longer abandons a frame at 50 ms and
-  strands the bus
-* A silent IMU is a warning, not a boot failure — camera, face detection and eyes
-  all work without it
-* `lib/SoftI2C` + `-e softimu` — bit-banged bus that addresses all four devices
-  cleanly. It cannot rescue a slave that never releases SCL, but it is the right
-  foundation if the replacement also proves marginal on ESP32-S3
+**What is actually left, and it needs the owl:**
 
-**When the new part arrives**: `pio run -e softimu -t upload` first — it names the
-failing protocol step rather than just "not found". Then the calibration
-(`kalibrieren.py`, figure-8 for `mag` BEFORE the static poses for `accel`), and
-because the head has been open, `IMU_HEADING_OFFSET_DEG` (75.4) needs
-**re-deriving**, not just the calibration redone.
+1. **Axis remap — DONE 2026-09-01**, measured with the board hand-held in its
+   mounted position: `IMU_REMAP_X = −2, Y = −1, Z = −3`. Level reads
+   `roll −1.4° / pitch +5.3°` and a beak-up tilt shows up as pitch, not roll.
+   **Worth knowing: "upside down like the BNO055" was not enough.** Both boards
+   are upside down and agree on Z, but this one's in-plane rotation differs by 90°
+   and swaps X with Y — copying the old P7 placement would have passed a level
+   check with a perfect 0/0 while putting every tilt on the wrong axis. Deriving
+   it needs **two** poses, level plus a beak-up tilt.
+2. **Mount the board for real, then repeat step 1.** It was hand-held, which is
+   plenty for choosing among 24 discrete orientations but not a substitute for the
+   real fitting. *If it turns out genuinely skewed rather than axis-aligned, three
+   constants cannot express it and `lib/OwlImu` needs a rotation matrix instead.*
+2b. **Settle the `roll` sign.** One observation contradicts the convention
+   (`+roll` = right side down) and cannot be reconciled — the three poses together
+   describe a left-handed triad, which is impossible. owl X and owl Z are each
+   pinned by an unambiguous pose so the third axis is forced; the sideways
+   observation is the odd one out. Needs an unambiguous side reference. **Do not
+   flip `IMU_REMAP_Y`** to resolve it: that makes the map improper and mirrors the
+   compass heading. Impact today is only the displayed `roll`, which nothing
+   consumes.
+3. **Calibrate**: `tools/kalibrieren.py`, one slow full turn (20–30 s). No
+   ordering constraint any more — the old "figure-8 before the static poses" rule
+   was a BNO055 counter artefact and is gone. `cal.axes` reaching **2** of 3 is
+   the success condition, not a partial one: a level turn sweeps only the two
+   horizontal axes.
+4. **Re-derive `IMU_HEADING_OFFSET_DEG`.** It currently holds **4.594** — the
+   magnetic declination **only**. The BNO055's 70.8° mounting term was measured
+   against that chip's own remapped axes on a different breakout and does not
+   carry over. Until this is done `imu.yaw` is off by the mounting rotation and
+   **navigation will aim wrong while looking perfectly healthy**. Aim the beak at
+   a known *true* bearing and set the constant to
+   `(true bearing − reported yaw + 4.594) mod 360`.
+5. **Untested failure path**: the mute-sensor backoff (`specs/006` Acceptance 6)
+   has never been exercised — it needs someone to pull SDA on a running owl and
+   confirm `loop_hz` does not collapse.
+
+`lib/SoftI2C` + `-e softimu` stay in the tree, retargeted to the new part. Their
+original reason (a clock-stretching slave the ESP32 controller cannot talk to) is
+gone; what remains useful is that they name the failing **protocol step**.
 
 ### Step 4 — Detection rate: RESOLVED 2026-08-29  `[x]`
 
@@ -1279,6 +1319,70 @@ RPi side updated to match: `web_ui.py` `EXPRESSIONS` and `config.yaml`
 `expressions:`. Note an override only lasts `EXPRESSION_OVERRIDE_MS` (3 s)
 before the firmware's own state machine reclaims the eyes — re-send faster than
 that to hold a mood.
+
+## IMU replaced: BNO055 → LSM303AGR — 2026-09-01
+
+The part that blocked Step 3 for four days is out. Recorded here because two of
+the traps below are the kind that produce *plausible wrong numbers* rather than
+failures, and those are the expensive ones.
+
+**Found on the bus first, before writing anything**: `-e i2ctest` reported
+`0x10 0x19 0x1E 0x40`, with `0x28` gone. Both halves answer on the bit-banged
+scan and through the Wire driver, at 100 and 400 kHz. No clock stretching.
+
+**Two Adafruit LSM303 breakouts share both addresses and are not
+interchangeable.** The blue `LSM303DLHC` and the black `LSM303AGR` both use
+`0x19` + `0x1E` and the **same accelerometer driver**, but their **magnetometer
+register maps are completely different**. `Adafruit LSM303DLH Mag` pointed at an
+AGR does not error — it returns garbage, i.e. a compass bearing that looks fine
+and is wrong. The AGR's magnetometer is a LIS2MDL (`Adafruit LIS2MDL`).
+Guarded rather than documented: `OwlImu::begin()` reads both `WHO_AM_I`
+registers itself (`0x0F`→`0x33`, `0x4F`→`0x40`) and names which half failed; the
+DLHC magnetometer has no `WHO_AM_I` at `0x4F` and cannot fake it.
+
+**The swap moved work from silicon into our firmware.** The LSM303AGR is 6-DOF
+with **no gyroscope and no fusion engine**. `lib/OwlImu` now owns: the software
+axis remap (the BNO055 had `AXIS_MAP` registers), roll/pitch from the gravity
+vector, a tilt-compensated compass, hard-iron calibration, and a mute-sensor
+backoff. `include/imu_config.h` feeds it from `config.h`, because libraries under
+`lib/` are self-contained and do not see `include/`.
+
+**The compass is deliberately vector algebra, not trigonometry.** Project the
+field and the beak direction into the horizontal plane and measure the angle
+between them. Same answer as the textbook formula, but nothing in it depends on
+an Euler-rotation order — and a mislabelled axis order is exactly what once had
+this project steering the head with a *pitch* angle (SPEC-006 Falsified).
+
+**Three things were carried over wrongly on the first pass and caught:**
+* `IMU_HEADING_OFFSET_DEG` = 75.4 does **not** survive the swap. It was 70.8° of
+  mounting rotation + 4.594° declination, and the mounting term was measured
+  against the BNO055's own remapped X axis on a different board. Only the
+  declination carries over; the constant is now **4.594**, and `imu.yaw` is
+  knowingly off by the mounting rotation until it is re-measured on the owl.
+* `calibrated` had to be split from the progress counter, or the BNO055's
+  permanently-false-flag bug would have been rebuilt in a new shape. `calibrated`
+  = *offsets exist AND geometry usable*; `cal.axes` = *how far this run's turn
+  got*. `axes` reading 0 while `calibrated` is true is the normal post-boot state.
+* Sampling had to move to loop rate. At the 2 Hz telemetry rate there is nothing
+  to low-pass (and no gyro to lean on), and the hard-iron min/max would collect a
+  few dozen points per turn instead of several hundred. `getImu()` is now a pure
+  getter — the BNO055 version wrote to **flash** from inside it.
+
+**`sys`/`gyro`/`accel` were deleted from telemetry, not replaced.** There is no
+gyro and no fusion engine for them to describe. Both sides of the wire moved
+together (`_IMU_CAL_FIELDS`, the `IMUCalibration` dataclass, the web UI, the
+tests) — R-010.5 working as designed.
+
+**Verified on hardware the same day**: both `WHO_AM_I` correct; `|a|` =
+9.74–9.85 m/s² (which validates register map, ±2 g range and 12-bit
+high-resolution mode in one number); `|m|` ≈ 38 µT against ~49 µT expected, the
+difference being the uncorrected hard-iron offset; the filter visibly steadier
+than the raw stream; real firmware flashed and emitting the new `imu.cal` shape
+at `loop_hz` 56–57 with no stalls.
+
+**Not verified, and deliberately left that way**: the mounting. Gravity reads
+`(−4.77, +5.91, −6.15)` — a compound angle, so the board is wired but not fitted.
+`IMU_REMAP_X/Y/Z` is still identity and almost certainly wrong. See Step 3.
 
 ## I2C bus / sensors — RESOLVED 2026-08-26
 

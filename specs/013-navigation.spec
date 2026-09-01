@@ -78,11 +78,16 @@ they are user data, and the web UI writes them.
 * Aim math is unit-tested against hand-computed bearings, including the
   wrap-around cases (`wrap_180(180) == -180`, so "directly behind" reads as a
   leftward limit rather than oscillating).
-* `imu.yaw` is a **true geographic** heading of the beak: the firmware folds
-  70.8° of measured mounting rotation plus **+4.594° of magnetic declination**
-  into `IMU_HEADING_OFFSET_DEG` (75.4). Both sides must share one north
-  reference, because `geo.bearing_deg()` computes a true bearing while the
-  BNO055 reports a magnetic one. Accuracy ±5–10° — fine for aiming a ±45° head.
+* `imu.yaw` is meant to be a **true geographic** heading of the beak: the
+  firmware folds the mounting rotation plus **+4.594° of magnetic declination**
+  into `IMU_HEADING_OFFSET_DEG`. Both sides must share one north reference,
+  because `geo.bearing_deg()` computes a true bearing while the magnetometer
+  measures a magnetic one. Accuracy ±5–10° — fine for aiming a ±45° head.
+  **Since the LSM303AGR replaced the BNO055 on 2026-09-01 the constant carries
+  the declination term only** (`IMU_HEADING_OFFSET_DEG` = 4.594): the old 70.8°
+  mounting rotation was measured against the BNO055's own remapped axes and does
+  not carry over, so the aim is off by the mounting rotation until it is
+  re-measured. See SPEC-006 Open.
 * Navigation counts as activity for auto-sleep: the owl must not fall asleep
   while guiding someone who is walking with no face in frame.
 * The controller no-ops with no fix or an uncalibrated heading (R-013.4/R-013.5),

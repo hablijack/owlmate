@@ -248,10 +248,18 @@ lines are protocol garbage on a machine-to-machine link.
 ## Open
 
 * The seven newly-parsed fields have only ever been fed **synthetic** frames.
-  The parsing is covered, but the web UI's rendering of the calibration
-  counters, GPS fix and pulse/hit totals has never been seen against a live owl.
+  The parsing is covered, but the web UI's rendering of the calibration state,
+  GPS fix and pulse/hit totals has never been seen against a live owl.
   Check it on the next hardware run — the calibration display exists to make the
-  figure-8 dance easier, which is the whole point of the change.
+  calibration turn easier, which is the whole point of the change.
+* **The `imu.cal` shape changed on 2026-09-01** with the LSM303AGR swap:
+  `sys`/`gyro`/`accel`/`mag` (four 0..3 counters from the BNO055's fusion engine)
+  became `axes` (0..3), `heading_ok` (bool) and `restored` (bool). The three
+  dropped counters had no referent on a chip with no gyro and no fusion, and were
+  deliberately **not** replaced by synthesised stand-ins. Both halves of the
+  contract moved together — `_IMU_CAL_FIELDS` in `serial_handler.py`, the
+  `IMUCalibration` dataclass, the web UI and `tests/test_protocol.py` — which is
+  R-010.5 working as intended. See SPEC-006.
 * Changes here need a matching change on the RPi side. The `_*_FIELDS` tables in
   `serial_handler.py` are the other half of this contract, and R-010.5 is the
   rule that keeps them honest.

@@ -45,7 +45,7 @@ original 3.00 MB OTA slots were too small. The 1.875 MB `spiffs` partition was
 unused (no SPIFFS/LittleFS/FFat anywhere in the code) and was folded into the
 app slots:
 
-    nvs       0x9000   0x6000     <- BNO055 calibration lives here, do not move
+    nvs       0x9000   0x6000     <- IMU calibration lives here, do not move
     otadata   0xf000   0x2000
     phy_init  0x11000  0x1000
     ota_0     0x20000  0x3F0000   (4.03 MB)

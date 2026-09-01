@@ -78,25 +78,35 @@
 #define I2C_SDA 1
 #define I2C_SCL 2
 // Ueberschreibbar per Build-Flag, damit Diagnose-Envs den Bustakt variieren
-// koennen, ohne diese Datei anzufassen. Der BNO055 verletzt beim
-// Clock-Stretching die Setup-Zeit zwischen SDA-HIGH und SCL-HIGH und gilt mit
-// ESP32/ESP32-S3 als unzuverlaessig (Adafruit: "Troublesome Chips"); der
-// dokumentierte Ausweg ist ein deutlich niedrigerer Takt.
+// koennen, ohne diese Datei anzufassen.
+//
+// 400 kHz ist hier seit dem Wechsel auf den LSM303AGR (2026-09-01) unauffaellig.
+// Der BNO055 davor war es nicht: er verletzte beim Clock-Stretching die
+// Setup-Zeit zwischen SDA-HIGH und SCL-HIGH und galt mit ESP32/ESP32-S3 als
+// unzuverlaessig (Adafruit: "Troublesome Chips"), weshalb `imuaxis` den Takt
+// auf 30 kHz herunterzog. DER LSM303AGR DEHNT DEN TAKT GAR NICHT - beide
+// Haelften wurden am 2026-09-01 mit `-e i2ctest` bit-gebangt und ueber den
+// Treiber bei 100 UND 400 kHz gefunden. Die Absenkung ist damit weg.
 #ifndef I2C_FREQ
 #define I2C_FREQ 400000
 #endif
 // Wie lange der Master auf einen Slave wartet, bevor er die Uebertragung
-// abbricht. Die Arduino-Voreinstellung (50 ms) ist zu kurz fuer den BNO055:
-// er dehnt den Takt lange, der Controller gibt auf, bricht MITTEN in der
-// Uebertragung ab - und laesst den Bus liegen. Danach ist nicht nur der IMU
-// weg, sondern auch GPS und Servotreiber, weil beide Leitungen unten bleiben.
+// abbricht. Die Arduino-Voreinstellung (50 ms) ist zu kurz: gibt der Controller
+// auf, bricht er MITTEN in der Uebertragung ab - und laesst den Bus liegen.
+// Danach ist nicht nur das eine Geraet weg, sondern auch GPS und Servotreiber,
+// weil beide Leitungen unten bleiben.
+//
+// GEMESSEN WURDE DAS AM BNO055, der den Takt dehnte; der LSM303AGR tut das
+// nicht. Der Wert bleibt trotzdem, und zwar nicht aus Traegheit: er schuetzt
+// gegen JEDEN stummen Slave am Bus, und das PA1010D-GPS ist regelmaessig einer.
+// Was sich geaendert hat, ist die Begruendung, nicht die Zahl.
 //
 // Auf Hardware gemessen 2026-08-28: mit 50 ms war der Bus nach dem ZWEITEN
 // Zugriff tot (jeder Bustakt, jede Bibliothek), mit 1000 ms ueberstand er 12
 // Lesezugriffe in Folge unbeschadet. Der Wert zaehlt ZEIT, nicht Takte -
 // deshalb half es auch nichts, den Bustakt zu senken.
-// 250 ms statt der 1000 ms des ersten Versuchs: der BNO055 dehnt den Takt um
-// hoechstens ~600 us, das ist immer noch das Vierhundertfache an Reserve. Der
+// 250 ms statt der 1000 ms des ersten Versuchs: gedehnt wurde nie um mehr als
+// ~600 us, das ist immer noch das Vierhundertfache an Reserve. Der
 // Wert wird bei JEDEM fehlgeschlagenen Zugriff voll bezahlt, und mit 1000 ms
 // brauchte ein Telemetrieframe mit stummem GPS so lange, dass die Hauptschleife
 // stehenblieb (gemessen: gar keine Telemetrie mehr).
@@ -280,63 +290,167 @@
 
 // ============================================================================
 // I2C Devices
-// BNO055 IMU @ 0x28
+// LSM303AGR IMU @ 0x19 (accel) + 0x1E (magnetometer)
 // PA1010D GPS @ 0x10
 // PCA9685 Servo Driver @ 0x40
 // ============================================================================
-#define ADDR_BNO055 0x28
 
-// --- BNO055 mounting orientation ------------------------------------------
-// The board is fitted bottom-PCB-up in the owl's head, i.e. rotated 180 deg
-// about its own Y axis, so its +Z points DOWN. Measured on hardware
-// 2026-08-26 with the owl standing on a level surface (`pio run -e imuaxis`):
-// gravity read (-0.53, -1.21, -9.71) -- 7.7 deg off the Z axis, so a cleanly
-// axis-aligned mount -- and Euler pitch read +172.8 deg, the 180 deg Y-flip
-// signature. The BNO055 corrects this in hardware via its AXIS_MAP registers;
-// these values are the datasheet's "P7" placement (X->-X, Y->Y, Z->-Z), which
-// Adafruit exposes as REMAP_CONFIG_P7 / REMAP_SIGN_P7.
+// --- LSM303AGR: two devices on one breakout --------------------------------
+// Replaced the BNO055 on 2026-09-01. This is NOT a drop-in swap and the
+// difference is the whole story of this block:
 //
-// IF THE SENSOR IS EVER REMOUNTED, re-measure with `pio run -e imuaxis`:
-// stand the owl level, and with the right placement roll and pitch both read
-// ~0. The AXIS_MAP registers can only express the 24 axis-aligned
-// orientations, so a sensor glued in at an odd angle cannot be fixed this way.
-#define IMU_AXIS_REMAP_CONFIG 0x24   // Adafruit REMAP_CONFIG_P7
-#define IMU_AXIS_REMAP_SIGN 0x05     // Adafruit REMAP_SIGN_P7
+//   * The BNO055 was a FUSION chip. It computed orientation, absolute heading,
+//     the mounting axis remap and its own calibration in silicon, and handed
+//     out finished Euler angles.
+//   * The LSM303AGR does NONE of that, and it has NO GYROSCOPE - it is a 6-DOF
+//     part (accelerometer + magnetometer), not a 9-DOF one. Roll/pitch now come
+//     from the gravity vector, yaw from a tilt-compensated compass, and both
+//     are computed in `lib/OwlImu`.
+//
+// The two halves are two independent I2C devices with their own addresses and
+// their own drivers; they share only the piece of PCB.
+#define ADDR_LSM303_ACCEL 0x19
+#define ADDR_LSM303_MAG 0x1E
 
-// Added to the fused heading so that yaw is the direction the BEAK points,
-// which is what navigation treats it as. The axis remap above makes yaw a
-// rotation about true vertical, but its zero sits wherever the sensor's
-// remapped X axis happens to face -- that is what this corrects.
+// TWO ADAFRUIT BREAKOUTS LOOK ALIKE AND ARE NOT. The older LSM303DLHC (BLUE
+// silkscreen, says "LSM303DLHC") and the LSM303AGR (BLACK, says "LSM303AGR")
+// both put the accelerometer on 0x19 and the magnetometer on 0x1E, and they
+// SHARE the accelerometer driver -- but the MAGNETOMETER REGISTER LAYOUTS ARE
+// COMPLETELY DIFFERENT. Running the DLHC magnetometer library ("Adafruit
+// LSM303DLH Mag") against an AGR does not error, it returns GARBAGE: a heading
+// that looks plausible and is wrong. We have the AGR, whose magnetometer is a
+// LIS2MDL, so the library is "Adafruit LIS2MDL".
+//   https://learn.adafruit.com/lsm303-accelerometer-slash-compass-breakout/which-lsm303-do-i-have
+// OwlImu::begin() checks both WHO_AM_I registers (0x0F -> 0x33 for the accel,
+// 0x4F -> 0x40 for the LIS2MDL) so a swapped board fails loudly at boot instead
+// of quietly producing a wrong compass.
+
+// --- Mounting orientation, now corrected in SOFTWARE ------------------------
+// The BNO055 had AXIS_MAP registers and did this in hardware (placement P7).
+// The LSM303AGR has no such thing, so `lib/OwlImu` remaps in software.
 //
-// This folds TWO corrections into one constant:
+// Each entry says which SENSOR axis feeds which OWL axis: magnitude 1/2/3 =
+// sensor x/y/z, sign = direction. Identity is {1, 2, 3}.
 //
-//  1. Mounting rotation, 70.8 deg. Measured on hardware 2026-08-26: the beak
-//     was aimed at a known MAGNETIC bearing of 341 deg (phone compass with
-//     True North switched OFF) while the sensor reported yaw 270.2 deg
-//     => (341 - 270.2) mod 360 = 70.8 deg.
+// Owl body frame (also the frame of imu.* in telemetry):
+//   +X = forward, out of the beak    +Y = to the owl's left    +Z = up
+// A level owl reads accel (0, 0, +9.81) -- an accelerometer at rest measures
+// the reaction to gravity, so its vector points UP.
 //
-//  2. Magnetic declination, +4.594 deg EAST at the time and place of that
-//     measurement (WMM, via the British Geological Survey web service).
-//     Re-derive it for your own location, it is not a universal constant.
-//     REQUIRED, not
-//     optional: the BNO055 reports a MAGNETIC heading, while geo.bearing_deg()
-//     on the RPi computes a TRUE geographic bearing from lat/lon. Both sides
-//     must share one north reference or navigation aims consistently wrong.
-//     true = magnetic + declination.
+// MEASURED ON HARDWARE 2026-09-01 with `pio run -e imuaxis -t upload`, the owl
+// standing level and the board held in its mounted position. TWO poses, because
+// one is not enough:
 //
-//  => 70.8 + 4.594 = 75.4, so yaw is now a TRUE geographic heading of the beak.
+//   level:    raw (0.62, -0.40, -9.98) -- gravity 100 % on sensor Z, only 4.2 deg
+//             off that axis, so the board is cleanly axis-aligned and its +Z
+//             points DOWN. => owl Z = -sensor Z.
+//   beak up:  raw (1.00, -6.43, -7.69) -- a 37 deg tilt that moved gravity within
+//             the sensor's Y-Z plane while sensor X barely moved. So sensor X is
+//             the tilt axis (the owl's left-right axis) and sensor Y is the
+//             fore-aft one. => owl X = -sensor Y.
+//   Right-handedness then forces the third: owl Y = Z x X = -sensor X.
 //
-// Declination drifts ~0.1 deg/year and is location dependent, so re-check it if
-// the owl changes region or after a few years:
-//   https://geomag.bgs.ac.uk/data_service/models_compass/wmm_calc.html
+// WHY THE SECOND POSE IS NOT OPTIONAL: gravity alone fixes only which axis is
+// vertical and its sign. That still leaves the four in-plane rotations, and a
+// level owl reads roll ~ pitch ~ 0 in ALL FOUR of them -- the error only shows up
+// once the owl tilts, as pitch appearing in roll. One pose cannot see it.
 //
-// ACCURACY: roughly +/-5..10 deg. The owl was pitched ~15 deg during the
-// measurement (its level resting pitch is ~8 deg) and `accel` read only 1/3,
-// both of which degrade tilt compensation of the compass. Fine for aiming a head
-// with a +/-45 deg range. To re-measure more precisely: stand the owl level, get
-// accel to 3/3 (six static poses), point the beak at a known bearing, then set
-// this to (true bearing - reported yaw) mod 360.
-#define IMU_HEADING_OFFSET_DEG 75.4f
+// AND THAT IS NOT ACADEMIC HERE: the BNO055 sat "upside down" in this same head
+// and its placement was P7, i.e. X->-X, Y->Y, Z->-Z. This board is ALSO upside
+// down and the two agree on Z -- but its in-plane rotation differs by 90 deg and
+// swaps X with Y. Copying P7 across would have left a level owl reading a
+// perfect 0/0 while every tilt showed up on the wrong axis.
+//
+// VERIFIED after applying these, board held in the mounted position:
+//   level:      roll -1.4 deg, pitch +5.3 deg  -- both near zero, so R-006.2 holds
+//   beak up:    pitch +35 deg while roll stayed -6.5  -- pitch does not leak into
+//               roll, so the in-plane rotation is right
+//   sideways:   roll swung to -62 deg while pitch stayed ~1  -- axes cleanly
+//               separated
+//
+// ONE LOOSE END, AND IT IS A NAMING ONE, NOT A FRAME ONE. In that third pose the
+// owl was reported as tipping onto its RIGHT side, which by the convention above
+// should give POSITIVE roll; the measurement was negative. Those three
+// observations cannot all be true: taken together they describe a LEFT-handed
+// triad, and no rigid body has one. owl Z and owl X are each pinned by an
+// unambiguous pose, so right-handedness FORCES owl Y = U x F = -sensor x, which
+// is what stands above. The sideways observation is the odd one out - most likely
+// the board rotated in the hand holding it (undetectable from a single vector),
+// or "its right side" was read as the observer's right.
+//
+// DELIBERATELY NOT "FIXED" BY FLIPPING IMU_REMAP_Y: that would make the map
+// improper (det -1). The compass is a cross product, so a mirrored frame would
+// return a MIRRORED HEADING that still looks like a plausible bearing - the exact
+// failure class this whole subsystem is built to avoid. The heading depends only
+// on owl X, owl Z and handedness, all three established, so yaw is unaffected
+// either way; only the sign of the reported roll is in question, and nothing
+// consumes roll. Re-test per specs/006 Acceptance 2 when the board is fixed in
+// place.
+//
+// Re-measure with `-e imuaxis` if the sensor is ever remounted; a level owl must
+// read roll and pitch near 0. These three constants can only express the 24
+// axis-aligned orientations -- a board glued in at an odd angle needs a real
+// rotation matrix instead.
+#define IMU_REMAP_X -2
+#define IMU_REMAP_Y -1
+#define IMU_REMAP_Z -3
+
+// Added to the computed compass heading so that yaw is the direction the BEAK
+// points, which is what navigation treats it as.
+//
+// THE MOUNTING TERM IS NOT YET MEASURED FOR THIS SENSOR. The BNO055's value was
+// 75.4 = 70.8 deg of mounting rotation + 4.594 deg of declination. The 70.8 was
+// measured against the BNO055's own remapped X axis on a different breakout in a
+// different position, so it does NOT carry over. Only the declination does:
+//
+//  * Magnetic declination, +4.594 deg EAST at this location (WMM, via the
+//    British Geological Survey service). REQUIRED, not cosmetic: the compass
+//    computes a MAGNETIC heading while geo.bearing_deg() on the RPi computes a
+//    TRUE geographic bearing, and both sides must share one north reference
+//    (true = magnetic + declination). Drifts ~0.1 deg/year and is location
+//    dependent, so re-check it if the owl changes region:
+//    https://geomag.bgs.ac.uk/data_service/models_compass/wmm_calc.html
+//
+// TO MEASURE THE MOUNTING TERM: stand the owl level, complete a magnetometer
+// calibration turn (see tools/kalibrieren.py) so the heading is valid at all,
+// aim the beak at a known TRUE bearing, and set this to
+// (true bearing - reported yaw + 4.594) mod 360. `pio run -e imuaxis` prints
+// the reported yaw live.
+#define IMU_HEADING_OFFSET_DEG 4.594f
+
+// --- Sampling and fusion tuning --------------------------------------------
+// How often OwlImu::update() actually touches the bus. It is called once per
+// main-loop iteration (~60 Hz) and rate-limits itself to this.
+//
+// NOT the telemetry rate, on purpose, and this cost real thought: without a
+// gyro the accelerometer is the ONLY attitude source, so the low-pass below
+// needs samples to work with -- and the hard-iron calibration collects its
+// min/max here, where 2 Hz would give a slow full turn a few dozen points
+// instead of several hundred.
+#define IMU_SAMPLE_INTERVAL_MS 20
+
+// Exponential low-pass coefficient for both the accel and the mag vector.
+// 0.15 at 50 Hz is a time constant of ~0.12 s: enough to swallow servo
+// vibration, fast enough that a head movement settles within a frame or two.
+#define IMU_FILTER_ALPHA 0.15f
+
+// Minimum observed peak-to-peak span, in microtesla, before a magnetometer axis
+// counts as calibrated. The earth field here is ~49 uT total at ~66 deg
+// inclination, so its HORIZONTAL component is only ~20 uT -- a full turn about
+// the vertical axis therefore sweeps ~40 uT on each horizontal axis and almost
+// nothing on the vertical one. That is why a level calibration turn scores 2 of
+// 3 axes and only tumbling the owl scores 3, and why two is the bar for a
+// usable heading.
+#define MAG_CAL_MIN_SPAN_UT 25.0f
+
+// Consecutive implausible reads before the IMU is declared dead, and how long
+// to wait before probing WHO_AM_I again.
+//
+// THE BACKOFF IS THE POINT. Every failed I2C access costs the full
+// I2C_TIMEOUT_MS (250 ms). Polling a mute sensor at 50 Hz would stop the main
+// loop dead -- exactly the defect getGps() already had twice (SPEC-005).
+#define IMU_MAX_READ_FAILS 5
+#define IMU_FAIL_BACKOFF_MS 5000
 #define ADDR_GPS 0x10
 #define ADDR_PCA9685 0x40
 
@@ -541,7 +655,7 @@
 // Wiring-verification boot. 0 (default) = normal boot into the state machine.
 // Build with -DHARDWARE_CHECK=1 (platformio.ini build_flags, or `pio run
 // --project-option="build_flags=... -DHARDWARE_CHECK=1"`) to instead probe
-// every peripheral (LCDs, PCA9685, GPS, BNO055, vibration, camera) and report
+// every peripheral (LCDs, PCA9685, GPS, LSM303AGR, vibration, camera) and report
 // each one's status over serial + on the eyes, then idle. See runHardwareCheck()
 // in src/hardware_check.cpp, which compiles to nothing unless this is 1.
 // Re-flash without the flag to return to normal operation.

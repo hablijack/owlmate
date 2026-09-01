@@ -32,7 +32,7 @@ Arduino-only path (SPEC-002).
 |---|---|---|
 | `dualtest` | two LCDs on one bus | distinct colours **and a swap**, so a pass cannot be coincidence |
 | `i2ctest` | I2C bus | a **bit-banged** scan that bypasses the ESP-IDF driver entirely |
-| `imuaxis` | IMU mounting | prints gravity in the **raw sensor frame**, deliberately no axis remap |
+| `imuaxis` | IMU mounting, calibration, heading | prints gravity in the **raw sensor frame** (to derive the remap) *and* the remapped result, the per-axis magnetometer span, and the live heading. Uses `lib/OwlImu`, i.e. the firmware's own fusion maths — a diagnostic carrying its own copy of the arithmetic only tests itself |
 | `vibtest` | vibration sensor | pull-up/pull-down test, sink impedance, edge scan over **all 11 header pins** |
 | `camtest` | camera | 8-bit **and** 16-bit ID reads, plus mean brightness to catch "initialises but returns black" |
 | `camsnap` | camera framing/orientation | returns the **actual JPEG** in all four vflip/hmirror combinations — the only check that catches a camera aimed at the wrong place |
@@ -44,7 +44,7 @@ hands:
 
 | tool | purpose |
 |---|---|
-| `kalibrieren.py` | guided BNO055 calibration; enforces figure-8 **before** static poses |
+| `kalibrieren.py` | guided LSM303AGR magnetometer calibration: one slow full turn, live per-axis span, saves hard-iron offsets. Until 2026-09-01 this drove the BNO055 and enforced the figure-8 **before** the static poses; that ordering constraint no longer exists |
 | `klopftest.py` | live tap intervals against the OTA window |
 | `preview_eyes.py` | renders `SHAPES[]` to an HTML contact sheet |
 | `schnappschuss.py` | decodes `camsnap`'s Base64 JPEGs to files; syncs on a sweep start so the four orientations are one comparable set |
@@ -146,8 +146,12 @@ Diagnostics that changed a conclusion, and what they cost:
 * `vibtest` — the pull-up/pull-down test separated "not connected" (follows the
   internal resistor) from "actively driven" (does not), which no amount of
   staring at telemetry could.
-* `imuaxis` — a level owl reading pitch +172.8° identified the inverted mounting
-  immediately.
+* `imuaxis` — a level owl reading pitch +172.8° identified the BNO055's inverted
+  mounting immediately. Retargeted to the LSM303AGR on 2026-09-01, where its
+  first run answered a question that had not been asked: `|a|` = 9.77 m/s²
+  proved the new register map and scaling correct, while the gravity vector
+  (−4.77, +5.91, −6.15) showed the board is not axis-aligned yet, so the remap
+  cannot be derived until it is mounted.
 * `camtest` — mean brightness dropping 122 → 53 when a hand covered the lens is
   what turned "the camera probably works" into "the camera works".
 

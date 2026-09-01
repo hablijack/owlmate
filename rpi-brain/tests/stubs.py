@@ -145,8 +145,10 @@ def FakeTelemetry(state="interacting", face_detected=True, confidence=0.9,
     from brain.serial_handler import (Telemetry, FaceDetection, IMUData,
                                       IMUCalibration, GPSData, VibrationData,
                                       UpdateMode, NavigationState, NUM_SERVOS)
-    # A calibrated IMU implies the two counters navigation actually gates on.
-    cal = IMUCalibration(gyro=3, mag=3) if imu_calibrated else IMUCalibration()
+    # A calibrated IMU implies a usable heading and a completed turn. A level
+    # full turn covers 2 of 3 magnetometer axes, which is the real-world value.
+    cal = (IMUCalibration(axes=2, heading_ok=True) if imu_calibrated
+           else IMUCalibration())
     return Telemetry(
         timestamp=0.0,
         state=state,

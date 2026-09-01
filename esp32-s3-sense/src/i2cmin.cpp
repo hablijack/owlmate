@@ -20,11 +20,13 @@
 #include "config.h"
 #include <Adafruit_GPS.h>
 
-// Testtakt. Der BNO055 verletzt beim Clock-Stretching die Setup-Zeit zwischen
-// SDA-HIGH und SCL-HIGH; mit ESP32/ESP32-S3 ist das dokumentiert unzuverlaessig
-// (Adafruit fuehrt ihn auf der Liste "Troublesome Chips"). Empfohlener Ausweg:
-// Bustakt deutlich senken. 100 kHz reichte hier NICHT, 30 kHz ist der in den
-// Foren genannte Wert.
+// Testtakt. HISTORISCH war das der interessante Regler: der BNO055 verletzte
+// beim Clock-Stretching die Setup-Zeit zwischen SDA-HIGH und SCL-HIGH und galt
+// mit ESP32/ESP32-S3 als unzuverlaessig (Adafruit: "Troublesome Chips"), 100 kHz
+// reichte nicht, 30 kHz war der Ausweg. Der LSM303AGR dehnt den Takt nicht und
+// laeuft bei 400 kHz - der Regler bleibt trotzdem, weil er jetzt eine andere
+// Frage beantwortet: reagiert der Bus ueberhaupt auf den Takt (Kabellaenge,
+// Pull-ups, Uebersprechen)?
 #ifndef TESTHZ
 #define TESTHZ 400000
 #endif
@@ -32,7 +34,8 @@
 static const char* nameOf(uint8_t a) {
     switch (a) {
         case 0x10: return " (PA1010D GPS)";
-        case 0x28: return " (BNO055 IMU)";
+        case 0x19: return " (LSM303AGR accel)";
+        case 0x1E: return " (LSM303AGR mag)";
         case 0x40: return " (PCA9685 Servo)";
         case 0x70: return " (PCA9685 all-call)";
         default:   return "";
@@ -46,9 +49,10 @@ static const char* nameOf(uint8_t a) {
 // wird. Ein Slave, der mitten in einer Uebertragung haengt und SDA festhaelt,
 // zaehlt die Impulse zu Ende und gibt den Bus frei. Danach eine Stop-Bedingung.
 //
-// Genau das trennt "Bauteil defekt" von "Bauteil haengt": kommt der BNO055 nach
-// den Impulsen zurueck, ist er in Ordnung und das Problem liegt im Protokoll
-// (der BNO055 dehnt den Takt, siehe Datenblatt) - nicht im Chip.
+// Genau das trennt "Bauteil defekt" von "Bauteil haengt": kommt ein Geraet nach
+// den Impulsen zurueck, ist es in Ordnung und das Problem liegt im Protokoll -
+// nicht im Chip. Am BNO055 war das der Normalfall (er dehnte den Takt); beim
+// LSM303AGR waere ein haengender Bus ein echter Befund.
 static void busRecover() {
     pinMode(I2C_SDA, INPUT_PULLUP);
     pinMode(I2C_SCL, OUTPUT);
@@ -131,10 +135,10 @@ static void scan(uint32_t hz) {
     delay(50);
     int found = 0;
     Serial.printf("  %6lu Hz: ", (unsigned long)hz);
-    // NUR die drei echten Adressen, kein Sweep ueber 112 Adressen. Damit laesst
+    // NUR die echten Adressen, kein Sweep ueber 112 Adressen. Damit laesst
     // sich pruefen, ob der Bus vom Scan selbst gestoert wird.
-    static const uint8_t nur[] = {0x10, 0x28, 0x40};
-    for (uint8_t i = 0; i < 3; i++) {
+    static const uint8_t nur[] = {0x10, 0x19, 0x1E, 0x40};
+    for (uint8_t i = 0; i < sizeof(nur); i++) {
         const uint8_t a = nur[i];
         Wire.beginTransmission(a);
         if (Wire.endTransmission() == 0) {
@@ -154,7 +158,7 @@ void setup() {
     Serial.println();
     Serial.println(F("=== Minimaler I2C-Scan ==="));
     Serial.printf("SDA=GPIO%d  SCL=GPIO%d\n", I2C_SDA, I2C_SCL);
-    Serial.println(F("Erwartet: 0x10 GPS, 0x28 IMU, 0x40 Servo (+0x70 all-call)"));
+    Serial.println(F("Erwartet: 0x10 GPS, 0x19+0x1E IMU, 0x40 Servo (+0x70 all-call)"));
     Serial.println();
 }
 
@@ -164,9 +168,10 @@ void setup() {
 // Umgeht den I2C-Controller des ESP32 vollstaendig. Entscheidend ist, dass wir
 // das Clock-Stretching KORREKT behandeln: nach jeder steigenden Flanke wird
 // gewartet, bis der Slave SCL tatsaechlich freigibt. Genau das macht der
-// Hardware-Controller nur bis zu seinem Timeout - und der BNO055 streckt lange.
+// Hardware-Controller nur bis zu seinem Timeout.
 //
-// Liest 0xA0 -> der Chip ist in Ordnung, das Problem liegt im Controller.
+// Geprueft wird das WHO_AM_I des Beschleunigungssensors (0x19, Register 0x0F).
+// Liest 0x33 -> der Chip ist in Ordnung, das Problem liegt im Controller.
 // Liest nichts -> der Chip antwortet wirklich nicht mehr.
 // ============================================================================
 static inline void sdaHigh() { pinMode(I2C_SDA, INPUT_PULLUP); }
@@ -229,17 +234,17 @@ static void bitbangTest() {
 
     for (int runde = 1; runde <= 8; runde++) {
         if (!bbStart()) { Serial.printf("  %d: START gescheitert (SCL bleibt unten)\n", runde); break; }
-        bool ok = bbWrite(0x28 << 1);               // Adresse + Write
+        bool ok = bbWrite(ADDR_LSM303_ACCEL << 1);  // Adresse + Write
         if (!ok) { Serial.printf("  %d: kein ACK auf die Adresse\n", runde); bbStop(); delay(150); continue; }
-        ok = bbWrite(0x00);                         // Register CHIP_ID
+        ok = bbWrite(0x0F);                         // Register WHO_AM_I
         if (!ok) { Serial.printf("  %d: kein ACK auf das Register\n", runde); bbStop(); delay(150); continue; }
         if (!bbStart()) { Serial.printf("  %d: Repeated START gescheitert\n", runde); break; }
-        ok = bbWrite((0x28 << 1) | 1);              // Adresse + Read
+        ok = bbWrite((ADDR_LSM303_ACCEL << 1) | 1); // Adresse + Read
         if (!ok) { Serial.printf("  %d: kein ACK auf Read-Adresse\n", runde); bbStop(); delay(150); continue; }
         const uint8_t id = bbRead(false);
         bbStop();
-        Serial.printf("  %d: Chip-ID = 0x%02X %s\n", runde, id,
-                      id == 0xA0 ? "<== KORREKT, CHIP LEBT!" : "");
+        Serial.printf("  %d: WHO_AM_I = 0x%02X %s\n", runde, id,
+                      id == 0x33 ? "<== KORREKT, CHIP LEBT!" : "");
         delay(150);
     }
     delay(5);
@@ -251,7 +256,7 @@ static void bitbangTest() {
 // EIN EINZIGES Wire.begin(), danach nie wieder end()/begin(). Genau das ist der
 // Unterschied zwischen den beiden vorherigen Laeufen: mit einmaliger Init hielt
 // der Bus 12 Lesezugriffe durch, mit Neuinitialisierung vor jedem Versuch war er
-// sofort tot. Verdacht: nicht der BNO055 legt den Bus lahm, sondern das
+// sofort tot. Verdacht: nicht der IMU legte den Bus lahm, sondern das
 // wiederholte Neuaufsetzen des I2C-Treibers - und mein erster Bisektions-Test
 // hat genau das getan.
 static void levels(int& sda, int& scl) {
@@ -264,9 +269,12 @@ static void levels(int& sda, int& scl) {
 
 // Gesundheitspruefung fuer ALLES AUSSER dem IMU.
 //
-// Beruehrt 0x28 bewusst nie: der BNO055 haelt SCL fest, sobald er angesprochen
-// wird, und riss bisher GPS und Servotreiber mit sich. Die Frage hier lautet, ob
-// die beiden davon Schaden genommen haben - oder nur Kollateralopfer waren.
+// Beruehrt die IMU-Adressen bewusst nie. Beim BNO055 war das zwingend - er hielt
+// SCL fest, sobald man ihn ansprach, und riss GPS und Servotreiber mit sich; die
+// Frage lautete, ob die beiden Schaden genommen hatten oder nur
+// Kollateralopfer waren. Beim LSM303AGR ist es nicht mehr zwingend, aber immer
+// noch nuetzlich: es ist der einzige Lauf, der GPS und Servotreiber OHNE
+// jeglichen IMU-Verkehr am Bus beurteilt.
 static Adafruit_GPS GPS(&Wire);
 
 void loop() {
@@ -321,7 +329,7 @@ void loop() {
         ? F("   ==> GPS sendet Daten - unbeschaedigt.")
         : F("   ==> Keine Saetze. Antwortet zwar, liefert aber nichts."));
 
-    Serial.println(F("\n0x28 wurde in diesem Test nie angesprochen."));
+    Serial.println(F("\n0x19/0x1E wurden in diesem Test nie angesprochen."));
 }
 
 #endif

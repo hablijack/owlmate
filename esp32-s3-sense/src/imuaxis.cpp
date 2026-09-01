@@ -1,79 +1,181 @@
 // ============================================================================
-// BNO055 mounting-orientation + calibration helper (env: imuaxis)
+// LSM303AGR: Einbaulage, Kalibrierung und Kurs (env: imuaxis, -DIMUAXIS_ACTIVE)
 //
-// Two jobs:
+// Beantwortet der Reihe nach:
+//   0. Sind beide Haelften da, und ist es wirklich ein AGR? WHO_AM_I des
+//      Beschleunigungssensors (0x0F -> 0x33) und des Magnetometers
+//      (0x4F -> 0x40). Das blaue LSM303DLHC hat auf 0x4F kein WHO_AM_I und
+//      faellt hier auf - siehe config.h, es waere sonst ein stiller Kursfehler.
+//   1. Wie ist das Board eingebaut? Der Schwerevektor im ROHEN Sensorrahmen
+//      liefert IMU_REMAP_X/Y/Z. Bei waagerechter Eule muss genau eine Achse
+//      etwa +/-9,81 zeigen und die anderen zwei etwa 0.
+//   2. Stimmt der Umbau? Nach dem Remap muessen roll und pitch bei
+//      waagerechter Eule nahe 0 liegen.
+//   3. Wie weit ist die Magnetometerkalibrierung? Spanne pro Achse und die
+//      Anzahl abgedeckter Achsen - der Fortschrittsbalken der Drehung.
+//   4. Was meldet der Kurs? Live, sobald genug Achsen abgedeckt sind.
 //
-// 1. WORK OUT THE AXIS REMAP. The BNO055 fuses in ITS OWN frame, so if the
-//    board is not sitting upright-and-forward inside the owl, `yaw` is not the
-//    owl's compass bearing and roll/pitch are offset. Rather than reason about
-//    "bottom-PCB-up", measure it: gravity always points down, so whichever
-//    sensor axis reads ~-9.8 while the owl is held level tells you which sensor
-//    axis is the owl's DOWN. Repeat with the beak pointing at the floor to find
-//    the owl's FORWARD. Those two fix the remap completely.
-//    IMPORTANT: this sketch deliberately leaves the chip at its DEFAULT remap
-//    (P1) so the numbers printed are in the raw sensor frame.
-//
-// 2. LIVE CALIBRATION MONITOR. Prints the four calibration counters so the
-//    figure-8 dance has visible feedback. Calibration is independent of
-//    mounting -- do it in your hands, in any orientation.
-//      gyro  : sits at 3 after a few seconds held still
-//      accel : hold stationary in ~6 different orientations
-//      mag   : slow figure-8, rotating through all axes
-//      sys   : reaches 3 once the other three are good
-//
-// Use:  pio run -e imuaxis && pio run -e imuaxis -t upload
+// BENUTZT ABSICHTLICH lib/OwlImu, also GENAU DIE MATHEMATIK DER FIRMWARE. Eine
+// Diagnose mit eigener Kopie der Rechnung prueft nur sich selbst.
 // ============================================================================
 #if defined(IMUAXIS_ACTIVE)
 
 #include <Arduino.h>
 #include <Wire.h>
-#include <Adafruit_BNO055.h>
+#include <Adafruit_LIS2MDL.h>
+#include <Adafruit_LSM303_Accel.h>
+
 #include "config.h"
+#include "imu_config.h"
 
-static Adafruit_BNO055 bno = Adafruit_BNO055(55, ADDR_BNO055, &Wire);
+static OwlImu imu;
+// Zweites, ROHES Paar Treiber: OwlImu gibt nur den bereits umgerechneten
+// Eulenrahmen heraus, aber fuer Schritt 1 braucht man genau den Rohrahmen.
+static Adafruit_LSM303_Accel_Unified rawAccel(1);
+static Adafruit_LIS2MDL rawMag(2);
+static bool rawOk = false;
 
-// Name the sensor axis that gravity has settled on, e.g. "-Z".
-static const char* dominantAxis(float x, float y, float z) {
-    const float ax = fabsf(x), ay = fabsf(y), az = fabsf(z);
-    if (ax >= ay && ax >= az) return x < 0 ? "-X" : "+X";
-    if (ay >= ax && ay >= az) return y < 0 ? "-Y" : "+Y";
-    return z < 0 ? "-Z" : "+Z";
+static void probeWhoAmI() {
+    struct { const char* name; uint8_t addr; uint8_t reg; uint8_t want; } P[] = {
+        {"Beschleunigung", ADDR_LSM303_ACCEL, 0x0F, 0x33},
+        {"Magnetometer  ", ADDR_LSM303_MAG, 0x4F, 0x40},
+    };
+    for (auto& p : P) {
+        Wire.beginTransmission(p.addr);
+        Wire.write(p.reg);
+        bool ok = (Wire.endTransmission(false) == 0) &&
+                  (Wire.requestFrom((int)p.addr, 1) == 1);
+        Serial.print(F("    "));
+        Serial.print(p.name);
+        Serial.print(F(" @0x"));
+        Serial.print(p.addr, HEX);
+        Serial.print(F("  WHO_AM_I=0x"));
+        if (!ok) {
+            Serial.print(F("--   KEINE ANTWORT"));
+        } else {
+            uint8_t v = Wire.read();
+            Serial.print(v, HEX);
+            Serial.print(v == p.want ? F("   ok") : F("   FALSCH, erwartet 0x"));
+            if (v != p.want) Serial.print(p.want, HEX);
+        }
+        Serial.println();
+    }
 }
 
 void setup() {
     Serial.begin(115200);
     uint32_t t0 = millis();
-    while (!Serial && millis() - t0 < 3000) delay(10);
+    while (!Serial && (millis() - t0) < USB_WAIT_TIMEOUT_MS) delay(10);
     delay(300);
 
-    Serial.println();
-    Serial.println(F("=== BNO055 axis + calibration helper ==="));
+    Serial.println(F("\n=== LSM303AGR: Einbaulage, Kalibrierung, Kurs ==="));
+    Serial.print(F("Bus: SDA=GPIO")); Serial.print(I2C_SDA);
+    Serial.print(F(" SCL=GPIO")); Serial.print(I2C_SCL);
+    Serial.print(F(" @ ")); Serial.print(I2C_FREQ / 1000); Serial.println(F(" kHz"));
 
     Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
+    Wire.setTimeOut(I2C_TIMEOUT_MS);
 
-    if (!bno.begin()) {                 // default NDOF
-        Serial.println(F("FATAL: BNO055 not found at 0x28"));
-        while (true) delay(1000);
+    Serial.println(F("\n[0] Identitaet beider Haelften"));
+    probeWhoAmI();
+
+    Serial.println(F("\n[1] Init"));
+    if (!imu.begin(owlImuConfigFromHeader(), &Wire)) {
+        Serial.println(F("    OwlImu::begin() FEHLGESCHLAGEN - Grund steht oben."));
+        Serial.println(F("    Ende."));
+        return;
     }
-    // Leave the axis remap at its power-on default: we are measuring the raw
-    // sensor frame in order to CHOOSE a remap.
-    Serial.println(F("BNO055 up, default (P1) axis remap, NDOF"));
-    Serial.println(F("grav = gravity vector m/s^2 in the SENSOR's own frame"));
-    Serial.println(F("----------------------------------------------------"));
+    Serial.println(F("    OwlImu bereit."));
+
+    rawOk = rawAccel.begin(ADDR_LSM303_ACCEL, &Wire) &&
+            rawMag.begin(ADDR_LSM303_MAG, &Wire);
+    if (rawOk) {
+        rawAccel.setRange(LSM303_RANGE_2G);
+        rawAccel.setMode(LSM303_MODE_HIGH_RESOLUTION);
+    }
+
+    Serial.print(F("\n    Aktueller Remap aus config.h: X<-"));
+    Serial.print(IMU_REMAP_X); Serial.print(F(" Y<-")); Serial.print(IMU_REMAP_Y);
+    Serial.print(F(" Z<-")); Serial.print(IMU_REMAP_Z);
+    Serial.print(F("   Kursoffset: ")); Serial.println(IMU_HEADING_OFFSET_DEG);
+
+    Serial.println(F("\nSO LIEST MAN DAS:"));
+    Serial.println(F("  ROH   = Schwerevektor im Sensorrahmen. Eule WAAGERECHT"
+                     " hinstellen: genau eine"));
+    Serial.println(F("          Achse ~+/-9.81, die anderen ~0. Diese Achse ist"
+                     " die Eulen-Z-Achse,"));
+    Serial.println(F("          das Vorzeichen sagt, ob sie gedreht werden muss."));
+    Serial.println(F("  EULE  = nach dem Remap. Bei waagerechter Eule muessen"
+                     " roll und pitch ~0 sein."));
+    Serial.println(F("  SPAN  = beobachtete Magnetfeldspanne je Achse in uT."
+                     " Eule LANGSAM einmal"));
+    Serial.print(F("          voll um die Hochachse drehen; ab "));
+    Serial.print(MAG_CAL_MIN_SPAN_UT);
+    Serial.println(F(" uT zaehlt eine Achse."));
+    Serial.println(F("          Eine waagerechte Drehung erreicht 2 von 3 - das"
+                     " reicht fuer den Kurs."));
+    Serial.println(F("  KURS  = Schnabelrichtung, rechtweisend (Deklination ist"
+                     " eingerechnet).\n"));
 }
 
 void loop() {
-    imu::Vector<3> g = bno.getVector(Adafruit_BNO055::VECTOR_GRAVITY);
-    imu::Vector<3> e = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+    if (!imu.ok()) { delay(500); return; }
 
-    uint8_t sys, gyro, accel, mag;
-    bno.getCalibration(&sys, &gyro, &accel, &mag);
+    imu.update();
 
-    Serial.printf("grav x=%+6.2f y=%+6.2f z=%+6.2f  down=%s | "
-                  "head=%6.1f roll=%+6.1f pitch=%+6.1f | cal sys=%u gyro=%u accel=%u mag=%u\n",
-                  g.x(), g.y(), g.z(), dominantAxis(g.x(), g.y(), g.z()),
-                  e.x(), e.y(), e.z(), sys, gyro, accel, mag);
-    delay(250);
+    static uint32_t last = 0;
+    if (millis() - last < 500) return;
+    last = millis();
+
+    OwlImuSample s = imu.read();
+
+    if (rawOk) {
+        sensors_event_t ae;
+        rawAccel.getEvent(&ae);
+        Serial.print(F("ROH  x=")); Serial.print(ae.acceleration.x, 2);
+        Serial.print(F(" y=")); Serial.print(ae.acceleration.y, 2);
+        Serial.print(F(" z=")); Serial.print(ae.acceleration.z, 2);
+        Serial.print(F("   |a|="));
+        Serial.println(sqrtf(ae.acceleration.x * ae.acceleration.x +
+                             ae.acceleration.y * ae.acceleration.y +
+                             ae.acceleration.z * ae.acceleration.z), 2);
+    }
+
+    Serial.print(F("EULE ax=")); Serial.print(s.ax, 2);
+    Serial.print(F(" ay=")); Serial.print(s.ay, 2);
+    Serial.print(F(" az=")); Serial.print(s.az, 2);
+    Serial.print(F("   roll=")); Serial.print(s.roll, 1);
+    Serial.print(F(" pitch=")); Serial.println(s.pitch, 1);
+
+    float sx, sy, sz;
+    imu.magSpan(sx, sy, sz);
+    Serial.print(F("MAG  mx=")); Serial.print(s.mx, 1);
+    Serial.print(F(" my=")); Serial.print(s.my, 1);
+    Serial.print(F(" mz=")); Serial.print(s.mz, 1);
+    Serial.print(F("   SPAN ")); Serial.print(sx, 0);
+    Serial.print('/'); Serial.print(sy, 0);
+    Serial.print('/'); Serial.print(sz, 0);
+    Serial.print(F(" uT  Achsen=")); Serial.print(s.magAxes);
+    Serial.println(F("/3"));
+
+    Serial.print(F("KURS "));
+    if (s.headingOk) {
+        Serial.print(s.yaw, 1);
+        Serial.println(F(" deg"));
+    } else if (!s.haveOffsets) {
+        Serial.println(F("-- noch nicht kalibriert (drehen!)"));
+    } else {
+        Serial.println(F("-- Geometrie unbrauchbar (Schnabel zu steil?)"));
+    }
+
+    float hx, hy, hz;
+    if (imu.getHardIron(hx, hy, hz)) {
+        Serial.print(F("OFFS ")); Serial.print(hx, 1);
+        Serial.print(' '); Serial.print(hy, 1);
+        Serial.print(' '); Serial.print(hz, 1);
+        Serial.println(F(" uT  <- diese Werte wuerde die Firmware speichern"));
+    }
+    Serial.println();
 }
 
 #endif // IMUAXIS_ACTIVE

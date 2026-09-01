@@ -14,7 +14,7 @@ A robotic owl companion with expressive LCD eyes, face detection, IMU, GPS, and 
 |---|---|---|---|---|
 | **LCD Eyes** | Waveshare 0.71" round (×2) | SPI (shared bus) | shared SCK=5 (D4), MOSI=7 (D8), RST=43 (D6); left CS=44 (D7) DC=9 (D10); right CS=8 (D9) DC=4 (D3) | Expressive eyes with GC9D01 driver. Verified on hardware 2026-08-26 |
 | **Camera** | OV3660 (on-board, Sense expansion) | SCCB/I2C + parallel | XCLK=10, SIOD=40, SIOC=39, D0-D7 on GPIO 15-18,38-48, VSYNC=38, HREF=47, PCLK=13 | Face detection input |
-| **IMU** | Adafruit BNO055 | I2C | SDA=1, SCL=2, addr 0x28 | Orientation (pitch/roll/yaw) |
+| **IMU** | Adafruit **LSM303AGR** | I2C | SDA=1, SCL=2, addr **0x19** (accel) + **0x1E** (magnetometer) | Orientation (pitch/roll/yaw). 6-DOF: accelerometer + magnetometer, **no gyroscope and no on-chip fusion** — the firmware computes the attitude and the tilt-compensated heading itself (`lib/OwlImu`). Replaced a BNO055 on 2026-09-01. **The black `LSM303AGR` board, not the blue `LSM303DLHC`** — same addresses, incompatible magnetometer registers, see `specs/006` |
 | **GPS** | Adafruit PA1010D | I2C | SDA=1, SCL=2, addr 0x10 | Position/satellites |
 | **Servo Driver** | PCA9685 | I2C | SDA=1, SCL=2, addr 0x40 | 5-channel PWM for servos |
 | **Vibration** | SW420 | Digital GPIO | GPIO3 (D2), input | Wake-on-vibration trigger |
@@ -46,7 +46,7 @@ right. This applies to the eyes as well as the servos.
 > channel: `[left_ear, right_ear, head, left_wing, right_wing]`.
 
 ### I2C Bus (GPIO1/2)
-All three I2C devices share the same bus: BNO055 @ 0x28, PA1010D @ 0x10, PCA9685 @ 0x40. Clock: 400 kHz.
+All I2C devices share the same bus: LSM303AGR @ 0x19 + 0x1E, PA1010D @ 0x10, PCA9685 @ 0x40. Clock: 400 kHz.
 
 ### Power
 - LCD backlights tied directly to 3.3V (always on)
@@ -145,7 +145,7 @@ Full design, math and open questions: `specs/013-navigation.spec`.
 - Center position on idle/sleep transitions
 
 ### Sensors Module
-- **BNO055**: Reads Euler angles (pitch/roll/yaw) from registers 0x1A–0x21, calibration status from 0x35
+- **LSM303AGR**: reads the acceleration and magnetic field vectors and derives roll/pitch from gravity plus a tilt-compensated heading from the magnetometer (`lib/OwlImu`). Hard-iron calibration is ours too, persisted in NVS
 - **PA1010D GPS**: Native I2C mode via `Adafruit_GPS GPS(&Wire)` — full NMEA parsing (RMC+GGA), no UART pins
 - **SW420**: Digital input with 100 ms debounce, event counting
 
@@ -164,7 +164,7 @@ Full design, math and open questions: `specs/013-navigation.spec`.
   "heap": { "free": 142880, "min": 121344, "largest": 96256,
             "psram_free": 7340032, "psram_largest": 6291456 },
   "imu": { "pitch": -2.5, "roll": 0.8, "yaw": 180.3, "calibrated": true,
-           "cal": { "sys": 2, "gyro": 3, "accel": 1, "mag": 3, "restored": true } },
+           "cal": { "axes": 2, "heading_ok": true, "restored": true } },
   "gps": { "valid": true, "latitude": 52.52, "longitude": 13.405, "altitude": 34.2, "satellites": 8 },
   "vibration": { "detected": false, "count": 3, "pulses": 3252 },
   "servos": [0.0, 0.0, 5.2, -1.0, 1.5],
@@ -189,8 +189,8 @@ Full design, math and open questions: `specs/013-navigation.spec`.
 The counters are diagnostics, and each exists because an instantaneous flag sampled at 2 Hz hid a
 real failure: `vibration.pulses` (raw ISR edges since boot), `face.total` (cumulative hits), and
 `face.attempts` with `loop_hz` — the denominator that says whether a low hit count means a poor
-detector or a starved main loop. `imu.cal.*` carries the BNO055 calibration counters and whether
-they were restored from flash.
+detector or a starved main loop. `imu.cal.*` carries the magnetometer calibration state:
+`axes` (0..3 covered this run), `heading_ok`, and whether the offsets were restored from flash.
 
 `face.capture_ms` / `face.infer_ms` split a detection cycle into waiting on the camera against
 computing, and `face.stack_free` is the low-water mark of the core-0 detection task's stack. They
@@ -281,13 +281,13 @@ esp32-s3-sense/                    # ESP32 firmware
 │   ├── protocol.cpp               # NDJSON commands + telemetry (the RPi contract)
 │   ├── vision.cpp                 # Face-detection task pinned to core 0; loop() only reads it
 │   ├── hardware_check.cpp         # -DHARDWARE_CHECK=1 wiring probe; else compiles to nothing
-│   ├── Sensors.cpp                # BNO055 IMU, PA1010D GPS, SW420 vibration
+│   ├── Sensors.cpp                # LSM303AGR IMU, PA1010D GPS, SW420 vibration
 │   ├── ServoController.cpp        # PCA9685 smooth servo interpolation
 │   ├── camtest.cpp                # -e camtest: SCCB probe, capture, mean brightness
 │   ├── camsnap.cpp                # -e camsnap: returns the real JPEG, all 4 orientations
 │   └── (dualtest / i2ctest / imuaxis / vibtest / powerprobe).cpp
 ├── tools/                         # Host-side helpers, run by you (German UI, see AGENTS.md)
-│   ├── kalibrieren.py             # Guided BNO055 calibration (figure-8 before static poses)
+│   ├── kalibrieren.py             # Guided magnetometer calibration (one slow full turn)
 │   ├── klopftest.py               # Live tap intervals against the OTA window
 │   ├── schnappschuss.py           # Decodes camsnap's JPEGs -- the camera-aim check
 │   ├── trefferquote.py            # Hit rate + face size + gaze-target interval (--live)
@@ -422,14 +422,14 @@ If it prints `ERROR: Left LCD failed` / `ERROR: Right LCD failed` / `ERROR: Sens
 | Field | Expected on first run |
 |---|---|
 | `state` | `boot` → `idle` after ~3 s |
-| `imu.calibrated` | `false` until the BNO055 is calibrated — **the stored calibration was erased and has not been redone** (`BACKLOG.md` Step 3). It is `gyro >= 3 && mag >= 3`, and `mag` only rises during a figure-8. Run `esp32-s3-sense/tools/kalibrieren.py`; figure-8 for `mag` BEFORE the static poses for `accel`, never after. Watch `imu.cal.{gyro,mag}` climb to 3/3 in the web UI |
+| `imu.calibrated` | `false` until the magnetometer is calibrated — **never done on this sensor yet** (`BACKLOG.md` Step 3). It means *hard-iron offsets exist* **and** *the geometry currently yields a usable heading*. Run `esp32-s3-sense/tools/kalibrieren.py` and turn the owl slowly through one full circle; watch `imu.cal.axes` reach 2 of 3 in the web UI (a level turn cannot reach 3 — only the two horizontal axes see any span). Note that `imu.yaw` is additionally off by the unmeasured mounting rotation, see `specs/006` Open |
 | `imu.cal.restored` | `true` once calibration has been saved and the owl rebooted — this is how you tell "calibration survived the last flash" from "it was wiped again" |
 | `gps.valid` | `true` only with a sky-view fix; `gps.satellites` > 0 |
 | `vibration.count` | `0` — increments when the SW420 is tapped |
 | `face.detected` | `false` (true when a face is in frame) |
 | `eye` | `searching` → `neutral` |
 
-When wired, all three I2C devices must be present on D0/D1 (addresses `0x28` BNO055, `0x10` PA1010D, `0x40` PCA9685). A missing device is almost always a solder/daisy-chain issue, not a code one.
+When wired, all I2C devices must be present on D0/D1 (addresses `0x19` + `0x1E` LSM303AGR, `0x10` PA1010D, `0x40` PCA9685). A missing device is almost always a solder/daisy-chain issue, not a code one.
 
 ### 3. Test face detection (camera)
 
@@ -505,7 +505,7 @@ python main.py [config.yaml]   # Default config path
 |---|---|---|
 | **GC9D01 LCD Driver** | ✅ Complete | Custom SPI driver, PSRAM framebuffers, software chip-select, 16 MHz. Both panels verified working on one shared bus |
 | **Eye Renderer** | ✅ Complete | 26 expressions (24 user-selectable) from ONE parametric routine driven by the `SHAPES[]` table — retune a mood by editing numbers, never by adding a draw function. Auto-blink, gaze, eyelids. Two colours only, black on white (see `AGENTS.md` and `specs/004-eye-expressions.spec`) |
-| **BNO055 IMU** | ✅ Complete | Euler angles + calibration status via I2C |
+| **LSM303AGR IMU** | ⚠️ Ported, unmeasured | Driver, software fusion and hard-iron calibration are in and validated on hardware (`\|a\|` = 9.77 m/s², both `WHO_AM_I` correct). **Not yet mounted, so the axis remap and the heading offset's mounting term are both unmeasured** — `imu.yaw` is not trustworthy until then (`specs/006` Open) |
 | **PA1010D GPS** | ✅ Complete | Native I2C (Adafruit_GPS), RMC+GGA NMEA parsing |
 | **SW420 Vibration** | ✅ Complete | **Edge-counting ISR**, evaluated once per main loop (~60 Hz). Explicitly *not* a level read and *not* debounced: the sensor emits ~1 kHz pulse bursts, and reading it as a stable level is what pinned the owl in DETECTING forever. `vibration.pulses` reports raw edges since boot so a dead sensor is distinguishable from a quiet one. See `specs/007-vibration-and-ota.spec` |
 | **PCA9685 Servo Ctrl** | ✅ Complete | 5 channels, smooth interpolation (2°/iteration) |
@@ -515,7 +515,7 @@ python main.py [config.yaml]   # Default config path
 | **Face Detection (ESP32)** | ✅ Complete | esp-dl **v3** `HumanFaceDetect` (managed IDF component, *not* the old `HumanFaceDetectMSR01`), OV3660 QVGA RGB565BE, `set_vflip(1)` mandatory, 48-91 ms inference **on core 0** since 2026-08-31 so it no longer stalls the eye render, gaze offsets + state transitions on-device. Hit rate is 100 % at a normal seating distance; it is dominated by face size in frame, and glasses cost about a third of it — see `specs/009-face-detection.spec` |
 | **OTA Update Mode** | ✅ Complete | 4-tap vibration → SoftAP `RobotOwl-Update` + `/update` HTTP page (HTTPUpdateServer); one tap exits; dual-bank ota_0/ota_1; standalone boot (5s USB wait) |
 | **Face Detection (RPi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
-| **Web UI (RPi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and BNO055 calibration counters, and a map place-picker for navigation. Page lives in `brain/templates/index.html`; the `/api/telemetry` payload is derived from the parsed telemetry dataclass, so it cannot fall behind the firmware (the SoftAP password is the one field deliberately withheld) |
+| **Web UI (RPi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and magnetometer calibration state, and a map place-picker for navigation. Page lives in `brain/templates/index.html`; the `/api/telemetry` payload is derived from the parsed telemetry dataclass, so it cannot fall behind the firmware (the SoftAP password is the one field deliberately withheld) |
 | **Speech (RPi)** | ✅ Implemented | German. Mic → RMS VAD gate → faster-whisper (`small`, int8 on CPU — the combination recommended for a Pi 4; CTranslate2, not torch) → keyword clusters / navigation triggers. Gated on awake + face + energy so the owl does not react to the TV. Disabled by default. See `specs/014-speech.spec` |
 | **RPi test suite** | ✅ 188 tests | Runs on a plain dev machine with no Pi, mic, PortAudio, faster-whisper, Flask, Jinja2 or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔RPi wire contract (48, `test_protocol.py`) and firmware-vs-RPi drift guards (11, `test_expressions.py`) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |

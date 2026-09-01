@@ -6,8 +6,10 @@
 # irgendwo im Code) und wurde auf die beiden OTA-Slots verteilt: jetzt
 # 0x3F0000 = 4,03 MB pro Slot, also ~78 % Belegung statt 103 %.
 #
-# nvs bleibt bewusst bei 0x9000/0x6000 - dort liegen die BNO055-
-# Kalibrierungsoffsets, die sonst verloren waeren.
+# nvs bleibt bewusst bei 0x9000/0x6000 - dort liegen die
+# Hartmagnet-Kalibrierungsoffsets des IMU, die sonst verloren waeren.
+# (Bis 2026-09-01 waren das die Offsets des BNO055; seit dem Tausch auf den
+# LSM303AGR sind es drei Floats unter owl-imu/mag-hardiron.)
 # App-Partitionen muessen auf 0x10000 ausgerichtet sein; 0x20000 und 0x410000
 # sind es. Summe: 0x410000 + 0x3F0000 = 0x800000 = genau 8 MB.
 nvs,      data, nvs,     0x9000,   0x6000,

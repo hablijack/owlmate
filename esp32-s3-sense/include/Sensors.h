@@ -4,21 +4,28 @@
 #include <Wire.h>
 #include "config.h"
 
-// IMU data from BNO055
+// Orientation from the LSM303AGR (accel 0x19 + LIS2MDL magnetometer 0x1E).
+// The fusion lives in lib/OwlImu -- this chip has no gyro and computes nothing
+// itself, unlike the BNO055 it replaced. See lib/OwlImu/OwlImu.h for the owl
+// body frame these angles are expressed in.
 struct ImuData {
-    float pitch;    // degrees, -90 to 90
-    float roll;     // degrees, -180 to 180
-    float yaw;      // degrees, 0 to 360 -- absolute magnetic heading, but only
-                    // once calMag reaches 3 (before that NDOF reports 0)
+    float pitch;    // degrees, -90 to +90;  +90 = beak at the sky
+    float roll;     // degrees, -180 to +180; +90 = lying on the right side
+    float yaw;      // degrees, 0 to 360 -- TRUE geographic bearing of the beak.
+                    // Holds its last trustworthy value while headingOk is false,
+                    // rather than emitting a garbage number.
+    // haveOffsets && headingOk. Navigation refuses to aim while this is false.
     bool isCalibrated;
-    // Raw BNO055 calibration counters, 0..3 each. Surfaced in telemetry so the
-    // figure-8 calibration dance has visible progress instead of a single
-    // opaque false. isCalibrated is all four at 3.
-    uint8_t calSys;
-    uint8_t calGyro;
-    uint8_t calAccel;
-    uint8_t calMag;
-    // True when this boot restored calibration offsets from flash instead of
+    // Magnetometer axes that have seen enough span THIS RUN, 0..3. The progress
+    // bar of the calibration turn -- deliberately a different question from
+    // isCalibrated. Conflating "do I have usable offsets" with "how far has this
+    // run got" is exactly what produced the BNO055 calibrated bug (SPEC-006).
+    // A level full turn reaches 2 of 3; only tumbling the owl reaches 3.
+    uint8_t magAxes;
+    // The current geometry yields a usable heading (beak not near-vertical,
+    // field plausible).
+    bool headingOk;
+    // True when this boot restored hard-iron offsets from flash instead of
     // starting from scratch.
     bool calRestored;
 };
@@ -44,6 +51,15 @@ class Sensors {
 public:
     bool begin();
 
+    // IMU wie die Vibration in zwei Haelften, und aus demselben Grund:
+    // updateImu() macht die Arbeit (Bus lesen, filtern, Kalibrierung
+    // mitschreiben, Offsets bei Bedarf ins Flash), getImu() liest nur ab.
+    // updateImu() gehoert einmal pro Hauptschleifendurchlauf aufgerufen; es
+    // begrenzt sich selbst auf IMU_SAMPLE_INTERVAL_MS.
+    //
+    // Beim BNO055 stand die Flash-Schreiblogik in getImu() - also in einem
+    // Getter, den die Telemetrie ruft. Das war schon damals der falsche Ort.
+    void updateImu();
     ImuData getImu();
     GpsData getGps();
     // Vibration in zwei Haelften: updateVibration() holt die Flanken ab und
@@ -70,8 +86,7 @@ public:
 
 private:
     bool _imuReady;
-    bool _calRestored;   // offsets came back from NVS at boot
-    bool _calSaved;      // offsets have been written to NVS this run
+    bool _calSaved;      // hard-iron offsets have been written to NVS this run
     bool _gpsReady;
 
     // Vibration debounce state

@@ -184,14 +184,14 @@ class TestWebUINavEndpoints(unittest.TestCase):
             face=FaceDetection(detected=True, total=57),
             vibration=VibrationData(detected=False, count=2, pulses=3252),
             imu=IMUData(yaw=210.0, calibrated=False,
-                        cal=IMUCalibration(sys=1, gyro=3, accel=2, mag=1,
+                        cal=IMUCalibration(axes=1, heading_ok=False,
                                            restored=True)),
             gps=GPSData(valid=True, latitude=48.0, longitude=11.0, satellites=8),
             update=UpdateMode(active=False), servos=[0.0] * 5)
         d = ui.app.view_functions["api_telemetry"]()
 
-        self.assertEqual(d["imu"]["cal"], {"sys": 1, "gyro": 3, "accel": 2,
-                                          "mag": 1, "restored": True})
+        self.assertEqual(d["imu"]["cal"], {"axes": 1, "heading_ok": False,
+                                          "restored": True})
         self.assertFalse(d["imu"]["calibrated"])
         self.assertAlmostEqual(d["imu"]["yaw"], 210.0)
         self.assertTrue(d["gps"]["valid"])

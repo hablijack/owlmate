@@ -68,35 +68,54 @@ class FaceDetection:
 
 @dataclass(frozen=True)
 class IMUCalibration:
-    """BNO055 per-sensor calibration counters, 0..3 each.
+    """LSM303AGR magnetometer calibration state.
 
-    Sent so the figure-8 dance can be guided from the web UI instead of a serial
-    log. `sys` and `accel` are live confidence values that fall during any
-    movement, which is why IMUData.calibrated deliberately excludes them (see
-    Sensors::getImu() -- requiring all four made the flag false in 0 of 23
-    frames on a fully calibrated sensor). `restored` means the offsets came back
-    from NVS at boot, so the owl started up already calibrated.
+    Sent so the calibration turn can be guided from the web UI instead of a
+    serial log.
+
+    The BNO055's four 0..3 counters (sys/gyro/accel/mag) are GONE as of
+    2026-09-01: the LSM303AGR has no gyroscope and no fusion engine, so three of
+    those four numbers had nothing to measure. They were not replaced with
+    synthesised stand-ins on purpose -- a number that looks like a measurement
+    and is not one is this project's most expensive error class.
+
+    `axes` is how many magnetometer axes have seen enough field span THIS RUN,
+    0..3: the progress bar of the calibration turn. A level full turn reaches 2
+    (the earth field's horizontal component only sweeps the two horizontal
+    axes); only tumbling the owl reaches 3. It may legitimately read 0 while
+    IMUData.calibrated is True -- that is a fresh boot with offsets restored
+    from flash, and conflating those two questions is precisely what caused the
+    BNO055 calibrated bug (SPEC-006).
+
+    `heading_ok` says the current geometry yields a usable heading at all (beak
+    not near-vertical, field magnitude plausible). `restored` means the
+    hard-iron offsets came back from NVS at boot.
     """
-    sys: int = 0
-    gyro: int = 0
-    accel: int = 0
-    mag: int = 0
+    axes: int = 0
+    heading_ok: bool = False
     restored: bool = False
 
 
 @dataclass(frozen=True)
 class IMUData:
-    """Fused orientation from the BNO055.
+    """Orientation computed from the LSM303AGR.
+
+    Not "fused" by a chip any more: the LSM303AGR is a 6-DOF part (accelerometer
+    + magnetometer, no gyro) and does no fusion of its own, so roll/pitch come
+    from the gravity vector and yaw from a tilt-compensated compass, both
+    computed in the firmware (esp32-s3-sense/lib/OwlImu).
 
     `yaw` is a TRUE geographic heading of the beak: the firmware folds the
     mounting rotation and the magnetic declination into IMU_HEADING_OFFSET_DEG,
-    so it shares one north reference with geo.bearing_deg(). Accurate to roughly
-    +/-5..10 deg.
+    so it shares one north reference with geo.bearing_deg(). It HOLDS its last
+    trustworthy value while cal.heading_ok is false rather than emitting a
+    garbage number, so read heading_ok before trusting a fresh reading.
     """
     pitch: float = 0.0
     roll: float = 0.0
     yaw: float = 0.0
-    # gyro >= 3 and mag >= 3. Navigation refuses to aim while this is false.
+    # Hard-iron offsets exist AND the geometry is usable. Navigation refuses
+    # to aim while this is false.
     calibrated: bool = False
     cal: IMUCalibration = field(default_factory=IMUCalibration)
 
@@ -244,10 +263,8 @@ class Telemetry:
 # dropped on the floor.
 # ============================================================================
 _IMU_CAL_FIELDS = (
-    ("sys", "sys", int),
-    ("gyro", "gyro", int),
-    ("accel", "accel", int),
-    ("mag", "mag", int),
+    ("axes", "axes", int),
+    ("heading_ok", "heading_ok", bool),
     ("restored", "restored", bool),
 )
 _IMU_FIELDS = (

@@ -11,8 +11,10 @@ servo driver. The bus was believed broken for a long time. It never was.
 
 ## Requirements
 
-* **R-005.1** BNO055 @ 0x28, PA1010D GPS @ 0x10, PCA9685 @ 0x40 on SDA=GPIO1,
-  SCL=GPIO2 at 400 kHz.
+* **R-005.1** LSM303AGR @ 0x19 (accel) + 0x1E (magnetometer), PA1010D GPS @
+  0x10, PCA9685 @ 0x40 on SDA=GPIO1, SCL=GPIO2 at 400 kHz. (Until 2026-09-01
+  the IMU was a BNO055 at 0x28 — a single device, and one that stretched the
+  clock; see SPEC-006.)
 * **R-005.2** A missing or mute device must not prevent the owl from running.
 * **R-005.3** No peripheral read may be able to block the main loop indefinitely.
 
@@ -52,8 +54,12 @@ Measured 2026-08-26 with `pio run -e vibtest`-style probing and `-e i2ctest`:
 
 * Bit-banged scan (bypassing the ESP-IDF driver entirely) **and** the Wire
   driver both find `0x10`, `0x28`, `0x40` — at 100 kHz and at 400 kHz.
+* Re-measured 2026-09-01 after the IMU swap: the same two scans both find
+  `0x10`, **`0x19`, `0x1E`**, `0x40` at 100 kHz and 400 kHz, and `0x28` is
+  gone. **No clock stretching from the new part** — the longest stretch the
+  bit-banged probe measures is ~0, against the BNO055's ~600 µs.
 * SDA and SCL idle HIGH. Wiring is sound.
-* Live data from each: BNO055 returns real Euler angles; the PA1010D produced
+* Live data from each: the BNO055 returned real Euler angles; the PA1010D produced
   43 NMEA sentences in 6 s (`$GNGGA`/`$GNRMC`, correct date field); the PCA9685
   ramped channel 0 through 0→6→12→18→24→30° and held.
 * Telemetry cadence ~535 ms, of which a noticeable share is I2C wait time.
