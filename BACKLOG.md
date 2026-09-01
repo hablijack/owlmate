@@ -362,9 +362,13 @@ genuine full redraw of both eyes and not a defect.
 
 **Left open by this work, both separate defects:**
 
-* **The SW-420 registered zero edges** while a person moved around in front of
-  the owl for two minutes. Vibration wake is currently dead — pot too
-  insensitive, or the module is disconnected. Nothing to do with the slowdown.
+* **The SW-420 is alive but far too insensitive.** It registered **zero** edges
+  while a person moved around in front of the owl for two minutes, and **20** in
+  a 15-minute session — against the 3252 edges in 28 s of deliberate tapping
+  that `config.h` records. So the module is not disconnected, which the first
+  reading suggested; its pot is simply turned down too far to notice a person.
+  Vibration wake and the 4-tap OTA entry are effectively dead until it is
+  re-adjusted. Nothing to do with the slowdown.
 * ~~`cam_hal: FB-OVF` / `FB-SIZE`~~ **CLOSED 2026-08-31 by a long run.** Both
   appeared twice, immediately after the 2.2 s stall, and stopped. A 15-minute
   capture on the fixed firmware (1729 telemetry frames, covering 39.8 min of
@@ -401,10 +405,38 @@ move again for the whole 15 minutes. Zero drops with a reader present; graceful
 degradation without one. Before the fix, that same unread condition produced
 `loop_max_ms` 2256 and 4023.
 
-**What this run does NOT cover:** nobody was in front of the camera, so it is the
-IDLE path. Core 1 skips the eye redraw and core 0's inference is 48-50 ms
-instead of 66-110 ms. A long run WITH someone tracked is still worth doing before
-calling the busy path proven.
+**The busy path, same day, owner tracked for 15 minutes.** 1699 frames, 1640 of
+them in `INTERACTING` (96 %), hit rate 87 %, a new gaze target every 196 ms,
+face 13-89 px:
+
+| per 3-min slice | 0-3 | 3-6 | 6-9 | 9-12 | 12-15 |
+|---|---|---|---|---|---|
+| `loop_hz` median | 29.2 | 29.2 | 29.2 | 29.2 | 29.2 |
+| `loop_max_ms` median | 111 | 111 | 111 | 112 | 111 |
+| `infer_ms` median | 74 | 71 | 74 | 70 | 68 |
+| hit rate | 98.6 % | 91.3 % | 87.0 % | 84.6 % | 74.9 % |
+
+`heap.largest` again one single value; `free` drifted -816 bytes inside its own
+1560-byte working band; `tx_dropped` constant at 5094 for the whole run, i.e.
+**zero drops in 15 minutes under load**; zero `cam_hal` lines; zero non-JSON
+lines. **Nothing degrades with runtime on the busy path either.** Step 4c is
+closed on both paths.
+
+**Two things that did move, neither of them a regression:**
+
+* **16 of 1692 samples (0.9 %) fell below 15 Hz, floor 9.1 Hz.** Not a blocked
+  call — `loop_max_ms` never exceeded 131 ms in the whole run. Those windows
+  held four or five consecutive ~110 ms eye redraws. For scale, the pre-core-0
+  baseline in `owl.h` was 3 of 55 (5.5 %) and was judged "visibly frozen", so
+  this is ~6x better and not zero. **The eye redraw is now the loop's dominant
+  cost during tracking** — the remaining lever is Step 4b's gaze smoothing and
+  the dirty-row flush (SPEC-003), not anything found here.
+* **The hit rate fell 98.6 % -> 74.9 % across the run** while face width rose
+  (38 -> 46 px) and `infer_ms` fell (74 -> 68). Compute is therefore not the
+  cause. The likely explanation is behavioural — these models detect *upright
+  frontal* faces, and someone asked to "keep moving" for 15 minutes drifts
+  toward profile poses. Worth a deliberate re-test before treating it as
+  anything else.
 
 **How this was measured**, for the next investigation: `cat` does not assert
 DTR/RTS, so a running owl can be watched without restarting it.

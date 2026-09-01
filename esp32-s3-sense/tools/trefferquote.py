@@ -179,6 +179,23 @@ def _collect(lines, skip=0):
     als der Fix: ein Artefakt, das man ERKLAERT, aber nicht GEMESSEN hat, ist
     eine ungelesene Fehlermeldung.
     """
+    # Eine Mitschrift kann eine LUECKE enthalten, und dann sind Trefferquote und
+    # Blickziel-Abstand falsch, ohne falsch auszusehen. Grund: `cat` bekommt
+    # zuerst, was noch im Puffer des Rechners lag - Frames von vor Minuten oder
+    # Stunden. Danach kommt die Gegenwart. first/last spannen dann ueber die
+    # Luecke, und in der Luecke lief die Eule weiter und zaehlte Versuche hoch,
+    # ohne dass jemand vor der Kamera sass.
+    #
+    # Am 2026-08-31 gemessen: eine 15-Minuten-Mitschrift mit 18 Minuten Vorlauf
+    # im Puffer meldete 38 % Trefferquote. Der tatsaechlich gemessene Abschnitt
+    # lag bei 87 %. Genau die Sorte Zahl, an die dieses Projekt schon Tage
+    # verloren hat - plausibel, praezise und aus zwei verschiedenen Zeitraeumen
+    # zusammengesetzt.
+    #
+    # Deshalb: bei einem Sprung von mehr als GAP_MS zwischen zwei Frames wird
+    # neu angefangen und nur der LETZTE zusammenhaengende Abschnitt gewertet.
+    GAP_MS = 5000
+    prev_up = None
     first = last = None
     widths, states, hz, timing = [], set(), [], []
     # Seit 2026-08-31: die laengste EINZELNE Runde je Fenster, und der
@@ -200,6 +217,14 @@ def _collect(lines, skip=0):
             continue
         f = o["face"]
         rec = (f["attempts"], f["total"], o["uptime"])
+        if prev_up is not None and o["uptime"] - prev_up > GAP_MS:
+            print("  HINWEIS: Luecke von %.0f s in der Mitschrift - es wird nur der"
+                  % ((o["uptime"] - prev_up) / 1000.0))
+            print("           Abschnitt DANACH gewertet (siehe _collect).")
+            first = None
+            widths, hz, timing = [], [], []
+            states = set()
+        prev_up = o["uptime"]
         if first is None:
             first = rec
         last = rec

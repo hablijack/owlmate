@@ -160,6 +160,19 @@ Diagnostics that changed a conclusion, and what they cost:
   and broken case is worse than none — it manufactures false certainty.
   Hence R-011.2: state up front what each outcome would mean, and if two
   different states produce the same reading, the test is not finished.
+* **"A capture file is one continuous measurement."** It is not, and the failure
+  is silent. `cat` first receives whatever the host had buffered — frames from
+  minutes or hours earlier — and only then the present. Any statistic computed
+  from the first and last frame then spans the gap, and the owl went on counting
+  attempts throughout it with nobody in front of the camera. Measured
+  2026-08-31: a 15-minute busy-path capture with ~18 minutes of stale buffer in
+  front of it reported a **38 %** hit rate and a gaze target every 422 ms; the
+  segment actually recorded was **87 %** and every 196 ms. Both numbers are
+  precise, plausible, and assembled from two different periods — the exact shape
+  of error this directory exists to prevent. `trefferquote.py` now detects a
+  jump of more than 5 s between consecutive frames, says so, and scores only the
+  last contiguous segment. **Any tool that reduces a capture to a rate must
+  check that the capture is contiguous first.**
 * **"Idle levels prove presence."** Reading a pin HIGH with an internal pull-up
   enabled says nothing about what is attached. Twice this was read as "the device
   is connected" (the vibration pin, then the camera's SCCB lines). The pull-*down*
