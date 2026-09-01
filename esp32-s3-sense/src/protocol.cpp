@@ -2,6 +2,7 @@
 
 #include <WiFi.h>
 #include <ArduinoJson.h>
+#include <esp_heap_caps.h>
 #include "behavior.h"
 #include "config.h"
 
@@ -11,13 +12,51 @@
 
 namespace {
 
+// Verworfene Zeilen, seit dem Boot. Wird in der Telemetrie mitgeschickt, denn
+// ein stilles Verwerfen waere genau die Sorte unsichtbarer Ausfall, gegen die
+// vibration.pulses und face.attempts existieren: der RPi saehe eine Luecke und
+// koennte nicht unterscheiden, ob die Eule nichts gesendet hat oder ob er
+// selbst zu langsam war.
+static uint32_t txDropped = 0;
+
 // One JSON object, one line. Every reply in this file ends this way; the two
 // lines were copy-pasted 8 times inside handleCommand() and gained a copy with
 // every command added, which is what this helper stops.
+//
+// SCHREIBT NIE BLOCKIEREND. Das ist der Kern und nicht eine Optimierung: diese
+// Funktion laeuft auf Kern 1, in derselben Schleife, die die Augen zeichnet.
+// Mit der Voreinstellung der Arduino-Portierung (256 Byte Ring, 100 ms
+// tx_timeout, bis zu 20 Wiederholungen) hielt EIN Telemetrieframe die Schleife
+// bis zu 2 s an, sobald der Leser am anderen Ende nicht mitkam - auf Hardware
+// gemessen 2026-08-31: loop_max_ms 2256 und 4023, loop_hz 3,3. Die Eule stand
+// dann still, weil der Raspberry Pi beschaeftigt war. Das darf nicht sein: die
+// Telemetrie ist ein Nebenprodukt, das Verhalten ist die Aufgabe.
+//
+// Zwei Teile, und beide werden gebraucht:
+//   1. availableForWrite() >= Laenge  ->  nur schreiben, wenn die GANZE Zeile
+//      in den Ring passt. Sonst verwerfen. Eine halb geschriebene NDJSON-Zeile
+//      ist schlimmer als keine: der RPi meldet dafuer einen Parse-Fehler.
+//   2. SERIAL_TX_TIMEOUT_MS 0 -> selbst wenn Punkt 1 sich irrte, wartet der
+//      Schreibvorgang nicht.
+//
+// Ein Frame zu verwerfen ist unbedenklich: Telemetrie ist eine Momentaufnahme
+// alle 500 ms, keine Ereignisliste. Die kumulativen Zaehler darin (face.total,
+// vibration.pulses) ueberleben eine Luecke, gerade weil sie kumulativ sind.
+//
+// EIN Schreibvorgang, nicht println(): println() schickt die Zeile und das
+// "\r\n" als ZWEI Aufrufe, also zwei Gelegenheiten zu blockieren und zwei, an
+// denen eine Zeile auseinandergerissen werden kann.
 void sendJson(const JsonDocument& doc) {
     String out;
     serializeJson(doc, out);
-    Serial.println(out);
+    out += '\n';
+
+    const size_t len = out.length();
+    if ((size_t)Serial.availableForWrite() < len) {
+        txDropped++;
+        return;
+    }
+    Serial.write((const uint8_t*)out.c_str(), len);
 }
 
 // Ack carrying nothing but its type.
@@ -138,7 +177,43 @@ void sendTelemetry() {
     doc["state"] = stateToString(behavior::current());
     doc["uptime"] = millis();
     doc["loop_hz"] = loopHz;
+    // Laengste EINZELNE Runde des letzten Fensters (ms). Siehe owl.h: der
+    // Mittelwert daneben kann ein Stocken nicht zeigen, diese Zahl schon - und
+    // ihre GROESSE benennt den Verursacher (~250 ms = ein I2C-Timeout, bis
+    // ~2000 ms = ein nicht mehr leergelesener USB-CDC-Port).
+    doc["loop_max_ms"] = loopMaxMs;
+    // Seit dem Boot verworfene Zeilen, weil der Leser am USB-Port nicht mitkam.
+    // Steigt = der RPi (oder das Terminal) haengt; die Eule laeuft weiter, was
+    // der ganze Zweck ist. Bleibt es 0, war der Port nie der Engpass.
+    doc["tx_dropped"] = txDropped;
     doc["fw"] = FW_VERSION;
+
+    // Haldenstand. Gegenstueck zu face.stack_free: der Stapel der
+    // Erkennungsaufgabe wird seit dem Umzug auf Kern 0 dauerhaft gemeldet, die
+    // Halde bisher gar nicht - und damit war "wird ueber die Laufzeit etwas
+    // voll?" auf der Hardware schlicht nicht pruefbar.
+    //
+    // free UND largest, denn erst das PAAR beantwortet die Frage:
+    //   free faellt                  -> ein Leck
+    //   free bleibt, largest faellt  -> FRAGMENTIERUNG, und nur so zu sehen
+    //   min faellt, free erholt sich -> es gab eine Spitze, sie ging vorbei
+    //
+    // INTERNAL getrennt vom PSRAM, weil beide unterschiedlich beansprucht
+    // werden: JSON, String und die Knoten von esp-dl landen intern (alles unter
+    // CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL = 16 KB), die Bildpuffer, der
+    // Ausschnittpuffer und die Augen-Framebuffer im PSRAM. Ein gemeinsamer Wert
+    // wuerde die interne Halde im Rauschen der 8 MB PSRAM verstecken.
+    //
+    // ACHTUNG, ehrlicher Preis: diese fuenf Felder verlaengern die
+    // Telemetriezeile um gut 100 Byte. Falls der USB-CDC-Gegendruck die Ursache
+    // ist, macht die Messung ihn also minimal SCHLIMMER - der Ringpuffer fasst
+    // 256 Byte, die Zeile lag schon vorher weit darueber. Trotzdem richtig
+    // herum: ohne die Felder ist die Vermutung gar nicht pruefbar.
+    doc["heap"]["free"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    doc["heap"]["min"] = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    doc["heap"]["largest"] = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    doc["heap"]["psram_free"] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    doc["heap"]["psram_largest"] = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
 
     // IMU data
     ImuData imu = sensors.getImu();

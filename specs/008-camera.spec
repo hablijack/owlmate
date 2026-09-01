@@ -43,6 +43,23 @@ working.
 * Image is real: mean brightness ~110 with min 7 / max 250 (full dynamic range),
   and it **dropped 122 → 53 the instant a hand covered the lens**. A blank or
   flat frame would show a narrow min/max spread.
+* **`cam_hal: FB-OVF` and `cam_hal: FB-SIZE: a != b` mean the driver DISCARDED a
+  frame, not that it handed us a bad one.** Both come from the DMA
+  frame-assembly path in `cam_hal.c`. `FB-SIZE` means the frame was short when
+  VSYNC arrived — observed once as `138240 != 153600`, i.e. 24 of 240 rows
+  missing — and the driver then sets `frames[pos].en = 1`, which gates the
+  `xQueueSend` that would have published it. `FB-OVF` means the DMA overran the
+  buffer; the driver calls `ll_cam_stop()` and abandons it. Neither reaches
+  `esp_camera_fb_get()`.
+  **With `fb_count = 2` a discarded frame costs nothing measurable**: observed
+  2026-08-31 alongside `capture_ms` = 0 in every one of 216 frames and
+  `face.attempts` steady at 5.7–6.7/s, because the second buffer already held
+  the next image. They appeared twice, immediately after an unrelated 2.2 s
+  main-loop stall, and a 15-minute capture after that stall was fixed contains
+  zero of them.
+  They are printed with `ets_printf`, so they land on the NDJSON protocol port
+  and cost the RPi a parse warning each. `CONFIG_LOG_DEFAULT_LEVEL_NONE` is what
+  suppresses them — `cam_hal.c:44` guards the macro on exactly that symbol.
 * **No pin conflicts.** Camera uses GPIO 10, 39, 40, 48, 11–18, 38, 47, 13; the
   rest of the owl holds 1–9, 43, 44.
 * **The Sense expansion board's microSD slot shares GPIO 7, 8, 9** — which are

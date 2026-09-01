@@ -247,15 +247,42 @@ GpsData Sensors::getGps() {
     // 512-iteration bound merely turned that into ~512 I2C transfers per call,
     // which cost ~700 ms per telemetry tick.
     //
-    // GPS.read() serves bytes from a 32-byte buffer and only touches the bus
-    // when it runs dry, so this budget is ~GPS_READ_BUDGET/32 transfers. The
-    // PA1010D emits RMC+GGA at 1 Hz (~150 byte/s) and telemetry runs at 2 Hz,
-    // so 128 bytes/call (~256 byte/s) keeps up with margin.
+    // GPS.read() serves bytes from a 32-byte buffer. Die PA1010D sendet RMC+GGA
+    // mit 1 Hz (~150 Byte/s), die Telemetrie laeuft mit 2 Hz, also reichen
+    // 128 Byte je Aufruf (~256 Byte/s) mit Reserve.
+    //
+    // WIDERLEGT 2026-08-31, und der Satz stand vorher genau hier: "read()
+    // beruehrt den Bus nur, wenn der Puffer leer laeuft, also kostet dieses
+    // Budget ~GPS_READ_BUDGET/32 Transfers". Das gilt NUR, solange die GPS
+    // etwas zu sagen hat. Hat sie nichts, schickt sie 0x0A-Fuellbytes; die
+    // Bibliothek wirft doppelte 0x0A weg, setzt _buff_max auf -1, und dann ist
+    // `_buff_idx <= _buff_max` bei JEDEM Aufruf falsch - also macht JEDER der
+    // 128 read()-Aufrufe einen eigenen 32-Byte-Transfer. Bei 400 kHz sind das
+    // rund 1 ms pro Stueck, macht ~128 ms in EINER Runde der Hauptschleife.
+    //
+    // Auf Hardware gemessen 2026-08-31: loop_max_ms wechselte im Leerlauf
+    // regelmaessig zwischen 53 und 127 ms - der teure Wert immer dann, wenn
+    // zwischen zwei Telemetrieframes kein NMEA-Satz kam. Das ist der Rest des
+    // "die Augen ruckeln", der nach der Reparatur des USB-Schreibens uebrig
+    // blieb.
+    //
+    // Deshalb wird jetzt nach GPS_DRY_READS leeren Lesungen abgebrochen. Solange
+    // Daten fliessen, liefert read() Zeichen und der Zaehler faellt auf 0 zurueck
+    // - der Durchsatz aendert sich also nicht. Ein direkt nach einem Nachfuellen
+    // zurueckgegebenes 0 ist normal (read() liefert dann kein Zeichen), darum 3
+    // und nicht 1.
     static const int GPS_READ_BUDGET = 128;
+    static const int GPS_DRY_READS = 3;
+    int dry = 0;
     for (int i = 0; i < GPS_READ_BUDGET; i++) {
-        GPS.read();
+        const char c = GPS.read();
         if (GPS.newNMEAreceived()) {
             GPS.parse(GPS.lastNMEA());   // parse() clears the flag
+        }
+        if (c == 0) {
+            if (++dry >= GPS_DRY_READS) break;
+        } else {
+            dry = 0;
         }
     }
 

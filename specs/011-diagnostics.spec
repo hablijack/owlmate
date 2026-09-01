@@ -81,6 +81,33 @@ explicitly first or is packaged as a script the user starts themselves.
   the confound") was raised and then *disproved* only because the non-invasive
   method existed to check it. The owl's own tools should prefer `cat` for
   observation and pyserial only when a fresh boot is wanted.
+* **`loop_max_ms` is what a mean cannot show, and its MAGNITUDE names the
+  culprit.** Added 2026-08-31 next to `loop_hz`. `loop_hz` is a rate (a count
+  over a window) and this is a duration (the longest single iteration in that
+  window); neither is derived from the other, and it is deliberately not a
+  "minimum loop_hz", because the reciprocal of one iteration is a duration
+  wearing a rate's clothing — the exact move SPEC-009 Falsified records. It
+  earned itself immediately: ~25 ms is healthy, ~110 ms is the auto-blink
+  redraw, ~130 ms was `getGps()` hammering a mute GPS (SPEC-005 Falsified), and
+  2256 ms was `Serial.println()` on an undrained USB CDC port (SPEC-010). Three
+  different defects, each identified by the size of the number alone, in
+  captures that had been taken before and had shown nothing.
+* **`heap.free` and `heap.largest` must be read as a pair, and a flat pair is a
+  strong negative result.** Measured over a 15-minute capture, 1729 frames,
+  covering 39.8 min of runtime: `free` drifted **-20 bytes** and `largest` held
+  **one single value** (102400) in every frame. That killed the leak and
+  fragmentation hypotheses outright — which was worth more than any positive
+  finding, because it stopped the search from wandering. `free` alone could not
+  have done it: fragmentation shows as a flat `free` with a falling `largest`.
+* **The measurement apparatus was the variable, twice, in the same
+  investigation.** Attaching a reader is not a neutral act: an unread port made
+  the firmware stall for seconds, so *starting* the capture could fix the symptom
+  being captured. The protocol that resolves this is to run it both ways — reader
+  attached throughout, versus attached only after the symptom appears — and treat
+  the difference as the finding rather than as noise. `trefferquote.py --folge`
+  exists for the first half: it reads a PIPE (`cat ... | tee lauf.ndjson |
+  ... --folge`) so a running owl can be recorded and watched at once, whereas
+  `--live` opens the port with pyserial and would restart it.
 * **A detection measurement with nobody in front of the camera reads as a
   fault.** Several readings on 2026-08-31 (0 hits, 31 %) were the owner being
   absent or further away, not a defect. `tools/trefferquote.py` prints the state

@@ -76,6 +76,27 @@ extern FaceResult_t faceResult;
 // 15 Hz before (visibly frozen), 0 of 58 after.
 extern float loopHz;
 
+// Longest SINGLE loop iteration in the last telemetry window, in milliseconds.
+// Reported alongside loopHz because the two answer different questions and only
+// together separate the two ways the eyes can freeze:
+//
+//   loopHz falls, loop_max_ms stays ~35   -> every iteration got a bit slower
+//   loopHz falls, loop_max_ms jumps       -> ONE iteration blocked, and for how
+//                                            long is the name of the culprit
+//
+// The magnitude identifies the blocker directly, which is the whole point of
+// measuring it rather than deriving it: ~250 ms is one I2C_TIMEOUT_MS (a slave
+// stopped answering), and up to ~2000 ms is HWCDC::write() giving up on a host
+// that stopped draining the USB CDC port (20 retries x its 100 ms tx timeout,
+// see HWCDC.cpp) -- the eyes are frozen for every millisecond of it.
+//
+// Deliberately a DURATION and not a "loop_hz_min". The reciprocal of a single
+// iteration is a duration wearing a rate's clothing, and this project has
+// already lost days to a number that was divided out of something rather than
+// timed (SPEC-009 Falsified). loopHz is a real rate -- count over a window;
+// this is a real duration. Neither is derived from the other.
+extern uint32_t loopMaxMs;
+
 // ----------------------------------------------------------------------------
 // Display bring-up.
 //

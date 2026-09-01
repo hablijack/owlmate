@@ -33,6 +33,26 @@ Reason: the two inputs that drive the interesting transitions — a face and a t
 — are both sensed on the ESP32. Putting the decision on the RPi would mean a
 serial round trip per frame and an owl that goes inert whenever the Pi reboots.
 
+**The behaviour is the job; the telemetry is a by-product, and the by-product
+yields.** The owl must never be hostage to the host's scheduling. This was an
+unstated assumption until 2026-08-31, when it turned out to be false in the one
+place it mattered: `sendTelemetry()` runs on core 1, in the same iteration that
+draws the eyes, and the Arduino USB CDC layer let a single frame block that loop
+for up to 2 s whenever nothing drained the port (measured `loop_max_ms` 2256 and
+4023). The owl stood still because a *reader* was slow.
+
+The rule that follows, and that any future outbound channel must obey: **a write
+on the behaviour loop either fits without waiting or is dropped.** Never
+truncated — a half-written NDJSON line costs the RPi a parse error while a
+dropped frame costs only a gap — and never silently: `tx_dropped` carries the
+count, so "the owl went quiet" and "I was too slow to listen" stay
+distinguishable. Telemetry is a 500 ms snapshot whose counters are cumulative,
+so it is *designed* to survive gaps. See SPEC-010 for the mechanism.
+
+This is a production requirement, not a bench nicety. The RPi runs speech
+recognition in the same process as the serial reader; a starved reader thread
+there must not be able to freeze the owl's eyes.
+
 **Leaving a state for IDLE is one named operation.** The three timeout paths out
 of `DETECTING`, `INTERACTING` and `NAVIGATING` each repeated
 `transitionTo(IDLE)` + `eyes.setGaze(0,0)` + `servos.setCenter()`, and did so in

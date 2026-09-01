@@ -25,7 +25,10 @@ servo driver. The bus was believed broken for a long time. It never was.
 `imu` / `gps` object entirely when its device is absent — which turns telemetry
 into a presence indicator for free.
 
-**Every peripheral read loop is bounded.** No exceptions. See Falsified.
+**Every peripheral read loop is bounded — in BUS TRANSFERS, not in calls.**
+No exceptions, and the distinction is the whole lesson: bounding the number of
+`read()` calls looks like a bound and is not one, because a mute peripheral can
+make every single call cost a transfer. See Falsified.
 
 **Servo channel numbers are sparse, and that is load-bearing.** The ears sit on
 PCA9685 channels **15 and 14**, not 0 and 1 — moved 2026-08-27 because the servo
@@ -92,11 +95,30 @@ Measured 2026-08-26 with `pio run -e vibtest`-style probing and `-e i2ctest`:
   terminates**. It hung the whole main loop on the first telemetry tick, freezing
   the eyes on their first frame. A first fix bounded it at 512 iterations, which
   merely converted an infinite loop into ~512 I2C transfers per tick — that was
-  the ~700 ms. It is now a 128-byte budget per call, parsing sentences as they
-  complete, and the cadence is 535 ms.
+  the ~700 ms. A second fix made it a 128-byte budget per call, parsing
+  sentences as they complete, and the cadence became 535 ms.
+* **"A 128-read budget bounds the bus traffic at ~4 transfers."** Third time in
+  the same eight lines of code, found 2026-08-31. That claim was written as a
+  comment directly above the loop and holds only while the GPS has something to
+  say. When it does not, it sends `0x0A` padding; `Adafruit_GPS::read()` drops
+  duplicate `0x0A`, ends up setting `_buff_max = -1`, and then `_buff_idx <=
+  _buff_max` is false on *every* subsequent call — so each of the 128 reads
+  issues its own 32-byte I2C transfer. At 400 kHz that is **~128 ms inside one
+  main-loop iteration**, twice a second, and the eyes are frozen for all of it.
+  Measured on hardware: `loop_max_ms` alternated 53 / 127 ms at idle, the
+  expensive value landing whenever no NMEA sentence had arrived between two
+  telemetry frames. Now bounded by consecutive *empty* reads
+  (`GPS_DRY_READS = 3`), which caps the dry case at 3 transfers and leaves the
+  data-flowing case untouched. Re-measured the same day: idle `loop_max_ms`
+  median **104 ms -> 25 ms**, and the alternation is gone.
 
-The general lesson, which cost time twice here: **a mute peripheral must not be
-able to stop the owl.** Never write an unbounded read loop against one.
+The general lesson, which cost time three times here: **a mute peripheral must
+not be able to stop the owl.** Never write an unbounded read loop against one —
+and note that all three defects were in the *same loop*, each time because the
+bound was placed on the wrong quantity. Bound the thing that costs time (bus
+transfers), not the thing that is easy to count (iterations). The tell is that a
+mute device is the expensive case, which is the opposite of the intuition the
+code was written with.
 
 ## Acceptance
 

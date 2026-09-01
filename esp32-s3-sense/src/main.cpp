@@ -47,10 +47,16 @@ FaceResult_t faceResult = {0};
 // Measured loop rate, reported in telemetry.
 float loopHz = 0.0f;
 
+// Longest single iteration of the last window, in ms. See owl.h for why this is
+// a duration and not a "minimum loop_hz".
+uint32_t loopMaxMs = 0;
+
 // Loop-local bookkeeping: nothing outside this file reads these.
 static uint32_t lastTelemetry = 0;
 static uint32_t loopCount = 0;
 static uint32_t lastLoopMeasure = 0;
+static uint32_t lastIterAt = 0;
+static uint32_t loopMaxMsWindow = 0;
 
 // See owl.h for why this order is load-bearing.
 void bringUpDisplays(bool& leftOk, bool& rightOk) {
@@ -66,6 +72,12 @@ void bringUpDisplays(bool& leftOk, bool& rightOk) {
 // Setup
 // ============================================================================
 void setup() {
+    // VOR Serial.begin(): begin() legt den Sendering nur an, wenn es noch
+    // keinen gibt, also gewinnt hier, wer zuerst kommt. Beides zusammen ist
+    // das, was verhindert, dass ein langsamer Leser am USB-Port die Augen
+    // anhaelt - siehe SERIAL_TX_BUFFER_SIZE in config.h fuer die Messung.
+    Serial.setTxBufferSize(SERIAL_TX_BUFFER_SIZE);
+    Serial.setTxTimeoutMs(SERIAL_TX_TIMEOUT_MS);
     Serial.begin(SERIAL_BAUD);
     delay(100);
 
@@ -151,13 +163,38 @@ void setup() {
 // Main loop
 // ============================================================================
 void loop() {
-    // Gemessene Schleifenrate, Fenster = Telemetrieintervall.
+    // Gemessene Schleifenrate, Fenster = Telemetrieintervall - und daneben die
+    // laengste EINZELNE Runde desselben Fensters.
+    //
+    // Der Mittelwert allein kann ein Stocken nicht zeigen; das ist in diesem
+    // Projekt belegt (siehe loopHz in owl.h: der Mittelwert SANK, als das
+    // Stocken verschwand). Bisher war die Folge der Mittelwerte die einzige
+    // Spur, und die braucht eine Mitschrift ueber viele Frames. Ein Ausreisser
+    // von 2 s verschwindet darin fast vollstaendig: 500 ms Fenster, also faellt
+    // er auf drei Frames mit sehr wenigen Runden - sichtbar, aber nicht
+    // beziffert. Diese Zahl beziffert ihn, in EINEM Frame.
+    //
+    // Gemessen wird die abgeschlossene VORIGE Runde, inklusive delay(16),
+    // Rendern und Telemetrieversand. Folge davon: blockiert der Versand von
+    // Frame N, taucht seine Dauer erst in Frame N+1 auf. Eine Runde zu frueh zu
+    // messen ginge nur, indem man die Runde in Abschnitte zerlegt - und genau
+    // dann misst man wieder Teilsummen statt der Sache selbst.
     loopCount++;
     {
         const uint32_t now = millis();
+        // lastIterAt == 0 ist nur die allererste Runde nach dem Boot: dort ist
+        // die "vorige Runde" das gesamte setup(), und das ist keine Runde.
+        if (lastIterAt != 0) {
+            const uint32_t iter = now - lastIterAt;
+            if (iter > loopMaxMsWindow) loopMaxMsWindow = iter;
+        }
+        lastIterAt = now;
+
         const uint32_t span = now - lastLoopMeasure;
         if (span >= TELEMETRY_INTERVAL_MS) {
             loopHz = (span > 0) ? (loopCount * 1000.0f / span) : 0.0f;
+            loopMaxMs = loopMaxMsWindow;
+            loopMaxMsWindow = 0;
             loopCount = 0;
             lastLoopMeasure = now;
         }

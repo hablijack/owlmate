@@ -51,9 +51,21 @@ Bring-up order, encoded in `bringUpDisplays()` in `main.cpp`:
 
 ## Verified facts
 
-* `LCD_SPI_FREQ` = 16 MHz. Frame time measured: **~61 ms per eye**, 161 ms for
-  both at the earlier 6 MHz. A full frame is 51,200 bytes, so frame time is
-  roughly 820 kbit / clock.
+* `LCD_SPI_FREQ` = 16 MHz. A full frame is 51,200 bytes per eye.
+  **A FULL flush of both eyes takes 149.9 ms and is not clock-bound** — the same
+  149.9 ms at 40 MHz. This bullet asserted "~61 ms per eye, roughly
+  820 kbit / clock" until 2026-08-31, which was the arithmetic this spec's own
+  Falsified section debunks three sections further down; it sat here contradicting
+  it for three days. A Verified-facts entry that was never measured is worse than
+  no entry, because the heading is the claim.
+* **A blink costs 102–126 ms of one loop iteration, and it is the largest
+  remaining cost in the idle loop.** Measured 2026-08-31 over 1729 telemetry
+  frames: idle `loop_max_ms` is 25 ms median with a p95 of 110–115 ms, the tail
+  being the auto-blink at its 2.5–6.5 s cadence. That is the dirty-row flush
+  doing its job — a blink repaints the lid band, not the 51,200 bytes a full
+  frame would cost, which is why it is 110 ms and not 149.9. It is a legitimate
+  cost, not a defect; noted so the next person reading a `loop_max_ms` sequence
+  does not go hunting for it.
 * Pin map, verified on hardware by driving each panel a different colour and
   asking which eye lit up. **"left"/"right" are the owl's own**, per SPEC-000: shared CLK=D4/GPIO5, DIN=D8/GPIO7, RST=D6/GPIO43;
   **left** CS=D7/GPIO44 DC=D10/GPIO9; **right** CS=D9/GPIO8 DC=D3/GPIO4.

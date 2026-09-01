@@ -38,6 +38,43 @@
 // Board & System
 // ============================================================================
 #define SERIAL_BAUD 115200
+
+// --- USB-CDC-Sendepuffer ----------------------------------------------------
+// DER WICHTIGSTE WERT IN DIESEM BLOCK. Er entscheidet, ob ein langsamer Leser
+// am anderen Ende die AUGEN einfrieren kann.
+//
+// Die Voreinstellung der Arduino-Portierung ist 256 Byte (HWCDC::begin()). Eine
+// Telemetriezeile ist rund 900 Byte, passt also NIE hinein: sie wird in Stuecke
+// zerlegt, und jedes Stueck wartet in HWCDC::write() bis zu tx_timeout_ms
+// (100 ms) auf Platz - bis zu 20 Mal hintereinander, bevor aufgegeben wird.
+// Das sind bis zu 2 s, in denen die Hauptschleife steht. Und sie steht dort,
+// wo auch die Augen gezeichnet werden.
+//
+// Auf Hardware gemessen 2026-08-31, waehrend NIEMAND den Port las:
+//   loop_max_ms 2256 und 4023, loop_hz 3,3-11,6 - die Augen sekundenlang tot;
+//   eine Zeile im Mitschnitt exakt bei 256 Byte abgeschnitten (die Ringgroesse,
+//   also die FIFO-Ersetzung in flushTXBuffer(), nicht ein zufaelliger Schnitt).
+// Sobald ein Leser anhing, war der hoechste Wert 228 ms.
+//
+// 4096 fasst gut vier Telemetriezeilen, also rund 2 s Rueckstand bei 2 Hz. Das
+// ueberbrueckt einen Leser, der kurz haengt - und der Raspberry Pi TUT das:
+// dort laeuft die Spracherkennung im selben Prozess. Laenger als das wird
+// verworfen statt gewartet, siehe sendJson() in src/protocol.cpp.
+//
+// Kostet 4 KB internen Heap (von ~197 KB frei). Muss VOR Serial.begin() gesetzt
+// werden: begin() legt den Ring nur an, wenn es noch keinen gibt.
+#define SERIAL_TX_BUFFER_SIZE 4096
+
+// Wartezeit von HWCDC::write() auf Platz im Ring, in Millisekunden.
+//
+// 0 = gar nicht warten. Das ist hier RICHTIG und nicht etwa riskant, weil
+// sendJson() vorher fragt, ob die ganze Zeile hineinpasst, und sonst gar nicht
+// erst schreibt. Damit kann der Schreibvorgang weder blockieren NOCH eine Zeile
+// halb hinausschicken - eine abgeschnittene NDJSON-Zeile kostet den RPi einen
+// Parse-Fehler und ist schlimmer als ein sauber verworfener Frame.
+//
+// Die Voreinstellung 100 ist der Wert, der oben die 2 s erzeugt.
+#define SERIAL_TX_TIMEOUT_MS 0
 #define I2C_SDA 1
 #define I2C_SCL 2
 // Ueberschreibbar per Build-Flag, damit Diagnose-Envs den Bustakt variieren

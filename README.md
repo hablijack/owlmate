@@ -158,7 +158,11 @@ Full design, math and open questions: `specs/013-navigation.spec`.
   "state": "idle",
   "uptime": 12345,
   "loop_hz": 10.5,
+  "loop_max_ms": 34,
+  "tx_dropped": 0,
   "fw": "1.2.0",
+  "heap": { "free": 142880, "min": 121344, "largest": 96256,
+            "psram_free": 7340032, "psram_largest": 6291456 },
   "imu": { "pitch": -2.5, "roll": 0.8, "yaw": 180.3, "calibrated": true,
            "cal": { "sys": 2, "gyro": 3, "accel": 1, "mag": 3, "restored": true } },
   "gps": { "valid": true, "latitude": 52.52, "longitude": 13.405, "altitude": 34.2, "satellites": 8 },
@@ -193,6 +197,23 @@ computing, and `face.stack_free` is the low-water mark of the core-0 detection t
 exist because the sum alone was misleading: the cycle had been "measured" at ~170-200 ms by dividing
 into `loop_hz`, which charged the detector for the eye render. Timed directly it is 48-91 ms, and
 `capture_ms` is 0 in every sample — the camera is never waited on.
+
+`tx_dropped` counts NDJSON lines the firmware threw away rather than block on. The telemetry write
+shares a loop with the eye rendering, so it refuses to wait for a host that is not draining the USB
+CDC port — with the Arduino defaults (a 256-byte TX ring against a ~900-byte line, 100 ms per chunk,
+20 retries) a single frame could stall that loop for **up to 2 s**. A rising `tx_dropped` means the
+reader fell behind, not that the owl went quiet. See `specs/010`.
+
+`loop_max_ms` and `heap.*` were added 2026-08-31 to answer "does something fill up over the
+runtime?", after the owl was reported to render smoothly for the first ~12 minutes and then lag and
+hold the eyes on their last position, recovering instantly on a power cycle. `loop_max_ms` is the
+longest **single** loop iteration in the window that produced `loop_hz` — a mean cannot show a
+stall, and its magnitude names the blocker (~35 ms healthy, ~250 ms one `I2C_TIMEOUT_MS`, up to
+~2000 ms a USB CDC port the host stopped draining). `heap.free` and `heap.largest` must be read as a
+pair: a falling `free` is a leak, a flat `free` with a falling `largest` is fragmentation, and
+neither alone can tell them apart. `heap.min` is the since-boot low-water mark, which survives a
+spike between two 2 Hz samples. Internal and PSRAM are separate because the small allocations that
+churn are all internal and 8 MB of PSRAM would hide them.
 
 While in **UPDATE** state the owl is on an isolated SoftAP (`RobotOwl-Update`); all commands except `heartbeat` are ignored, and telemetry carries the AP credentials under `update` (ssid / password / ip / url).
 
@@ -281,7 +302,7 @@ rpi-brain/                         # Raspberry Pi brain (Python)
 ├── assets/sounds/                 # Owl-call WAVs played through the I2S amp
 ├── tools/
 │   └── gen_expressions.py         # GENERATES brain/expressions.py from the firmware's NAMES[]
-├── tests/                         # 184 tests; run on a plain Mac, no Pi or audio stack needed
+├── tests/                         # 188 tests; run on a plain Mac, no Pi or audio stack needed
 │   ├── run_tests.py               # unittest discovery
 │   ├── stubs.py                   # fakes third-party modules ONLY when not importable
 │   ├── test_protocol.py           # the ESP32<->RPi wire contract (39 tests)
@@ -496,7 +517,7 @@ python main.py [config.yaml]   # Default config path
 | **Face Detection (RPi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
 | **Web UI (RPi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and BNO055 calibration counters, and a map place-picker for navigation. Page lives in `brain/templates/index.html`; the `/api/telemetry` payload is derived from the parsed telemetry dataclass, so it cannot fall behind the firmware (the SoftAP password is the one field deliberately withheld) |
 | **Speech (RPi)** | ✅ Implemented | German. Mic → RMS VAD gate → faster-whisper (`small`, int8 on CPU — the combination recommended for a Pi 4; CTranslate2, not torch) → keyword clusters / navigation triggers. Gated on awake + face + energy so the owl does not react to the TV. Disabled by default. See `specs/014-speech.spec` |
-| **RPi test suite** | ✅ 184 tests | Runs on a plain dev machine with no Pi, mic, PortAudio, faster-whisper, Flask, Jinja2 or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔RPi wire contract (44, `test_protocol.py`) and firmware-vs-RPi drift guards (11, `test_expressions.py`) |
+| **RPi test suite** | ✅ 188 tests | Runs on a plain dev machine with no Pi, mic, PortAudio, faster-whisper, Flask, Jinja2 or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔RPi wire contract (48, `test_protocol.py`) and firmware-vs-RPi drift guards (11, `test_expressions.py`) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
 
 ---

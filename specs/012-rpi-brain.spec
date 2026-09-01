@@ -130,9 +130,19 @@ assembled from the real type cannot drift.
 
 ## Verified facts
 
-* 174 tests at the close of that pass, up from 104 before it (184 as of
-  2026-08-31). `tests/test_protocol.py` (39) and
+* 174 tests at the close of that pass, up from 104 before it (188 as of
+  2026-08-31). `tests/test_protocol.py` (48) and
   `tests/test_expressions.py` (11) are new; neither area had any coverage.
+* **The reader thread's latency is a firmware-visible quantity.** `tx_dropped`
+  counts NDJSON lines the ESP32 threw away rather than block its render loop on
+  (SPEC-001, SPEC-010). It is therefore a measurement *of this process*: a rising
+  value means the read loop fell behind, and the likeliest cause is the speech
+  thread — `faster_whisper` inference holding the GIL — starving it. Verified
+  2026-08-31 from the firmware side: 2838 lines dropped across 22 minutes with no
+  reader, then **not one** across the following 15 minutes with `cat` attached.
+  A gap in telemetry is therefore diagnosable rather than ambiguous, which is the
+  point: telemetry counters are cumulative precisely so a gap costs nothing but
+  the gap.
 * `web_ui.py` 746 → ~360 lines; `brain/templates/index.html` 429 lines, verified
   byte-for-byte identical to the extracted literal (20,257 characters).
 * The whole suite runs on a plain Mac with no Pi, mic, PortAudio, faster-whisper,

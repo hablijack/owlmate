@@ -70,11 +70,24 @@ both sides and fought over expressions; don't reintroduce one.
 ### Firmware (`esp32-s3-sense/`)
 
 ```bash
-pio run                      # build the default env (xiao_esp32s3)
-pio run -t upload            # flash over USB-C
-pio run -t monitor           # serial monitor, 115200 baud
-pio run -e dualtest -t upload  # flash a diagnostic env instead
+pio run -e xiao_esp32s3              # build the main firmware
+pio run -e xiao_esp32s3 -t upload    # flash it over USB-C
+pio run -e xiao_esp32s3 -t monitor   # serial monitor, 115200 baud
+pio run -e dualtest -t upload        # flash a diagnostic env instead
+pio run                              # build ALL 11 envs (the regression check)
 ```
+
+**`-e` is not optional on `-t upload`, and leaving it off is silently
+destructive.** There is no `[platformio] default_envs` in `platformio.ini`, so a
+bare `pio run -t upload` does not flash "the default"; it flashes **all eleven
+envs in file order**, and `[env:softimu]` is last — so the owl ends up running
+the bit-banged IMU probe, printing `Lesefehler` every 500 ms and no NDJSON at
+all. It looks exactly like dead firmware. Cost a flash cycle and a confused
+diagnosis on 2026-08-31, when this block still said `pio run -t upload` and
+described it as flashing the default env.
+
+A bare `pio run` (no target) is fine and useful: it builds all 11, which is the
+"builds clean on every env" check `BACKLOG.md` refers to.
 
 Ten diagnostic envs, each selected with `-e` and each compiling exactly one source file via
 `build_src_filter`. All guard their `setup()`/`loop()` behind a `#if defined(..._ACTIVE)` flag so
@@ -156,7 +169,7 @@ taking the BNO055 calibration with it. Flash the pieces separately:
 ### RPi brain (`rpi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (184 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (188 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
@@ -279,8 +292,13 @@ spent a day on this. `pio run -e i2ctest` settles the question in seconds.
 Three traps in this area, all fixed, all easy to reintroduce:
 
 - `Adafruit_GPS::available()` is hardcoded to `return 1` in I2C mode, so `while (GPS.available())`
-  never terminates. `Sensors::getGps()` uses a fixed byte budget instead. Never write an unbounded
-  read loop against a peripheral here — a mute device must not be able to stop the owl.
+  never terminates. Never write an unbounded read loop against a peripheral here — a mute device
+  must not be able to stop the owl. **And bound the BUS TRANSFERS, not the calls:** `getGps()` had
+  a 128-*read* budget that looked like a bound and was not one. A GPS with nothing to say sends
+  `0x0A` padding, the library then refills on every single call, and all 128 reads become separate
+  32-byte transfers — ~128 ms inside one loop iteration, twice a second, with the eyes frozen for
+  it. It now also breaks after 3 consecutive empty reads. Third defect in that same loop; see
+  `specs/005-i2c-bus.spec` Falsified.
 - `getVector(VECTOR_EULER)` reads from `BNO055_EULER_H_LSB_ADDR`, so the register block is
   **Heading, Roll, Pitch**: `orientation.x` is yaw, `.y` is roll, `.z` is pitch. All three were once
   wired up wrong here.
@@ -396,8 +414,16 @@ every capture starts from a fresh boot; plain `cat /dev/cu.usbmodem*` does
 climbing across two connects). But **discard the first two telemetry frames of a
 `cat` capture**: attaching to a port nobody has been reading collapses the first
 `loop_hz` sample (measured `4 22 40 56 50 …`, with an immediate repeat reading
-`47 47 47 53 …`). `trefferquote.py --datei` does this for you. Without it every
-capture reports a stall that was only the measurement. And the owner has to be *in front of the camera*
+`47 47 47 53 …`). `trefferquote.py --datei` and `--folge` do this for you.
+
+**That collapse was explained as a guess — "presumably the full USB CDC buffer
+only clears once a reader attaches" — until it was measured on 2026-08-31, and
+the guess was pointing at a real firmware defect.** The loop really was stopping,
+for `loop_max_ms` **2256** and **4023** ms at a time, because `Serial.println()`
+of a ~900-byte telemetry line blocked on a 256-byte TX ring whenever nobody
+drained the port. Fixed the same day (see `specs/010`); the artifact is now a
+mild one, but the general lesson is sharper than the specific fix: **an artifact
+you have explained but not measured is an unread bug report.** And the owner has to be *in front of the camera*
 for any detection number to mean anything: several readings of "0 hits" and
 "31 %" were nobody standing there, or standing further away, not a fault.
 `tools/trefferquote.py` reports hit rate, face size and the gaze-target interval

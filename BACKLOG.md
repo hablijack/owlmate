@@ -27,6 +27,7 @@ come apart:
 | 2 | ready, but cheap and low-value alone | a 2-minute confirmation, best folded into the next flash |
 | 5 | blocked *through* 3 | navigation cannot be verified without a trustworthy heading |
 | **4b** | **ready, needs the owl** | gaze smoothing (unblocked 2026-08-31), square crop, field of view |
+| **4c** | done | the ~12-minute slowdown: two causes found, fixed and verified 2026-08-31 |
 | **6** | items 1–3 **done and flashed** | item 4 stays blocked (no Flask here); items 5–6 open |
 
 So the dependency chain 0→5 is stalled at 3 until the IMU arrives. Step 6 was
@@ -317,6 +318,106 @@ deflection (it reaches 69.5 px of the 80 px disc, against 68.9 for the shipped
 the middle half of its camera view. Nobody has measured what cone the owl
 actually needs — that depends on where it ends up sitting.
 
+### Step 4c — The slowdown after ~12 minutes  `[x]` RESOLVED 2026-08-31
+
+**Reported by the owner:** the eyes track smoothly for a while, then lag and
+hold on their last position; a re-plug fixes it instantly. Not reproducible on
+demand, not at a fixed runtime.
+
+**Two separate causes, both found, both fixed, both verified on hardware.**
+
+**Cause 1 — the telemetry write blocked the render loop.** `sendTelemetry()`
+runs on core 1, in the iteration that draws the eyes. The Arduino USB CDC layer
+gives it a 256-byte TX ring and a 100 ms per-chunk timeout with 20 retries; a
+telemetry line is ~900 bytes and therefore always chunked. With nothing draining
+the port, one frame stalled the loop for up to 2 s. Measured: `loop_max_ms`
+**2256** and **4023**, `loop_hz` **3.3**, and a captured line truncated at
+exactly 256 bytes. Fixed by a 4096-byte ring, a 0 ms write timeout, and a
+`availableForWrite()` check that drops a frame rather than truncate or wait
+(`tx_dropped` counts them). Re-measured, same condition, port unread 73 s then
+attached: `loop_max_ms` **23 ms**, `tx_dropped` 139, no stall. See SPEC-010.
+
+**Cause 2 — `getGps()` bounded the wrong quantity.** Its 128-*read* budget was a
+bound on calls, not on bus transfers. A GPS with nothing to say sends `0x0A`
+padding, the library refills on every call, and all 128 reads become separate
+32-byte transfers: **~128 ms in one loop iteration**, twice a second. Measured:
+idle `loop_max_ms` alternating **53 / 127 ms**, the expensive value landing
+whenever no NMEA sentence had arrived between two telemetry frames. Fixed by
+also breaking after 3 consecutive empty reads. Re-measured: idle `loop_max_ms`
+median **104 -> 25 ms**, alternation gone. Third defect in that same eight-line
+loop — see `specs/005-i2c-bus.spec` Falsified.
+
+**What is left at idle is the blink**, ~102-117 ms every 2.5-6.5 s, which is a
+genuine full redraw of both eyes and not a defect.
+
+**Ruled out with evidence, so do not re-derive these:**
+
+| candidate | evidence |
+|---|---|
+| heap leak | `heap.free` in a 1.3 KB band, no trend, over 216 frames |
+| fragmentation | `heap.largest` = **106496 in all 216 frames**, one single value |
+| vibration ISR | `vibration.pulses` = **0** for the whole run |
+| core 0 / inference | `infer_ms` median 65 -> 66; `capture_ms` 0 in all 216 frames |
+| thermal | a re-plug fixes it instantly, and the die is still hot two seconds later |
+
+**Left open by this work, both separate defects:**
+
+* **The SW-420 registered zero edges** while a person moved around in front of
+  the owl for two minutes. Vibration wake is currently dead — pot too
+  insensitive, or the module is disconnected. Nothing to do with the slowdown.
+* ~~`cam_hal: FB-OVF` / `FB-SIZE`~~ **CLOSED 2026-08-31 by a long run.** Both
+  appeared twice, immediately after the 2.2 s stall, and stopped. A 15-minute
+  capture on the fixed firmware (1729 telemetry frames, covering 39.8 min of
+  runtime) contains **zero** `cam_hal` lines and **zero** non-JSON lines of any
+  kind. They were a consequence of the stall region, and went with it. They cost
+  nothing while they happened either: `capture_ms` was 0 in every frame, so the
+  detector never waited on the discarded frames — `fb_count = 2` had the next one
+  ready. If they ever return, the lever for keeping them off the protocol port is
+  `CONFIG_LOG_DEFAULT_LEVEL_NONE`, which `cam_hal.c:44` explicitly honours.
+
+**The long run, 2026-08-31 — the direct answer to "does something fill up?"**
+15 minutes of capture on the fixed firmware, 1729 frames, covering runtime 1.6
+min to 41.3 min:
+
+| | result |
+|---|---|
+| `heap.free` drift over 39.8 min | **-20 bytes** |
+| `heap.largest` | **102400 — one single value, all 1729 frames** |
+| `loop_max_ms` median, per 2-min slice | **25 ms in every slice**, 24 min through 40 min |
+| `loop_max_ms` p95 / max | 110-115 / 117-126 (the auto-blink redraw) |
+| `loop_hz` median, per 2-min slice | **61.4 in every slice** |
+| `infer_ms` | 50 first quarter, 50 last quarter |
+| `capture_ms` | 0 in every frame |
+| non-JSON / truncated lines | **0** |
+
+Nothing fills up and nothing degrades with runtime. The "~12 minutes" in the
+original report was not a clock — it was however long it took the host to stop
+draining the port.
+
+`tx_dropped` is the other half of that: the board ran **22 minutes unread**
+before this capture attached, and dropped 2838 lines in that time (139 -> 2977)
+without ever stalling. The moment `cat` attached it froze at 2977 and did not
+move again for the whole 15 minutes. Zero drops with a reader present; graceful
+degradation without one. Before the fix, that same unread condition produced
+`loop_max_ms` 2256 and 4023.
+
+**What this run does NOT cover:** nobody was in front of the camera, so it is the
+IDLE path. Core 1 skips the eye redraw and core 0's inference is 48-50 ms
+instead of 66-110 ms. A long run WITH someone tracked is still worth doing before
+calling the busy path proven.
+
+**How this was measured**, for the next investigation: `cat` does not assert
+DTR/RTS, so a running owl can be watched without restarting it.
+
+```bash
+cat /dev/cu.usbmodem* | tee lauf.ndjson \
+    | python3 esp32-s3-sense/tools/trefferquote.py --folge
+python3 esp32-s3-sense/tools/trefferquote.py --datei lauf.ndjson   # summary
+```
+
+`--folge` reads a PIPE, never the port; `--live` opens it with pyserial and
+would restart the owl.
+
 ### Step 5 — Verify navigation on hardware  `[ ]`
 
 Needs Step 3 done (a trustworthy heading) and a sky-view GPS fix.
@@ -552,7 +653,7 @@ wrong; run the lot only after mechanical work.
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
 | detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
-| RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 184 tests pass |
+| RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 188 tests pass |
 | firmware/RPi drift | `cd rpi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
@@ -573,7 +674,7 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` blocked
 ## Refactoring pass — 2026-08-31 (code smells)
 
 Six small cleanups, no behaviour change intended. All 11 PlatformIO envs build,
-the `-DHARDWARE_CHECK=1` variant builds, 184 RPi tests pass, `check_docs.py`
+the `-DHARDWARE_CHECK=1` variant builds, 188 RPi tests pass, `check_docs.py`
 passes.
 
 **Flashed and verified on the owl, 2026-08-31** (four pieces separately, never

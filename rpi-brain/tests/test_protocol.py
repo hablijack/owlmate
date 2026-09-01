@@ -3,7 +3,7 @@ Protocol tests: the ESP32 -> RPi telemetry parser and message dispatcher.
 
 `SerialHandler.parse_telemetry()` / `._handle_message()` / `.read_loop()` are
 the RPi half of the NDJSON contract with `sendTelemetry()` in
-esp32-s3-sense/src/main.cpp. Until now they had NO direct test coverage at all:
+esp32-s3-sense/src/protocol.cpp. Until now they had NO direct test coverage at all:
 serial_handler was imported by seven test modules, but only to build Telemetry
 objects by hand -- the parsing itself was never exercised.
 
@@ -26,7 +26,7 @@ install_stub_modules()
 from brain.serial_handler import SerialHandler, Telemetry  # noqa: E402
 
 
-# A complete telemetry frame, matching sendTelemetry() in main.cpp field for
+# A complete telemetry frame, matching sendTelemetry() in protocol.cpp field for
 # field. Every optional section is present here; individual tests drop parts of
 # it to check the defaults.
 FULL_FRAME = {
@@ -58,6 +58,12 @@ FULL_FRAME = {
         "attempts": 233, "capture_ms": 27, "infer_ms": 174, "stack_free": 3120,
     },
     "loop_hz": 10.5,
+    "loop_max_ms": 34,
+    "tx_dropped": 0,
+    "heap": {
+        "free": 142880, "min": 121344, "largest": 96256,
+        "psram_free": 7340032, "psram_largest": 6291456,
+    },
 }
 
 
@@ -153,9 +159,9 @@ class TestParseTelemetrySections(unittest.TestCase):
 
 
 class TestDiagnosticFields(unittest.TestCase):
-    """The seven fields the firmware sends to make invisible failures visible.
+    """The fields the firmware sends to make invisible failures visible.
 
-    Every one of these was being sent by sendTelemetry() and silently discarded
+    Seven of them were being sent by sendTelemetry() and silently discarded
     by the RPi until 2026-08-27. They are the difference between "the sensor is
     quiet" and "the sensor is dead", so a dropped diagnostic field is worse than
     a missing feature -- it makes a fault look like normal operation.
@@ -190,6 +196,42 @@ class TestDiagnosticFields(unittest.TestCase):
         # Cumulative hits. `detected` is an instantaneous 2 Hz sample and misses
         # sporadic detections; this is what exposes them.
         t = parse(FULL_FRAME)
+        self.assertEqual(t.face.total, 57)
+
+    def test_loop_max_ms(self):
+        # The mean loop_hz next to it cannot show a stall: on this owl the mean
+        # went DOWN when a visible freeze was fixed (see owl.h). A single
+        # 2000 ms iteration barely moves a 500 ms-windowed mean but is stated
+        # outright here.
+        t = parse(FULL_FRAME)
+        self.assertEqual(t.loop_max_ms, 34)
+
+    def test_heap_levels(self):
+        # free AND largest, because only the pair separates a leak from
+        # fragmentation. See HeapData.
+        t = parse(FULL_FRAME)
+        self.assertEqual(t.heap.free, 142880)
+        self.assertEqual(t.heap.min, 121344)
+        self.assertEqual(t.heap.largest, 96256)
+        self.assertEqual(t.heap.psram_free, 7340032)
+        self.assertEqual(t.heap.psram_largest, 6291456)
+
+    def test_tx_dropped(self):
+        # Lines the firmware threw away rather than block the render loop on.
+        # Rising means the RPi reader fell behind -- not that the owl went
+        # quiet, which is the reading a missing counter would invite.
+        t = parse(frame(tx_dropped=17))
+        self.assertEqual(t.tx_dropped, 17)
+
+    def test_heap_and_loop_max_default_on_older_firmware(self):
+        # A build from before 2026-08-31 sends neither. That must read as "not
+        # reported", not as "the heap is exhausted and the loop never stalls".
+        t = parse(frame(heap=None, loop_max_ms=None, tx_dropped=None))
+        self.assertEqual(t.heap.free, 0)
+        self.assertEqual(t.heap.largest, 0)
+        self.assertEqual(t.loop_max_ms, 0)
+        self.assertEqual(t.tx_dropped, 0)
+        # The rest of the frame must still parse.
         self.assertEqual(t.face.total, 57)
 
     def test_face_attempts(self):

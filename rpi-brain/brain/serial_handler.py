@@ -149,6 +149,42 @@ class NavigationState:
 
 
 @dataclass(frozen=True)
+class HeapData:
+    """ESP32 heap levels, the counterpart to FaceDetection.stack_free.
+
+    Added 2026-08-31 because "does something fill up over the runtime?" was not
+    answerable on hardware: the owl was reported to render smoothly for the
+    first ~12 minutes and then lag and hold the eyes on their last position,
+    recovering instantly on a power cycle. Nothing in telemetry could tell a
+    leak from fragmentation from a blocked loop.
+
+    `free` and `largest` have to be read as a PAIR -- that is the whole reason
+    both are here:
+
+        free falls                  -> a leak
+        free flat, largest falls    -> FRAGMENTATION, invisible in `free` alone
+        min low, free recovered     -> there was a spike and it passed
+
+    `min` is the low-water mark since boot, so it is monotonic and remembers a
+    transient the 2 Hz sampling would otherwise step over.
+
+    Internal and PSRAM are separate because they carry different loads:
+    JSON/String/esp-dl list nodes are all under
+    CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL (16 KB) and land in internal RAM, while
+    the camera buffers, the crop buffer and the two eye framebuffers are in
+    PSRAM. Summed, the internal heap would vanish into the noise of 8 MB.
+
+    All values are bytes; 0 means the firmware did not send the field (any
+    build before 2026-08-31).
+    """
+    free: int = 0
+    min: int = 0
+    largest: int = 0
+    psram_free: int = 0
+    psram_largest: int = 0
+
+
+@dataclass(frozen=True)
 class Telemetry:
     """One complete telemetry frame from the ESP32.
 
@@ -164,6 +200,24 @@ class Telemetry:
     # detection may run; eye rendering and the loop's own delay decide how
     # often it actually does. Without this the two are indistinguishable.
     loop_hz: float = 0.0
+    # Longest SINGLE loop iteration in the window that produced `loop_hz`, in
+    # ms. The mean cannot show a stall -- that is documented on the firmware
+    # side, where the mean loop_hz went DOWN as a visible stall disappeared.
+    # This one can, and its MAGNITUDE names the blocker: ~35 ms is healthy,
+    # ~250 ms is one I2C_TIMEOUT_MS, and up to ~2000 ms is the USB CDC write
+    # giving up on a host that stopped reading the port. 0 on firmware older
+    # than 2026-08-31.
+    loop_max_ms: int = 0
+    # NDJSON lines the firmware DROPPED rather than block on, cumulative since
+    # boot. The ESP32 writes telemetry from the same loop that renders the eyes,
+    # so it refuses to wait for a host that is not draining the USB CDC port --
+    # with the Arduino defaults one frame could stall that loop for up to 2 s
+    # (measured 2026-08-31: loop_max_ms 2256, loop_hz 3.3, eyes visibly dead).
+    # A rising value means THIS PROCESS fell behind, not that the owl is quiet:
+    # the likeliest cause is the reader thread being starved by speech
+    # inference. Telemetry is a 500 ms snapshot and its counters are cumulative,
+    # so a dropped frame costs nothing but the gap.
+    tx_dropped: int = 0
     imu: IMUData = field(default_factory=IMUData)
     gps: GPSData = field(default_factory=GPSData)
     vibration: VibrationData = field(default_factory=VibrationData)
@@ -172,13 +226,14 @@ class Telemetry:
     face: FaceDetection = field(default_factory=FaceDetection)
     eye_expression: str = "neutral"
     navigation: NavigationState = field(default_factory=NavigationState)
+    heap: HeapData = field(default_factory=HeapData)
 
 
 # ============================================================================
 # Wire format
 #
 # One row per field: (wire key, attribute, coercion). These tables ARE the
-# contract with sendTelemetry() in esp32-s3-sense/src/main.cpp -- adding a
+# contract with sendTelemetry() in esp32-s3-sense/src/protocol.cpp -- adding a
 # firmware field means adding one row here and one field to the dataclass
 # above, and nothing else.
 #
@@ -237,6 +292,13 @@ _UPDATE_FIELDS = (
 _NAVIGATION_FIELDS = (
     ("active", "active", bool),
     ("angle", "angle", float),
+)
+_HEAP_FIELDS = (
+    ("free", "free", int),
+    ("min", "min", int),
+    ("largest", "largest", int),
+    ("psram_free", "psram_free", int),
+    ("psram_largest", "psram_largest", int),
 )
 
 
@@ -423,6 +485,8 @@ class SerialHandler:
             state=_scalar(data, "state", str, "idle"),
             uptime_ms=_scalar(data, "uptime", int, 0),
             loop_hz=_scalar(data, "loop_hz", float, 0.0),
+            loop_max_ms=_scalar(data, "loop_max_ms", int, 0),
+            tx_dropped=_scalar(data, "tx_dropped", int, 0),
             firmware=_scalar(data, "fw", str, ""),
             eye_expression=_scalar(data, "eye", str, "neutral"),
             imu=_section(
@@ -441,6 +505,7 @@ class SerialHandler:
                         if nav_raw else NavigationState()),
             servos=servos,
             face=_section(FaceDetection, _FACE_FIELDS, _as_dict(data.get("face"))),
+            heap=_section(HeapData, _HEAP_FIELDS, _as_dict(data.get("heap"))),
         )
 
     def _handle_message(self, line: str, callback: Optional[Callable[[Telemetry], None]] = None):

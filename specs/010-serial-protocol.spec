@@ -35,7 +35,9 @@ times over during hardware debugging.
 
 **Telemetry every `TELEMETRY_INTERVAL_MS` (500 ms).** Object shape:
 
-    {"type":"telemetry","state":…,"uptime":…,"loop_hz":…,"fw":…,
+    {"type":"telemetry","state":…,"uptime":…,"loop_hz":…,"loop_max_ms":…,
+     "tx_dropped":…,"fw":…,
+     "heap":{"free","min","largest","psram_free","psram_largest"},
      "imu":{"pitch","roll","yaw","calibrated","cal":{"sys","gyro","accel","mag","restored"}},
      "gps":{"valid","latitude","longitude","altitude","satellites"},
      "vibration":{"detected","count","pulses"},
@@ -67,6 +69,72 @@ opposite fixes. The pair settled it in one measurement — attempts at 4.4/s
 against a `FACE_DETECT_INTERVAL_MS` promising 10/s, so the loop was the cause
 (SPEC-009). Prefer shipping the denominator with the counter rather than adding
 it during the next investigation.
+
+**The telemetry write must never block the render loop, and by default it
+did.** Fixed 2026-08-31, and this is the answer to the report that prompted the
+`heap`/`loop_max_ms` fields in the first place. `sendTelemetry()` runs on core 1,
+in the same iteration that draws the eyes. The Arduino USB CDC layer gives that
+write a **256-byte** ring buffer and a 100 ms per-chunk timeout with up to 20
+retries — and a telemetry line is ~900 bytes, so it never fits and is always
+chunked. When the host stops draining, one frame stalls the loop for up to 2 s.
+Measured on hardware with nothing reading the port: `loop_max_ms` **2256** and
+**4023**, `loop_hz` **3.3**, and one captured line truncated at exactly 256
+bytes — the ring size, i.e. the driver's FIFO-replacement path, not a random cut.
+
+Three parts, and all three are needed:
+
+* `SERIAL_TX_BUFFER_SIZE` 4096 (set **before** `Serial.begin()`, which only
+  creates the ring if there is none) so a whole line fits and the ISR drains it
+  in the background;
+* `SERIAL_TX_TIMEOUT_MS` 0, so the write cannot wait;
+* `sendJson()` asks `availableForWrite()` whether the **entire** line fits and
+  drops the frame if not. Dropping beats truncating: a half-written NDJSON line
+  costs the RPi a parse error, while a dropped frame costs only a gap — telemetry
+  is a 500 ms snapshot and its counters are cumulative, so nothing is lost.
+
+`tx_dropped` carries the count, because a silent drop is exactly the invisible
+failure `vibration.pulses` and `face.attempts` exist to prevent: the RPi would
+otherwise see a gap and be unable to tell "the owl went quiet" from "I was too
+slow". Verified on hardware the same day, same condition (port unread for 73 s,
+then attached): `loop_max_ms` **23 ms**, `tx_dropped` 139. No stall.
+
+**This is a production requirement, not a bench nicety.** The RPi runs speech
+recognition in the same process; if that thread starves the reader, the owl's
+eyes must not freeze. The behaviour is the job and the telemetry is the
+by-product, so the by-product yields.
+
+**A level needs its low-water mark and its largest block, not just its
+level.** `heap.*` and `loop_max_ms` were added 2026-08-31, prompted by a report
+that the owl renders smoothly for the first ~12 minutes and then lags and holds
+the eyes on their last position, recovering instantly on a power cycle. Reading
+the firmware ruled out a leak (every `esp_camera_fb_get()` is returned, esp-dl
+clears its result list per run and caps it at top_k, the crop buffer is
+allocated once) — but it could not rule out *fragmentation*, because the RPi had
+no heap field at all to look at. `free` alone would not have settled it either:
+a heap that is fragmented rather than leaking shows a flat `free` and a
+shrinking `largest`, so the pair is the measurement and either one alone is not.
+`min` is the since-boot low-water mark, which is what survives a spike between
+two 2 Hz samples. Internal and PSRAM are separate rather than summed — under
+`CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` the small allocations that churn (JSON,
+String, esp-dl nodes) are all internal, and 8 MB of PSRAM would hide them.
+
+**A mean cannot show a stall, so the outlier must be sent too.** `loop_max_ms`
+is the longest single loop iteration in the window that produced `loop_hz`.
+`loop_hz` is a real rate (a count over a window) and this is a real duration;
+neither is derived from the other, and it is deliberately NOT expressed as a
+"minimum loop_hz" — the reciprocal of one iteration is a duration wearing a
+rate's clothing, which is the exact mistake SPEC-009 Falsified records. Its
+*magnitude* is the diagnosis: ~35 ms is healthy, ~250 ms is one
+`I2C_TIMEOUT_MS` (a slave stopped answering), and up to ~2000 ms is
+`HWCDC::write()` abandoning a host that stopped draining the USB CDC port (20
+retries × a 100 ms tx timeout). The eyes are frozen for every millisecond of it,
+and a 500 ms-windowed mean barely registers any of it.
+
+Honest cost, recorded here so nobody rediscovers it: the five heap fields
+lengthen the telemetry line by ~100 bytes. The HWCDC TX ring buffer is 256
+bytes and the line was already far past that, so if USB backpressure IS the
+cause, the instrument makes the symptom marginally worse. Accepted, because
+without the fields the hypothesis cannot be tested at all.
 
 **A duration must be reported split, not summed.** `face.capture_ms` and
 `face.infer_ms` were added 2026-08-31 with the move of the inference to core 0,
