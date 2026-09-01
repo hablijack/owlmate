@@ -356,19 +356,12 @@ genuine full redraw of both eyes and not a defect.
 |---|---|
 | heap leak | `heap.free` in a 1.3 KB band, no trend, over 216 frames |
 | fragmentation | `heap.largest` = **106496 in all 216 frames**, one single value |
-| vibration ISR | `vibration.pulses` = **0** for the whole run |
+| vibration ISR | `vibration.pulses` = **0** for the whole run — nobody tapped, so this is the expected reading and rules the ISR out as a CPU load, nothing more |
 | core 0 / inference | `infer_ms` median 65 -> 66; `capture_ms` 0 in all 216 frames |
 | thermal | a re-plug fixes it instantly, and the die is still hot two seconds later |
 
-**Left open by this work, both separate defects:**
+**Left open by this work:**
 
-* **The SW-420 is alive but far too insensitive.** It registered **zero** edges
-  while a person moved around in front of the owl for two minutes, and **20** in
-  a 15-minute session — against the 3252 edges in 28 s of deliberate tapping
-  that `config.h` records. So the module is not disconnected, which the first
-  reading suggested; its pot is simply turned down too far to notice a person.
-  Vibration wake and the 4-tap OTA entry are effectively dead until it is
-  re-adjusted. Nothing to do with the slowdown.
 * ~~`cam_hal: FB-OVF` / `FB-SIZE`~~ **CLOSED 2026-08-31 by a long run.** Both
   appeared twice, immediately after the 2.2 s stall, and stopped. A 15-minute
   capture on the fixed firmware (1729 telemetry frames, covering 39.8 min of
@@ -437,6 +430,16 @@ closed on both paths.
   frontal* faces, and someone asked to "keep moving" for 15 minutes drifts
   toward profile poses. Worth a deliberate re-test before treating it as
   anything else.
+
+**A zero read under conditions that produce zero is not a finding.** This
+session briefly recorded "the SW-420 is far too insensitive" because
+`vibration.pulses` stayed near 0 across two long captures. Nobody had tapped the
+owl in either — it sat on a desk, and an SW-420 detects knocks, not a person
+sitting nearby. The 4-tap OTA entry had already been tapped by hand and works
+(Step 6 item 2). Same shape as the "0 hits" readings that were nobody standing
+in front of the camera, and it went in despite that trap being documented two
+files away. **State what a healthy reading would look like before calling one
+unhealthy.**
 
 **How this was measured**, for the next investigation: `cat` does not assert
 DTR/RTS, so a running owl can be watched without restarting it.
