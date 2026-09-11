@@ -72,6 +72,7 @@ commit messages.
 | [012](012-rpi-brain.spec) | RPi brain internals: ownership, packaging, testing | implemented |
 | [013](013-navigation.spec) | Navigation — the owl as a compass | partial |
 | [014](014-speech.spec) | Speech — hearing the user and reacting | partial |
+| [015](015-orangepi-audio.spec) | Orange Pi A733 I2S audio stack (amp + mic) | open |
 
 ## Conventions used throughout
 

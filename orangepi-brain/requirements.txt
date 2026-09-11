@@ -1,0 +1,36 @@
+# Robot Owl OrangePi Brain - Python dependencies
+#
+# Compared to the RPi brain, the OrangePi drops the torch/CTranslate2 stack
+# (opencv-python-headless, soundfile, faster-whisper, ctranslate2) and adds two
+# self-contained C++ runtimes: whisper.cpp (ASR) and llama.cpp (the optional
+# emotion layer). Both are imported lazily (only when their feature is enabled),
+# so the brain still starts on a machine where they are absent.
+pyserial>=3.5
+numpy>=1.24.0
+pyyaml>=6.0
+flask>=3.0.0
+# Audio (MAX98357A I2S amp): playback via ALSA 'aplay'; WAV built with stdlib
+# (wave + struct). No extra Python package required -- 'aplay' ships with the
+# OS (alsa-utils). The amp and the mic share ONE I2S card (I2S0), so the same
+# card is used for playback here and capture in speech.py.
+#
+# Speech recognition (ICS43434 I2S mic -> offline whisper.cpp ASR). Imported
+# lazily by brain/speech.py ONLY when speech.enabled is true, so the brain still
+# runs on a machine with no mic and the heavy ASR import stays out of normal
+# startup. 'sounddevice' needs the PortAudio system library (installed by
+# setup.sh). The mic is captured at the card's native 48 kHz / stereo and
+# resampled to 16 kHz in the worker before the VAD + ASR.
+sounddevice>=0.4.6
+# ASR engine is whisper.cpp (NOT faster-whisper): a single self-contained C++
+# runtime with no torch / CTranslate2 dependency, which is what makes it a good
+# fit for the OrangePi. 'pywhispercpp' is the Python binding (import whispercpp);
+# it bundles/links the whisper.cpp runtime. The model is a LOCAL .bin/.gguf file
+# downloaded by setup.sh (see config.yaml speech.model), not pulled from a hub at
+# runtime -- the OrangePi runs offline.
+pywhispercpp
+# Optional emotion layer (brain/emotion.py): a small GGUF language model
+# (ringorsolya/Emotion_RoBERTa_german6_v7) run through llama.cpp to tag a
+# transcript with a sentence-level emotion. 'llama-cpp-python' is the binding
+# (import llama_cpp). Imported lazily ONLY when emotion.enabled is true, so the
+# brain runs without it by default. The GGUF is downloaded by setup.sh.
+llama-cpp-python

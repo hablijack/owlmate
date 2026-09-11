@@ -65,6 +65,14 @@ telemetry, monitors health, and sends policy (`sleep`/`wake`) plus *temporary* o
 (`expression`/`gaze`, 3 s) and navigation aim angles. A duplicate state machine used to exist on
 both sides and fought over expressions; don't reintroduce one.
 
+There is also an **Orange Pi variant**: `orangepi-brain/` runs the same Python
+brain on an Orange Pi Zero 3W (Allwinner A733) instead of the Pi, where the
+MAX98357A amp and an ICS43434 microphone share the A733's I2S0 bus. The A733's
+I2S controller is not the Pi's clean driver — it needs a small **custom kernel
+driver** (`orangepi-brain/audio/`) for a one-bit data-delay quirk that a DT
+overlay cannot express. That stack, and what is still unverified on hardware,
+is `specs/015-orangepi-audio.spec`.
+
 ## Commands
 
 ### Firmware (`esp32-s3-sense/`)

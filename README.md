@@ -61,6 +61,14 @@ short effects (beep/chirp/happy/sad/alert) in-process (`brain/audio.py`) and
 plays them with `aplay`; if the amp/I2S is absent it just logs and no-ops.
 Full pin map + the SD-MODE-to-3.3V gotcha are in `WIRING.md`.
 
+**Orange Pi variant.** `orangepi-brain/` runs the same brain on an Orange Pi
+Zero 3W (Allwinner A733) instead of the Pi. There the MAX98357A amp **and** an
+ICS43434 microphone share the A733's I2S0 bus on one 48 kHz ALSA card (`owl`),
+so the owl can both talk *and* hear. The A733's I2S controller needs a small
+custom kernel driver (a one-bit data-delay fix that is not expressible in a DT
+overlay) rather than the Pi's `hifiberry-i2s-lite` overlay — see
+`specs/015-orangepi-audio.spec`.
+
 ---
 
 ## Software Architecture
@@ -321,6 +329,15 @@ rpi-brain/                         # Raspberry Pi brain (Python)
     └── banner.py                  # Startup banner
 ```
 
+```
+orangepi-brain/                    # Orange Pi Zero 3W (A733) brain — same brain, real I2S mic + amp
+├── main.py, config.yaml, requirements.txt   # as rpi-brain, but speech uses whisper.cpp (not faster-whisper)
+├── setup.sh                       # full provisioning: kernel module + DT overlay + asound + wizard + model + reboot
+├── deploy/                        # install.sh (light redeploy) + systemd unit + udev rule
+├── audio/                         # owl_i2s kernel driver + DT overlay + asound.conf (the A733 'owl' sound card)
+└── brain/                         # same modules as rpi-brain/brain; speech via whisper.cpp
+```
+
 > The RPi mirrors nothing by hand. `brain/expressions.py` is generated from the
 > firmware's `NAMES[]`, and the telemetry field tables in `serial_handler.py` are
 > the single place a new field is added. Both are drift-guarded by tests — see
@@ -384,6 +401,31 @@ aplay -l                                # confirm the I2S amp is visible
 anything later, edit `/opt/robot-owl/rpi-brain/config.yaml` (or re-run
 `sudo ./setup.sh` to go through the wizard again). For an unattended install use
 `sudo ./setup.sh --non-interactive` to skip the wizard and keep the bundled defaults.
+
+### Orange Pi Brain — one-command setup
+
+On a fresh DietPi install on an Orange Pi Zero 3W, the whole side is set up
+with a single script:
+
+```bash
+cd orangepi-brain
+sudo ./setup.sh
+```
+
+`setup.sh` (idempotent — safe to re-run) does, in order:
+
+1. **apt** — the Python/ALSA packages plus the kernel-module build tools and `dtc`.
+2. **Kernel module** — builds + installs `owl_i2s` (the A733 I2S sound card) and loads it at boot.
+3. **DT overlay** — compiles + installs + enables `owl-i2s-overlay` (muxes the I2S0 pins); needs a reboot.
+4. **asound.conf** — installs the shared 48 kHz `owl` card config.
+5. **Install + wizard** — copies the brain to `/opt/robot-owl/orangepi-brain`, builds a `.venv`, and runs a config wizard (serial port, web UI, speech + whisper.cpp model, auto-sleep).
+6. **Model** — pre-downloads the whisper.cpp model so the first transcription is instant.
+7. **User + udev + systemd** — creates the `robotowl` user, installs the serial-port udev rule, and enables `robot-owl-brain.service`.
+8. **Reboot** — applies the DT overlay; the owl auto-starts on boot.
+
+To redeploy after changing brain code (without touching the audio stack), use
+`sudo deploy/install.sh`. The A733 specifics — and what is still unverified on
+hardware — are in `specs/015-orangepi-audio.spec`.
 
 ---
 

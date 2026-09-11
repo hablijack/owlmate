@@ -1,0 +1,109 @@
+/*
+ * Robot Owl I2S sound card overlay for Orange Pi Zero 3W (Allwinner A733).
+ *
+ * Wires the 40-pin header's I2S0 pins to a MAX98357A amplifier (DOUT) and an
+ * ICS43434 MEMS microphone (DIN). Both share one BCLK/LRCLK pair; neither uses
+ * MCLK, so PB4 / I2S0_MCLK (header pin 7) is deliberately left unclaimed.
+ *
+ * Header routing:
+ *   pin 12  PB5  I2S0 BCLK  -> MAX98357A SCLK  + ICS43434 SCK
+ *   pin 35  PB6  I2S0 LRCK  -> MAX98357A LRCLK + ICS43434 WS
+ *   pin 40  PB7  I2S0 DOUT  -> MAX98357A DIN
+ *   pin 38  PB8  I2S0 DIN   <- ICS43434 SD
+ *
+ * The stock i2s0_mach is disabled and the owl-i2s machine driver (audio/owl_i2s.c)
+ * takes over i2s0_plat with a dummy codec, because the MAX98357A and ICS43434
+ * are not I2C-programmable ASoC codecs. Modelled on the Whisplay Zero 3W overlay
+ * (the proven A733 reference), minus its I2C codec / regulators / MCLK.
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	metadata {
+		title = "Enable the Robot Owl I2S sound card on Orange Pi Zero 3W";
+		compatible = "xunlong,orangepi-zero3w", "allwinner,sun60i-a733";
+		category = "misc";
+		exclusive = "i2s0_plat", "i2s0_mach",
+			    "PB5", "PB6", "PB7", "PB8";
+		description = "Drive the MAX98357A amp and ICS43434 mic on I2S0.";
+	};
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			owl_i2s: owl-i2s {
+				compatible = "robotowl,owl-i2s";
+				i2s-controller = <&i2s0_plat>;
+				status = "okay";
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&pio>;
+		__overlay__ {
+			owl_i2s0_bclk: owl-i2s0-bclk {
+				pins = "PB5";
+				function = "i2s0_bclk";
+				allwinner,drive = <1>;
+				bias-disable;
+			};
+
+			owl_i2s0_lrck: owl-i2s0-lrck {
+				pins = "PB6";
+				function = "i2s0_lrck";
+				allwinner,drive = <1>;
+				bias-disable;
+			};
+
+			owl_i2s0_din: owl-i2s0-din {
+				pins = "PB8";
+				function = "i2s0_din0";
+				allwinner,drive = <1>;
+				bias-pull-down;
+			};
+
+			owl_i2s0_dout: owl-i2s0-dout {
+				pins = "PB7";
+				function = "i2s0_dout0";
+				allwinner,drive = <1>;
+				bias-pull-down;
+			};
+
+			owl_i2s0_sleep: owl-i2s0-sleep {
+				pins = "PB5", "PB6", "PB7", "PB8";
+				function = "io_disabled";
+				allwinner,drive = <1>;
+				bias-disable;
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&i2s0_plat>;
+		__overlay__ {
+			tdm-num = <0>;
+			tx-pin = <0>;
+			rx-pin = <0>;
+			tx-hub-en;
+			rx-sync-en;
+			pinctrl-used;
+			pinctrl-names = "default", "sleep";
+			pinctrl-0 = <&owl_i2s0_bclk
+				     &owl_i2s0_lrck
+				     &owl_i2s0_din
+				     &owl_i2s0_dout>;
+			pinctrl-1 = <&owl_i2s0_sleep>;
+			status = "okay";
+		};
+	};
+
+	fragment@3 {
+		target = <&i2s0_mach>;
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+};

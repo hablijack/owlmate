@@ -14,7 +14,8 @@ before any detection tuning: remounting changes the framing and may change
 `CAM_VFLIP`, so tuning against a camera that is about to move is wasted effort.
 Navigation cannot be verified until the heading is trustworthy.
 
-Steps 0–5 need the owl. Step 6 needs nothing but a laptop.
+Steps 0–5 need the owl. Step 6 needs nothing but a laptop. Step 7 needs the
+Orange Pi board.
 
 **Read the two orders separately.** The Step numbers are a *dependency* order and
 stay fixed — renumbering them would destroy the information they carry. What is
@@ -30,6 +31,7 @@ come apart:
 | **4b** | **ready, needs the owl** | gaze smoothing (unblocked 2026-08-31), square crop, field of view |
 | **4c** | done | the ~12-minute slowdown: two causes found, fixed and verified 2026-08-31 |
 | **6** | items 1–3 **done and flashed** | item 4 stays blocked (no Flask here); items 5–6 open |
+| **7** | **open, needs the Orange Pi board** | the A733 audio stack is written + unit-tested on a laptop; the first flash is the acceptance test (SPEC-015) |
 
 The dependency chain 0→5 was stalled at 3 until the IMU arrived; as of
 2026-09-01 it is stalled only on bench time, not on a part. Step 6 was
@@ -734,6 +736,34 @@ wrong; run the lot only after mechanical work.
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
 and with it the IMU calibration. `bootloader.bin` @0x0, `partitions.bin` @0x8000,
 `boot_app0.bin` @0xf000, `firmware.bin` @0x20000.
+
+---
+
+### Step 7 — Orange Pi Zero 3W: first flash of the A733 audio stack  `[ ]`
+
+The brain now has an Orange Pi variant (`orangepi-brain/`) that runs on an
+Orange Pi Zero 3W (Allwinner A733, DietPi) instead of the Pi. It adds a real
+I2S microphone (ICS43434) alongside the MAX98357A amp on the A733's I2S0 bus,
+and swaps faster-whisper for whisper.cpp. The A733's I2S controller needs a
+small **custom kernel driver** (`orangepi-brain/audio/owl_i2s.c`) — a one-bit
+data-delay fix that is not expressible in a DT overlay — plus a DT overlay, an
+`asound.conf`, and a 10-step `setup.sh`. All of it is written and unit-tested
+on a laptop, but **none of it has run on the board yet**: the vendor kernel
+module cannot be compiled without the `orange-pi-6.6-sun60iw2` build tree.
+
+The first flash is the acceptance test (SPEC-015 Acceptance):
+
+1. `sudo ./setup.sh` on the DietPi board.
+2. After reboot, `aplay -l` lists a card named `owl`.
+3. A test tone is audible from the amp — and not one bit off.
+4. `arecord -D owl:capture -f S16_LE -r 48000 -d 3 out.raw` captures the mic:
+   real audio, not the data-delay failure signature (samples alternating
+   0 / full-scale).
+
+Still open until it runs (SPEC-015 Open): the DietPi DT-overlay enable
+mechanism (`setup.sh` probes `armbianEnv.txt` and warns otherwise), whether the
+base `.dts` already sets the I2S0 pinctrl, and `dmix`/`dsnoop` vs the a7z-style
+`plug`-on-`hw:` topology.
 
 ---
 
