@@ -57,21 +57,19 @@ describing the NDJSON wire contract.
 ## What this is
 
 A two-part robot owl. `esp32-s3-sense/` is Arduino/PlatformIO firmware for a Seeed XIAO ESP32-S3
-Sense (LCD eyes, camera face detection, IMU, GPS, PCA9685 servos). `rpi-brain/` is a Python
-supervisor that runs on a Raspberry Pi and talks to the board over USB CDC serial.
+Sense (LCD eyes, camera face detection, IMU, GPS, PCA9685 servos). `orangepi-brain/` is a Python
+supervisor that runs on an Orange Pi Zero 3W and talks to the board over USB CDC serial.
 
-The **ESP32 owns the behavior state machine**. The RPi is *not* a second state machine — it logs
+The **ESP32 owns the behavior state machine**. The Orange Pi is *not* a second state machine — it logs
 telemetry, monitors health, and sends policy (`sleep`/`wake`) plus *temporary* overrides
 (`expression`/`gaze`, 3 s) and navigation aim angles. A duplicate state machine used to exist on
 both sides and fought over expressions; don't reintroduce one.
 
-There is also an **Orange Pi variant**: `orangepi-brain/` runs the same Python
-brain on an Orange Pi Zero 3W (Allwinner A733) instead of the Pi, where the
-MAX98357A amp and an ICS43434 microphone share the A733's I2S0 bus. The A733's
-I2S controller is not the Pi's clean driver — it needs a small **custom kernel
-driver** (`orangepi-brain/audio/`) for a one-bit data-delay quirk that a DT
-overlay cannot express. That stack, and what is still unverified on hardware,
-is `specs/015-orangepi-audio.spec`.
+The brain's audio is worth flagging: the MAX98357A amp and an ICS43434
+microphone share the A733's I2S0 bus, and the A733's I2S controller is not a
+clean off-the-shelf driver — it needs a small **custom kernel driver**
+(`orangepi-brain/audio/`) for a one-bit data-delay quirk that a DT overlay
+cannot express. That stack, and what is still unverified on hardware is `specs/015-orangepi-audio.spec`.
 
 ## Commands
 
@@ -115,13 +113,13 @@ their `setup()`/`loop()` collide with `main.cpp`'s.
 | `camsnap` | returns the **actual JPEG** over serial (Base64), one per vflip/hmirror combination, decoded by `tools/schnappschuss.py`. The only check that catches a camera aimed at the wrong place — brightness looks perfect on a ceiling. Added 2026-08-28 after exactly that cost a session |
 | `powerprobe` | rolling 5 V-input reading from a genuinely minimal image (no PSRAM/LCD/camera/I2C/servos), to tell "rail dragged down by a peripheral" from "rail dead". Was a `#if POWER_PROBE` branch inside `main.cpp` until 2026-08-27, which linked the whole firmware and so measured nothing useful |
 
-The main env sets `-DCORE_DEBUG_LEVEL=0`: this USB CDC port carries the NDJSON protocol the RPi
+The main env sets `-DCORE_DEBUG_LEVEL=0`: this USB CDC port carries the NDJSON protocol the Orange Pi
 parses, so core log lines are protocol garbage. The diagnostic envs override `build_flags` and
 therefore keep full logging.
 
 **It only silences the *Arduino* core, not ESP-IDF components** — observed 2026-08-31 the first
 time anyone watched the 4-tap OTA transition: `WiFi.softAP()` puts about forty `I (…) wifi:` /
-`phy_init` / `esp_netif_lwip` lines straight onto the protocol port, and the RPi logs a parse
+`phy_init` / `esp_netif_lwip` lines straight onto the protocol port, and the Orange Pi logs a parse
 warning for each. Harmless but exactly the noise the flag exists to prevent; logged as `BACKLOG.md`
 Step 6 item 6. If you need a genuinely quiet port, the lever is `CONFIG_LOG_DEFAULT_LEVEL_NONE`
 in `sdkconfig.defaults`, not `CORE_DEBUG_LEVEL`.
@@ -147,7 +145,7 @@ Everything else here varies by machine, so **discover it, do not hardcode it**:
 ```bash
 # Serial port
 ls /dev/cu.usbmodem*      # macOS
-ls /dev/ttyACM*           # Linux / Raspberry Pi
+ls /dev/ttyACM*           # Linux / Orange Pi
 
 # esptool + a python that has pyserial. With a PlatformIO install both live in
 # its venv; otherwise use the system ones.
@@ -175,26 +173,27 @@ taking the IMU calibration with it. Flash the pieces separately:
 | `0xf000` | `boot_app0.bin` |
 | `0x20000` | `firmware.bin` |
 
-### RPi brain (`rpi-brain/`)
+### Orange Pi brain (`orangepi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (188 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (201 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
 python3 main.py [config.yaml]           # run the brain (default config.yaml)
-sudo ./setup.sh [--non-interactive]     # full Pi provisioning (idempotent, reboots at the end)
+sudo ./setup.sh [--non-interactive]     # full Orange Pi provisioning (idempotent, reboots at the end)
 ```
 
-The suite runs on a plain Mac with **no** Pi, mic, PortAudio or faster-whisper: `tests/stubs.py`
-`install_stub_modules()` fakes `serial`/`flask`/`yaml`/`sounddevice`/`faster_whisper` *only when the
+The suite runs on a plain Mac with **no** Orange Pi, mic, PortAudio, whisper.cpp or llama.cpp:
+`tests/stubs.py`
+`install_stub_modules()` fakes `serial`/`flask`/`yaml`/`whispercpp`/`llama_cpp` *only when the
 real module is not importable*. Every test file calls it before importing `brain.*`, so keep new
 tests in that order (`install_stub_modules()` then `from brain... # noqa: E402`). numpy is the one
 hard dependency. There is no linter configured.
 
-`setup.sh` installs to `/opt/robot-owl/rpi-brain` with its own `.venv` under a `robotowl` system
-user and enables `robot-owl-brain.service`; on the Pi, edit
-`/opt/robot-owl/rpi-brain/config.yaml`, not the repo copy.
+`setup.sh` installs to `/opt/robot-owl/orangepi-brain` with its own `.venv` under a `robotowl` system
+user and enables `robot-owl-brain.service`; on the Orange Pi, edit
+`/opt/robot-owl/orangepi-brain/config.yaml`, not the repo copy.
 
 ## Firmware architecture
 
@@ -624,7 +623,7 @@ CS=D9/GPIO8 DC=D3/GPIO4. (They had been swapped left-for-right.)
 unused pin, and listed the vibration sensor on **D3 — the right eye's DC**. It is the document you
 follow with a soldering iron, so check it against `config.h` whenever pins move.
 
-## RPi brain architecture
+## Orange Pi brain architecture
 
 `main.py` wires everything and then hands the foreground thread to
 `SerialHandler.read_loop(supervisor.on_telemetry, idle_cb)`. Everything optional runs in daemon
@@ -653,7 +652,7 @@ without it" rather than exiting. The idle callback runs `supervisor.check_stale(
   holds the angle it is told. `geo.aim_angle()`'s `sign` comes from `navigation.aim_sign` in
   config — **flip that config value** if the head points the wrong way on hardware (this is still
   unverified against real hardware). Places persist to `~/.config/robot-owl/locations.json`.
-- `speech.py` — sounddevice capture → RMS VAD gate → faster-whisper (CTranslate2, **not**
+- `speech.py` — sounddevice capture → RMS VAD gate → whisper.cpp (via pywhispercpp, **not**
   openai-whisper/torch) → `feed(transcript)`. In `feed()`, nav triggers are matched *before* the
   keyword clusters so "wie komme ich zum Zoo" isn't stolen by the `question` cluster. German
   keywords/clusters/reactions all live in `config.yaml`, not in code. Heavy imports are lazy so the
@@ -661,13 +660,13 @@ without it" rather than exiting. The idle callback runs `supervisor.check_stale(
 - `web_ui.py` — Flask, port 8080, disabled by default, **no authentication** (LAN only). The page
   lives in `brain/templates/index.html` (~430 lines) and is read once at import; it is still
   rendered with `render_template_string`, deliberately *not* Flask's `render_template` — see
-  `specs/012-rpi-brain.spec`. `/api/*` endpoints forward the same NDJSON commands the supervisor
+  `specs/012-orangepi-brain.spec`. `/api/*` endpoints forward the same NDJSON commands the supervisor
   uses. `EXPRESSIONS` is generated, not written here. The map picker loads Leaflet **and its tiles**
   from two remote hosts and degrades to "type the lat/lon" offline; do not "fix" that by vendoring
   leaflet.js — the comment above the CDN tags explains why it would not help.
-- `audio.py` — plays WAVs from `assets/sounds/` (or synthesizes tones) through `aplay` on the Pi's
-  I2S MAX98357A amp. No-ops with a log line when the amp/I2S is absent. **All audio is on the Pi;
-  the ESP32 has no audio pins.**
+- `audio.py` — plays WAVs from `assets/sounds/` (or synthesizes tones) through `aplay` on the Orange Pi's
+   I2S MAX98357A amp. No-ops with a log line when the amp/I2S is absent. **All audio is on the Orange Pi;
+   the ESP32 has no audio pins.**
 
 Every feature block in `config.yaml` (`supervisor.auto_sleep`, `web`, `navigation`, `speech`) is
 `enabled: false` by default so existing deployments are unaffected — keep new features opt-in the
@@ -691,12 +690,12 @@ If a spec contradicts `esp32-s3-sense/include/config.h`, the header wins — fix
 the spec.
 
 **A retroactive spec can describe intent and read as description.** SPEC-010
-listed three telemetry fields the RPi never parsed, and called its dataclasses
+listed three telemetry fields the Orange Pi never parsed, and called its dataclasses
 frozen while they were mutable — and the closer a document is to right, the less
 likely anyone checks. Where a claim is backed by a test the spec now says so;
 treat an unbacked claim as intent. Two specs are especially worth reading before
-touching the RPi: `010-serial-protocol` (the wire contract, R-010.5 "every field
-sent must be parsed") and `012-rpi-brain` (which module owns what, and why a
+touching the Orange Pi: `010-serial-protocol` (the wire contract, R-010.5 "every field
+sent must be parsed") and `012-orangepi-brain` (which module owns what, and why a
 regression test is assumed broken until it has been seen to fail).
 
 ## Definition of done — the docs are part of the change
@@ -711,10 +710,10 @@ trusting that would have read navigation's correct refusal to aim as a bug.
 So it is enforced, not requested:
 
 ```bash
-python3 tools/check_docs.py        # or just run the RPi suite, which includes it
+python3 tools/check_docs.py        # or just run the Orange Pi suite, which includes it
 ```
 
-187 checks: specs indexed both ways, every spec keeps its skeleton, every
+200 checks: specs indexed both ways, every spec keeps its skeleton, every
 `Step N` reference resolves, every path named in a steering doc exists, numbers
 quoted in docs match `config.h`, **every `**D<n>**` row in `WIRING.md` matches
 the firmware pin map**, and quoted expression/test counts are real.
@@ -733,7 +732,7 @@ Before finishing any change, ask:
 | a pin | `WIRING.md` (both tables) — the checker diffs them against `config.h` |
 | the telemetry format | the `_*_FIELDS` table **and** `specs/010`; R-010.5 says every field sent must be parsed |
 | anything about timing | measure it **directly**; a number divided out of `loop_hz` is a subtraction, not a measurement, and that is how "~170-200 ms inference" got into three files |
-| `NAMES[]` | run `rpi-brain/tools/gen_expressions.py`; never hand-edit the generated list |
+| `NAMES[]` | run `orangepi-brain/tools/gen_expressions.py`; never hand-edit the generated list |
 | a design decision, or falsified a belief | the owning spec — **especially its `Falsified` section**, which is the most valuable part of `specs/` |
 | what is left to do | `BACKLOG.md`, and only there |
 | anything with a test count in a doc | the number, or phrase it as historical |
@@ -806,9 +805,9 @@ shapes — fall out for free; a row-by-row rasteriser could not do it.
 a mismatch is a build error rather than a silently wrong eye. `NAMES[]` is the single source for the
 protocol strings — `Eyes::nameOf()`/`parseName()` back both telemetry's `eye` field and the
 `expression` command. `main.cpp` used to keep a second hand-maintained list; it doesn't any more.
-The RPi copy is **generated** from `NAMES[]` by `rpi-brain/tools/gen_expressions.py` into
-`rpi-brain/brain/expressions.py` — never hand-edit it, and regenerate after adding a mood
-(`cd rpi-brain && python3 tools/gen_expressions.py`). `tests/test_expressions.py` fails if the two
+The Orange Pi copy is **generated** from `NAMES[]` by `orangepi-brain/tools/gen_expressions.py` into
+`orangepi-brain/brain/expressions.py` — never hand-edit it, and regenerate after adding a mood
+(`cd orangepi-brain && python3 tools/gen_expressions.py`). `tests/test_expressions.py` fails if the two
 diverge. Two hand-kept mirrors existed until 2026-08-27 and had already drifted (26 / 23 / 24 names);
 `config.yaml`'s `expressions:` block turned out to be read by nothing and is gone.
 

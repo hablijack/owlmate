@@ -63,7 +63,7 @@ void task(void*) {
         // MINDESTENS ein Tick, auch wenn der Wert 0 ist: vTaskDelay(0) ist nur
         // ein Yield an gleich hohe Prioritaeten und laesst die Idle-Aufgabe
         // NICHT laufen - dann verhungert IDLE0 und der Task-Watchdog schreibt
-        // seine Klage in den NDJSON-Strom, den der RPi parst.
+        // seine Klage in den NDJSON-Strom, den der Orange Pi parst.
         const TickType_t gap = pdMS_TO_TICKS(FACE_DETECT_INTERVAL_MS);
         vTaskDelay(gap > 0 ? gap : 1);
     }

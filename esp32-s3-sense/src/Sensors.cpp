@@ -19,7 +19,7 @@ static void IRAM_ATTR vibrationIsr() {
 
 // Hard-iron offsets are persisted in NVS. Nothing about the magnetometer
 // survives a power cycle by itself, and navigation refuses to aim until
-// imu.calibrated is true (rpi-brain/brain/navigation.py), so without this the
+// imu.calibrated is true (orangepi-brain/brain/navigation.py), so without this the
 // calibration turn would be a prerequisite of every single boot.
 //
 // Three floats (x/y/z in microtesla), not the BNO055's opaque 22-byte offset
@@ -88,7 +88,7 @@ bool Sensors::begin() {
         // ist ohnehin blockiert, solange keine Kalibrierung vorliegt
         // (navigation.py verweigert dann die Zielansage).
         //
-        // Die Telemetrie laesst das Objekt "imu" dann weg, was auf der RPi-Seite
+        // Die Telemetrie laesst das Objekt "imu" dann weg, was auf der Orange-Pi-Seite
         // bereits als "Geraet nicht vorhanden" gilt.
         //
         // OwlImu::begin() hat oben schon gesagt, WELCHE Haelfte fehlt und ob es

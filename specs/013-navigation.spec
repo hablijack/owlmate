@@ -19,9 +19,9 @@ are recorded below as decisions.
 
 ## Requirements
 
-* **R-013.1** All geodesy runs on the RPi. The ESP32 holds an angle it is told
+* **R-013.1** All geodesy runs on the Orange Pi. The ESP32 holds an angle it is told
   and does no math (inherits R-001.2 — one brain).
-* **R-013.2** A dropped RPi link must never leave the head stuck pointing.
+* **R-013.2** A dropped Orange Pi link must never leave the head stuck pointing.
 * **R-013.3** There must be more than one way out, and no way to get stuck in.
 * **R-013.4** A missing or untrustworthy sensor holds the last aim rather than
   flailing. Never aim on a guess.
@@ -31,7 +31,7 @@ are recorded below as decisions.
 
 ## Decisions
 
-**The RPi computes, the ESP32 holds.** `geo.bearing_deg()` (initial great-circle
+**The Orange Pi computes, the ESP32 holds.** `geo.bearing_deg()` (initial great-circle
 bearing) and `geo.distance_m()` (haversine) against the live fix, then
 `geo.aim_angle()` reduces it to a head angle. The firmware's `nav` command
 carries only that angle.
@@ -39,7 +39,7 @@ carries only that angle.
 **`nav` is a PERSISTENT override, unlike expression/gaze.** Those expire after
 3 s; `NAVIGATING` holds until an explicit `active:false` — or until
 `NAV_TIMEOUT_MS` (5 s) passes with no refresh, at which point the firmware
-recenters itself (R-013.2). The RPi re-sends at `refresh_min_s` (0.5 s), so the
+recenters itself (R-013.2). The Orange Pi re-sends at `refresh_min_s` (0.5 s), so the
 firmware timeout is 10× the refresh interval: comfortably long enough not to
 trip on jitter, short enough that a dead link is noticed immediately.
 
@@ -115,11 +115,11 @@ they are user data, and the web UI writes them.
 
 ## Acceptance
 
-1. `cd rpi-brain && python3 tests/run_tests.py` — the navigation, geodesy, speech
+1. `cd orangepi-brain && python3 tests/run_tests.py` — the navigation, geodesy, speech
    and web-UI navigation tests pass.
 2. With a fix and a calibrated heading, starting a navigation makes the head
    point at the destination and track it as you turn.
-3. Unplugging the RPi mid-navigation recenters the head within
+3. Unplugging the Orange Pi mid-navigation recenters the head within
    `NAV_TIMEOUT_MS`.
 4. Each of the four exits returns the owl to `IDLE` with the head centred.
 

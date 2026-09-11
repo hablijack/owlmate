@@ -58,7 +58,7 @@ working.
   main-loop stall, and a 15-minute capture after that stall was fixed contains
   zero of them.
   They are printed with `ets_printf`, so they land on the NDJSON protocol port
-  and cost the RPi a parse warning each. `CONFIG_LOG_DEFAULT_LEVEL_NONE` is what
+  and cost the Orange Pi a parse warning each. `CONFIG_LOG_DEFAULT_LEVEL_NONE` is what
   suppresses them — `cam_hal.c:44` guards the macro on exactly that symbol.
 * **No pin conflicts.** Camera uses GPIO 10, 39, 40, 48, 11–18, 38, 47, 13; the
   rest of the owl holds 1–9, 43, 44.

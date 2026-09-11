@@ -45,7 +45,7 @@ nothing writes PWM to an empty one.
 
 "left"/"right" throughout mean the **owl's own** left and right: standing in
 front of the owl, its left ear is on your right. The channel numbers are
-duplicated in `rpi-brain/brain/web_ui.py`, which is a mirror — `config.h` is the
+duplicated in `orangepi-brain/brain/web_ui.py`, which is a mirror — `config.h` is the
 source of truth.
 
 ## Verified facts

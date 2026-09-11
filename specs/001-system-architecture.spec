@@ -7,16 +7,16 @@ Depends on: —
 ## Intent
 
 A robot owl with expressive eyes, sensors and servos, which behaves sensibly on
-its own and gains extra abilities (voice, navigation, a web UI) when a Raspberry
+its own and gains extra abilities (voice, navigation, a web UI) when an Orange
 Pi is attached. The hard question is not what hardware to use, it is **which
 side decides what the owl does**.
 
 ## Requirements
 
-* **R-001.1** The owl must exhibit its core behaviour with no Raspberry Pi
+* **R-001.1** The owl must exhibit its core behaviour with no Orange Pi
   attached — power alone is enough.
 * **R-001.2** There must be exactly one behaviour state machine in the system.
-* **R-001.3** The RPi may influence behaviour, but only as policy and as
+* **R-001.3** The Orange Pi may influence behaviour, but only as policy and as
   temporary overrides; it must not be able to leave the owl in a stuck state by
   crashing or being unplugged.
 * **R-001.4** Every subsystem must degrade to "running without it" rather than
@@ -30,7 +30,7 @@ Transitions are driven by *local* inputs only: the vibration sensor, on-device
 face detection, and timeouts from `config.h`.
 
 Reason: the two inputs that drive the interesting transitions — a face and a tap
-— are both sensed on the ESP32. Putting the decision on the RPi would mean a
+— are both sensed on the ESP32. Putting the decision on the Orange Pi would mean a
 serial round trip per frame and an owl that goes inert whenever the Pi reboots.
 
 **The behaviour is the job; the telemetry is a by-product, and the by-product
@@ -43,13 +43,13 @@ for up to 2 s whenever nothing drained the port (measured `loop_max_ms` 2256 and
 
 The rule that follows, and that any future outbound channel must obey: **a write
 on the behaviour loop either fits without waiting or is dropped.** Never
-truncated — a half-written NDJSON line costs the RPi a parse error while a
+truncated — a half-written NDJSON line costs the Orange Pi a parse error while a
 dropped frame costs only a gap — and never silently: `tx_dropped` carries the
 count, so "the owl went quiet" and "I was too slow to listen" stay
 distinguishable. Telemetry is a 500 ms snapshot whose counters are cumulative,
 so it is *designed* to survive gaps. See SPEC-010 for the mechanism.
 
-This is a production requirement, not a bench nicety. The RPi runs speech
+This is a production requirement, not a bench nicety. The Orange Pi runs speech
 recognition in the same process as the serial reader; a starved reader thread
 there must not be able to freeze the owl's eyes.
 
@@ -72,7 +72,7 @@ written and would have gone silently wrong the first time anyone inserted a fiel
 into the struct, shifting every value after it. `ImuData data{}` is equivalent
 today and cannot rot (likewise `GpsData`, `VibrationData`).
 
-**The RPi is a supervisor, not a second brain.** It logs telemetry, watches for
+**The Orange Pi is a supervisor, not a second brain.** It logs telemetry, watches for
 staleness, and sends: policy (`sleep`/`wake`), *temporary* overrides
 (`expression`, `gaze` — 3 s, `EXPRESSION_OVERRIDE_MS`), and navigation aim
 angles.
@@ -133,11 +133,11 @@ That control mattered — a 12 s sample of the refactored build alone read 604 m
 against the ~535 ms in these specs and looked like a regression, and a 20 s
 sample of the same build read 549 ms. A short cadence sample is not a signal.
 
-**All audio lives on the RPi.** The ESP32 has no audio pins in this build; the
+**All audio lives on the Orange Pi.** The ESP32 has no audio pins in this build; the
 MAX98357A amp hangs off the Pi's I2S bus.
 
 **Optional features are opt-in and isolated.** Every feature block in
-`rpi-brain/config.yaml` (`supervisor.auto_sleep`, `web`, `navigation`, `speech`)
+`orangepi-brain/config.yaml` (`supervisor.auto_sleep`, `web`, `navigation`, `speech`)
 defaults to `enabled: false`, and each optional thread is wrapped so a failure
 logs and continues.
 
@@ -152,7 +152,7 @@ logs and continues.
 ## Falsified
 
 * **"Both sides can run a state machine and cooperate."** An earlier design had
-  one on each side. They fought over expressions and gaze — the RPi would set a
+  one on each side. They fought over expressions and gaze — the Orange Pi would set a
   mood, the ESP32 would immediately overwrite it. Do not reintroduce this. It is
   the reason overrides are explicitly *temporary* rather than authoritative.
 
@@ -166,6 +166,6 @@ logs and continues.
 
 ## Open
 
-* `navigation.aim_sign` in the RPi config has never been verified against
+* `navigation.aim_sign` in the Orange Pi config has never been verified against
   hardware. If the head turns the wrong way on the first navigation test, that
   single value is the fix.

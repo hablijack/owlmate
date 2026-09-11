@@ -24,7 +24,7 @@
 #include "FaceDetector.h"
 
 // ----------------------------------------------------------------------------
-// Behaviour states. The ESP32 owns this machine; the RPi only sends policy
+// Behaviour states. The ESP32 owns this machine; the Orange Pi only sends policy
 // (sleep/wake) and temporary overrides. See behavior.h for the transitions.
 // ----------------------------------------------------------------------------
 enum class State {

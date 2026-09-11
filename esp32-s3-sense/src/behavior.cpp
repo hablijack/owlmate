@@ -29,7 +29,7 @@ float navTargetAngle = 0.0f;
 // frozen grin it replaces.
 uint32_t greetUntil = 0;
 
-// Temporary overrides from the RPi supervisor. These take precedence over the
+// Temporary overrides from the Orange Pi supervisor. These take precedence over the
 // state-driven expression/gaze until they expire or the state changes. They
 // never change the state itself.
 EyeExpression overrideExpr = EyeExpression::NEUTRAL;
@@ -310,10 +310,10 @@ void update() {
         }
 
         case State::NAVIGATING: {
-            // "Guide me home": the head is pinned to the RPi-computed compass
-            // bearing (navTargetAngle) and ignores face-following. The RPi
+            // "Guide me home": the head is pinned to the Orange-Pi-computed compass
+            // bearing (navTargetAngle) and ignores face-following. The Orange Pi
             // re-sends the angle on each refresh, so the head tracks the
-            // destination. If the RPi stops sending (link dropped / it crashed),
+            // destination. If the Orange Pi stops sending (link dropped / it crashed),
             // the self-timeout recenters the head and returns to idle so it is
             // never left stuck pointing somewhere.
             applyExpression(EyeExpression::SEARCHING);

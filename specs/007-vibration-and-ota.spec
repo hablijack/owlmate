@@ -15,7 +15,7 @@ a body with no accessible USB port.
 * **R-007.1** A tap must be detected reliably; a motionless owl must never
   register one.
 * **R-007.2** Four taps in quick succession enter `UPDATE`; one tap leaves it.
-* **R-007.3** Update mode must work with no Raspberry Pi attached.
+* **R-007.3** Update mode must work with no Orange Pi attached.
 * **R-007.4** Sensitivity must be adjustable without a firmware change.
 
 ## Decisions
@@ -117,7 +117,7 @@ hardware, so 1500 ms stays.
   Observed 2026-08-31 on the first capture of this transition. `WiFi.softAP()`
   emits ESP-IDF component logs (`I (…) wifi:`, `phy_init`, `esp_netif_lwip`),
   and `-DCORE_DEBUG_LEVEL=0` does not gate those — it silences only the Arduino
-  core. The RPi logs a parse warning per line. Nothing breaks; it violates the
+  core. The Orange Pi logs a parse warning per line. Nothing breaks; it violates the
   spirit of the quiet-port decision in SPEC-002/SPEC-010. Lever is
   `CONFIG_LOG_DEFAULT_LEVEL_NONE` in `sdkconfig.defaults`. BACKLOG Step 6
   item 6.

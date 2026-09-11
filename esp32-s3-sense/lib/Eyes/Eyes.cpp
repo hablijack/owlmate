@@ -201,7 +201,7 @@ static const EyeShape SHAPES[] = {
     /* ERROR       */ { 33, 40, 26,  0,  0,   0,  0,  0, 0 },  // cross instead
 };
 
-// Protocol names, same order. These are the strings the RPi sends in
+// Protocol names, same order. These are the strings the Orange Pi sends in
 // {"type":"expression","value":"..."} and that telemetry reports back as "eye".
 static const char* const NAMES[] = {
     "neutral", "blink_high", "blink_low", "happy", "glee",

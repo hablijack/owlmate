@@ -59,7 +59,7 @@ whether it fires. The 4-tap OTA path was the one thing the verification flash
 could not reach; it was tapped by hand on 2026-08-31 and works (Step 6 item 2).
 
 > **"Step" here, "Phase" elsewhere — they are different things.** These Steps are
-> this session's task order. The `Phase 1..4` you will see in `rpi-brain/brain/`
+> this session's task order. The `Phase 1..4` you will see in `orangepi-brain/brain/`
 > comments and in `specs/014-speech.spec` are the *speech feature's*
 > implementation phases (VAD → ASR → reactions → auto-sleep) and have nothing to
 > do with the list below. Do not renumber either to match the other.
@@ -186,7 +186,7 @@ and no on-chip fusion**. Everything the BNO055 did in silicon is now in
 compass, hard-iron calibration, NVS persistence, and a backoff so a mute sensor
 cannot stall the main loop. Telemetry's `imu.cal` changed shape with it
 (`sys`/`gyro`/`accel`/`mag` → `axes`/`heading_ok`/`restored`) on both sides of the
-wire. All 11 envs build; the RPi suite and `check_docs.py` pass. Full record in
+wire. All 11 envs build; the Orange Pi suite and `check_docs.py` pass. Full record in
 `specs/006-imu-orientation.spec`.
 
 **Watch out for the two Adafruit breakouts.** The blue `LSM303DLHC` and the black
@@ -499,7 +499,7 @@ would restart the owl.
 
 Needs Step 3 done (a trustworthy heading) and a sky-view GPS fix.
 
-`navigation.aim_sign` in `rpi-brain/config.yaml` has **never** been verified
+`navigation.aim_sign` in `orangepi-brain/config.yaml` has **never** been verified
 against hardware. Start a navigation to a saved place; if the head turns the
 wrong way, flip the sign. That is the one value the geodesy cannot derive on its
 own — it encodes which way the head servo turns for a positive angle and whether
@@ -607,7 +607,7 @@ this list that varies far more than the work itself does.
      esp-dl's own allocations are unchanged, just made from another task.
    * **Watchdog: no trigger.** The task always yields at least one tick, so
      IDLE0 is fed. No `Task watchdog` line appeared in any capture, which
-     matters doubly here: it would land in the NDJSON stream the RPi parses.
+     matters doubly here: it would land in the NDJSON stream the Orange Pi parses.
    * **Core 0 contention during OTA:** none, as expected — `vision::setEnabled`
      pauses the task on entry to `UPDATE` and clears the published result, so
      WiFi has core 0 to itself.
@@ -688,7 +688,7 @@ this list that varies far more than the work itself does.
    `-DCORE_DEBUG_LEVEL=0` silences the *Arduino* core's logging. It does not
    gate ESP-IDF component logs, and `WiFi.softAP()` emits about forty of them
    (`I (346384) wifi:wifi driver task…`, `phy_init`, `esp_netif_lwip`, …)
-   straight onto the USB CDC port that carries the NDJSON protocol. The RPi's
+   straight onto the USB CDC port that carries the NDJSON protocol. The Orange Pi's
    `_handle_message` logs `Failed to parse message` for each one. Nothing
    breaks, but this is exactly the noise `CORE_DEBUG_LEVEL=0` exists to
    prevent, and the port is the machine-to-machine link.
@@ -730,8 +730,8 @@ wrong; run the lot only after mechanical work.
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
 | detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
-| RPi brain | `cd rpi-brain && python3 tests/run_tests.py` | 188 tests pass |
-| firmware/RPi drift | `cd rpi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
+| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 201 tests pass |
+| firmware/Orange Pi drift | `cd orangepi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
 and with it the IMU calibration. `bootloader.bin` @0x0, `partitions.bin` @0x8000,
@@ -741,8 +741,8 @@ and with it the IMU calibration. `bootloader.bin` @0x0, `partitions.bin` @0x8000
 
 ### Step 7 — Orange Pi Zero 3W: first flash of the A733 audio stack  `[ ]`
 
-The brain now has an Orange Pi variant (`orangepi-brain/`) that runs on an
-Orange Pi Zero 3W (Allwinner A733, DietPi) instead of the Pi. It adds a real
+The brain runs on an Orange Pi Zero 3W (`orangepi-brain/`, Allwinner A733,
+DietPi). It adds a real
 I2S microphone (ICS43434) alongside the MAX98357A amp on the A733's I2S0 bus,
 and swaps faster-whisper for whisper.cpp. The A733's I2S controller needs a
 small **custom kernel driver** (`orangepi-brain/audio/owl_i2s.c`) — a one-bit
@@ -779,7 +779,7 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` blocked
 ## Refactoring pass — 2026-08-31 (code smells)
 
 Six small cleanups, no behaviour change intended. All 11 PlatformIO envs build,
-the `-DHARDWARE_CHECK=1` variant builds, 188 RPi tests pass, `check_docs.py`
+the `-DHARDWARE_CHECK=1` variant builds, 188 Orange Pi tests pass, `check_docs.py`
 passes.
 
 **Flashed and verified on the owl, 2026-08-31** (four pieces separately, never
@@ -861,7 +861,7 @@ frame and report correctly.
 had not, and one of them was reasoning from it: `config.h`'s note above
 `FACE_DETECT_INTERVAL_MS` justified the value with "die Inferenz braucht ohnehin
 ~180 ms". Also `src/main.cpp`, `src/vision.cpp` and
-`rpi-brain/brain/serial_handler.py` (`FaceDetection.capture_ms`). All now say
+`orangepi-brain/brain/serial_handler.py` (`FaceDetection.capture_ms`). All now say
 48-91 ms (mean 66), directly measured. This is the failure mode AGENTS.md warns
 about by name — the figure reached *six* files, not three, and the two that were
 fixed made the remaining four look fixed too.
@@ -909,7 +909,7 @@ is not something to add as a side effect of a refactor; and the firmware's
 
 **That last one was a latent name collision nobody had noticed.** `navigation`
 means two different things on the two sides — the firmware's echo (`active`,
-`angle`: is the head really held where we told it?) and the RPi controller's
+`angle`: is the head really held where we told it?) and the Orange Pi controller's
 status (`target`, `bearing`, `distance_m`, `aim`), which is what the Navigate
 card renders. The hand-written payload only ever had the controller's copy, so
 assignment order hid it; asdict brought both into one dict and made the clash
@@ -947,7 +947,7 @@ the "mixed-language files" slice (`main.cpp`, `protocol.cpp`, `GC9D01.cpp`,
 ## Refactoring pass — 2026-08-27
 
 The 2026-08-26 tree was committed and then refactored. Eight commits, no
-behaviour change intended anywhere; all seven PlatformIO envs build and the RPi
+behaviour change intended anywhere; all seven PlatformIO envs build and the Orange Pi
 suite went from 104 to 179 test methods.
 
 **Dead code removed:** `Eyes::fillTriangle`, `Eyes::markDirty`,
@@ -965,7 +965,7 @@ firmware (297 KB now, was 3.28 MB) which made it useless as the light-load
 comparison it exists to be.
 
 **Protocol single-sourced:** seven fields the firmware had always sent were
-never parsed on the RPi — `imu.cal.{sys,gyro,accel,mag,restored}`,
+never parsed on the Orange Pi — `imu.cal.{sys,gyro,accel,mag,restored}`,
 `vibration.pulses`, `face.total`. All of them exist to make an invisible failure
 visible, and all were dropped. Now parsed, and shown in the web UI along with
 heading and GPS fix (neither of which the page exposed at all). Field
@@ -973,7 +973,7 @@ transcription is a table, so a new firmware field is one row plus one dataclass
 field. Frames are frozen.
 
 **Expression list generated** from `NAMES[]` in `lib/Eyes/Eyes.cpp` via
-`rpi-brain/tools/gen_expressions.py`. The two hand-kept mirrors had drifted
+`orangepi-brain/tools/gen_expressions.py`. The two hand-kept mirrors had drifted
 (26 / 23 / 24 names), and `config.yaml`'s 36-line `expressions:` block turned out
 to be read by *nothing*. Drift is now a test failure.
 
@@ -998,7 +998,7 @@ vibration sensor listed on **D3 — the right eye's DC**. Corrected against
 * **Leaflet not vendored.** The tiles come from a second remote host, so a
   locally-bundled Leaflet renders a working map widget full of blank grey
   squares — worse than the current honest "Map unavailable" message. Real offline
-  maps need a region tile pack or a tile server on the Pi: a feature with a real
+  maps need a region tile pack or a tile server on the Orange Pi: a feature with a real
   cost, not a dependency cleanup. Rationale is in the code above the CDN tags.
 
 ### Open follow-ups from the pass
@@ -1231,7 +1231,7 @@ not present in Arduino core 3.x** (verified: nothing matching `*human_face*` or
 project moved to pioarduino 3.3.11 / IDF 5.5 to fix PSRAM. README "Decision #8"
 still claims the SDK provides it -- that rationale is stale.
 `FACE_DETECTION_ENABLED` stays 0 until this is resolved. Options, none started:
-  1. Detection on the RPi over USB CDC (OpenCV is already in requirements.txt;
+  1. Detection on the Orange Pi over USB CDC (OpenCV is already in requirements.txt;
      USB CDC ignores the baud setting so QVGA JPEG streaming is realistic).
      Costs the "ESP32 owns behavior" property of Decisions #7/#8.
   2. Revert to Arduino core 2.0.x to regain esp-dl -- risks the PSRAM
@@ -1345,7 +1345,7 @@ emotional-standard convention was used (angry lowers the INNER brow, worried and
 sad lower the OUTER one). Swapping `slantIn`/`slantOut` in those four rows flips
 it if the reference actually differs.
 
-RPi side updated to match: `web_ui.py` `EXPRESSIONS` and `config.yaml`
+Orange Pi side updated to match: `web_ui.py` `EXPRESSIONS` and `config.yaml`
 `expressions:`. Note an override only lasts `EXPRESSION_OVERRIDE_MS` (3 s)
 before the firmware's own state machine reclaims the eyes — re-send faster than
 that to hold a mood.
@@ -1429,7 +1429,7 @@ What the symptoms actually were:
    (`while (read8(CHIP_ID) != BNO055_ID)`); every poll before the chip finishes
    rebooting NACKs and logs two lines. ~18 of them over ~490 ms, then it works.
    A previous session read this as a dead bus. `CORE_DEBUG_LEVEL=0` now keeps
-   this noise off the NDJSON stream the RPi parses (diagnostic envs keep logs).
+   this noise off the NDJSON stream the Orange Pi parses (diagnostic envs keep logs).
 2. **~700 ms telemetry ticks were a runaway GPS read loop.**
    `Adafruit_GPS::available()` is hardcoded to `return 1` in I2C mode, so
    `while (GPS.available()) GPS.read();` never exits. Now a fixed 128-byte
@@ -1457,7 +1457,7 @@ What the symptoms actually were:
    `esptool --before usb-reset erase-region 0x9000 0x6000` if you do.
 
 Telemetry gained `imu.cal.{sys,gyro,accel,mag,restored}` so calibration progress
-is visible. Additive only; the RPi parser ignores unknown fields.
+is visible. Additive only; the Orange Pi parser ignores unknown fields.
 
 **Still to do (needs the user, not code):** run the calibration dance once —
 hold still for gyro, hold stationary in ~6 orientations for accel, slow figure-8
@@ -1526,17 +1526,17 @@ waiting on it. Out of scope for the eyes session.
   eyes move less up/down). Documented in `Eyes.cpp`; do NOT make it symmetric.
 - [x] **Blink speed param unused** — wired up. `blink(speed)` (1=fast…5=slow)
   now sets `_blinkSpeed`, which paces both the animation duration and the
-  eyelid openness curve in `renderEye()`. The RPi `blink` command's `speed`
+  eyelid openness curve in `renderEye()`. The Orange Pi `blink` command's `speed`
   field is now honored.
 
 ## Module integration
 
 - [x] **Firmware version in telemetry** — added `FW_VERSION` to `config.h` and
-  `doc["fw"]` to `sendTelemetry()`. RPi `Telemetry.firmware` parses it and the
+  `doc["fw"]` to `sendTelemetry()`. Orange Pi `Telemetry.firmware` parses it and the
   supervisor logs it once (and on change, to confirm an OTA took).
-- [x] **RPi-side update tooling** — DROPPED (not needed). Updates are done by
+- [x] **Orange Pi-side update tooling** — DROPPED (not needed). Updates are done by
   joining the owl's SoftAP from a phone/laptop hotspot and flashing via the
-  browser `/update` page. No RPi push tooling required.
+  browser `/update` page. No Orange Pi push tooling required.
 - [ ] **`webServer.stop()` doesn't unregister `/update`** — handled with the
   `updateServerReady` one-shot guard (`main.cpp`), so it works, but the handler
   stays registered forever. Low priority; revisit if a second `WebServer` or a
@@ -1556,18 +1556,17 @@ waiting on it. Out of scope for the eyes session.
   so the lib sees the project `config.h`. **Still needs on-hardware
   validation**: if the owl under-detects (ignores you), lower the thresholds
   toward 0.3; if it false-triggers on hands/pictures, raise them.
-- [ ] **RPi face-detection fallback** — explicitly NOT needed (ESP32 does it).
+- [ ] **Orange Pi face-detection fallback** — explicitly NOT needed (ESP32 does it).
   Only revisit if on-device detection is later disabled.
 
-## Speech recognition (RPi-side)
+## Speech recognition (Orange Pi-side)
 
 Step 1 (skeleton), Step 2 (mic + VAD + ASR), Step 3 ("last heard" in web
 UI) and Step 4 (autonomous sleep + wake-on-speech) code is **done and
 unit-tested on the Mac** (38 tests, stubbed serial/supervisor/mic/Whisper).
-See `specs/014-speech.spec`. The RPi `Speech` class captures a USB mic,
-runs an energy VAD, and on a gated utterance transcribes with **faster-whisper**
-(`small`, int8 on CPU — the size/precision pair faster-whisper recommends for a
-Pi 4; the CTranslate2 engine, no torch, ~4× faster than openai-whisper) and drives a *temporary* reaction (expression/gaze/audio) via
+See `specs/014-speech.spec`. The Orange Pi `Speech` class captures a USB mic,
+runs an energy VAD, and on a gated utterance transcribes with **whisper.cpp**
+(`small`, int8 on CPU — via pywhispercpp, no torch) and drives a *temporary* reaction (expression/gaze/audio) via
 the existing override path — no firmware change.
 
 **Setup is now a single interactive command:** `sudo ./setup.sh` runs a config
@@ -1593,12 +1592,12 @@ unattended installs.
   unchanged otherwise). The page renders a "heard *…* (Ns ago)" line. 4 unit
   tests cover the seam; all 25 tests pass. (Hardware check folded into the item above.)
 - [x] **Step 4 (revised) — autonomous sleep on inactivity + wake on speech** —
-  *No command forces sleep; no firmware change.* The RPi watches the existing
+  *No command forces sleep; no firmware change.* The Orange Pi watches the existing
   telemetry (face / vibration) + its own speech events; after `supervisor.auto_sleep.after_s`
   with **no** interaction trigger it sends the **existing** `sleep` command (disabled by
   default). The owl's *wake* is mostly already in the firmware (it self-wakes on a
-  face or a vibration); the one new thing is **wake-on-speech** — the RPi sends the
-  existing `wake` command when it hears the user while the owl is asleep. All RPi-brain:
+  face or a vibration); the one new thing is **wake-on-speech** — the Orange Pi sends the
+  existing `wake` command when it hears the user while the owl is asleep. All Orange Pi-brain:
   `supervisor.py` (inactivity timer → `sleep`), `speech.py` (wake-exception gate → `wake`),
   `config.yaml` (`auto_sleep.*`). **Code done + 13 unit tests** drive the real
   `Supervisor`/`Speech` against stubs (see `specs/014-speech.spec` for the
@@ -1609,12 +1608,12 @@ unattended installs.
 ## Navigation — "guide me home" (live compass)
 
 The owl points its head at a **named destination** and keeps re-aiming from live
-GPS + IMU heading — a live compass. All the math is on the RPi (it already parses
+GPS + IMU heading — a live compass. All the math is on the Orange Pi (it already parses
 the GPS fix + IMU yaw); the ESP32 just holds the head at the angle it's sent.
 Full design + math + open questions: `specs/013-navigation.spec`.
 
 **Implemented + tested on the Mac (no hardware):**
-- [x] **RPi core** — `brain/geo.py` (bearing/haversine/wrap/aim, pure),
+- [x] **Orange Pi core** — `brain/geo.py` (bearing/haversine/wrap/aim, pure),
   `brain/locations.py` (name→{lat,lon} JSON store), `brain/navigation.py`
   (controller: start/stop/on_telemetry, rate-limited re-aim, four exit paths).
 - [x] **Speech start/stop** — `nav_triggers` ("bring mich nach …") checked
@@ -1624,7 +1623,7 @@ Full design + math + open questions: `specs/013-navigation.spec`.
 - [x] **Web UI** — Places card (add/remove/list + OpenStreetMap/Leaflet map
   picker, no API key) + Navigate card (start/stop + live bearing/distance/aim)
   + `/api/locations*` and `/api/nav/start|stop` endpoints.
-- [x] **Firmware** — 8th state `NAVIGATING` (holds the head at the RPi's
+- [x] **Firmware** — 8th state `NAVIGATING` (holds the head at the Orange Pi's
   compass angle; `SEARCHING` eyes; 5 s no-refresh self-timeout → IDLE) + the
   `nav {angle, active}` command + `nav_ack` + a `navigation` telemetry field.
   `FW_VERSION` 1.1.0 → 1.2.0. Compiles clean under PlatformIO.
@@ -1633,7 +1632,7 @@ Full design + math + open questions: `specs/013-navigation.spec`.
 - [x] **Docs** — `README.md` (8-state table + a Navigation section) and this
   entry; the design is now `specs/013-navigation.spec`.
 
-**On-hardware (needs the Pi/ESP32) — the test procedure:**
+**On-hardware (needs the Orange Pi/ESP32) — the test procedure:**
   0. [x] **RESOLVED 2026-08-24 — the "brownout loop" was a corrupt flash, not a
     power fault.** (First hardware connect.) The XIAO rebooted in a tight loop
     (`rst:0x3 RTC_SW_SYS_RST`, ~30×/sec) and never reached `setup()`. We first
@@ -1673,7 +1672,7 @@ Full design + math + open questions: `specs/013-navigation.spec`.
     mistake on your side.** To restore the eyes the module's PSRAM needs to be
     repaired/replaced (reseat/reflow the octal part, or swap the XIAO). Face
     detection + navigation + servos do NOT depend on PSRAM and will work once
-    the RPi brain is connected.
+    the Orange Pi brain is connected.
   1. [ ] **First-run wiring check** — set `HARDWARE_CHECK 1` (in
    `include/config.h`, or add `-DHARDWARE_CHECK=1` to `build_flags` in
    `platformio.ini`), `pio run`, and flash. On boot the owl probes **every**
@@ -1685,7 +1684,7 @@ Full design + math + open questions: `specs/013-navigation.spec`.
    `i2c_found` lists every address that answers, so a wrong-address or dead-bus
    wire is obvious. Flip `HARDWARE_CHECK` back to `0` and re-flash to return to
    normal operation. (The check runs before the normal init, so it doesn't depend
-   on the RPi being attached.)
+   on the Orange Pi being attached.)
  2. [ ] **Flash 1.2.0** (normal build) — 4-tap OTA (join `RobotOwl-Update` AP →
    `/update`) or USB; confirm `journalctl -u robot-owl-brain` shows `fw 1.2.0`.
  3. [ ] **Nav command moves the head** — from the web UI Navigate card, pick a
@@ -1732,7 +1731,7 @@ Full design + math + open questions: `specs/013-navigation.spec`.
   `JsonDocument` + `serializeJson` for consistency.
 - [x] **Dead `Eyes::sleep()`** — declared in `Eyes.h` but never called; the
   `SLEEPING` state drives `_sleeping` via `setExpression`. Removed it.
-- [x] **RPi drops non-telemetry messages** — `serial_handler.py::read_loop`
+- [x] **Orange Pi drops non-telemetry messages** — `serial_handler.py::read_loop`
   only parsed `type == "telemetry"` and silently discarded everything else.
   Added a `_handle_message()` dispatcher: telemetry still goes to the
   callback, while `boot`, `update_mode`/`update_mode_end`, `error`, and any
@@ -1742,29 +1741,29 @@ Full design + math + open questions: `specs/013-navigation.spec`.
   `{"type":"error","msg":"line_too_long"}` before clearing, so a
   truncated/malformed frame is diagnosable instead of silent.
 
-## RPi-brain UX (2026-08-18)
+## Orange Pi-brain UX (2026-08-18)
 
-Ideas to make the RPi supervisor nicer to run and debug.
+Ideas to make the Orange Pi supervisor nicer to run and debug.
 
 ### Service & startup
 
-- [x] **One-command setup script** — `rpi-brain/setup.sh` is the single entry
-  point for a fresh Raspberry Pi OS install: `sudo ./setup.sh`. It runs apt
+- [x] **One-command setup script** — `orangepi-brain/setup.sh` is the single entry
+  point for a fresh DietPi install: `sudo ./setup.sh`. It runs apt
   (python3-venv/alsa-utils/rsync/portaudio), adds the I2S `dtoverlay` to the
   correct `config.txt` (`/boot` or `/boot/firmware`), runs an **interactive
   config wizard** (serial port / web UI / speech / auto-sleep — useful
   defaults, Enter to accept; `--non-interactive` skips it), installs the tree
-  to `/opt/robot-owl` + venv + requirements (faster-whisper, no torch),
+  to `/opt/robot-owl` + venv + requirements (whisper.cpp via pywhispercpp, no torch),
   **pre-downloads the Whisper model**, creates the `robotowl` user in the
   `dial` group, installs the udev rule, enables the systemd unit, then reboots
   to apply I2S — with a one-shot boot hook that starts the robot and clears
   itself. Idempotent. `deploy/install.sh` remains as the no-reboot/no-apt
   variant for manual installs.
 - [x] **systemd service** — `deploy/robot-owl-brain.service` + `deploy/install.sh`
-  (copies the tree to `/opt/robot-owl/rpi-brain`, builds a `.venv`, creates a
+  (copies the tree to `/opt/robot-owl/orangepi-brain`, builds a `.venv`, creates a
   `robotowl` system user in the `dial` group, installs a udev rule for the
   ESP32 USB CDC port, then `enable`s the unit). Re-runnable. **Not yet run on
-  real hardware** — verify `install.sh` + `systemctl start` on the RPi.
+  real hardware** — verify `install.sh` + `systemctl start` on the Orange Pi.
 - [x] **Startup banner** — `brain/banner.py` prints an ASCII owl + firmware
   version / serial port / config path / web-UI status once at launch (stdout,
   so it shows in `journalctl`).
@@ -1789,8 +1788,8 @@ needed. The page polls `/api/telemetry` (1s) to show live state/face/servos.
   `{"type":"blink","speed":N}`.
 - [x] **"Look <expression>"** — button grid (neutral/happy/sleepy/surprised/
   angry/searching) → `{"type":"expression","value":...}` (3s overrides).
-- [x] **"Make a sound"** — audio is **RPi-side only**: the MAX98357A I2S amp
-  is wired to the Pi (see the new **Audio** section in `WIRING.md`), so no
+- [x] **"Make a sound"** — audio is **Orange Pi-side only**: the MAX98357A I2S amp
+  is wired to the Orange Pi (see the new **Audio** section in `WIRING.md`), so no
   firmware change is needed. `brain/audio.py` synthesizes short effects
   (beep/chirp/happy/sad/alert) in-process as 16-bit mono WAV and plays them via
   `aplay` in a daemon thread (never blocks the serial read loop); it degrades
@@ -1800,8 +1799,8 @@ needed. The page polls `/api/telemetry` (1s) to show live state/face/servos.
   (`detecting`→chirp, `interacting`→happy, `sleeping`→sad, `update`/`error`
   →alert). Config: `audio.enabled` / `audio.device` / `audio.volume` in
   `config.yaml`. **On-hardware TODO:** enable I2S
-  (`dtoverlay=hifiberry-i2s-lite` in `config.txt`), wire the amp (SD MODE →
-  3.3V!), then confirm `aplay -l` lists a bcm2835 device and the buttons are
+  (the `owl_i2s` DT overlay in the device tree), wire the amp (SD MODE →
+  3.3V!), then confirm `aplay -l` lists the `owl` card and the buttons are
   audible.
 - [x] **"Move the head (arrow buttons)"** — 3×3 pad (up/left/center/right/
   down) driving the head servo (`CH_HEAD`) with absolute angles
@@ -1819,8 +1818,8 @@ the page loads and each button visibly drives the owl (blink/expression/head).
 
 - [x] **OTA update mode** — 4-tap vibration → SoftAP `RobotOwl-Update` +
   `/update` HTTP page (HTTPUpdateServer); one tap exits; dual-bank
-  `ota_0`/`ota_1` partitions; standalone boot (5s USB wait, no RPi needed).
-- [x] **RPi supervisor update-mode handling** — `Telemetry.update` dataclass
+  `ota_0`/`ota_1` partitions; standalone boot (5s USB wait, no Orange Pi needed).
+- [x] **Orange Pi supervisor update-mode handling** — `Telemetry.update` dataclass
   parses the `update` object; `Supervisor` logs the AP ssid/password/url on
   entry and a confirmation on exit.
 - [x] **README corrected** — state machine documented as 7 states (was 6),

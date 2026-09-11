@@ -6,7 +6,7 @@ Depends on: 002, 008
 
 ## Intent
 
-The owl should notice a person and look at them, without help from the Raspberry
+The owl should notice a person and look at them, without help from the Orange
 Pi. That is what makes `DETECTING → INTERACTING` a local decision (SPEC-001) and
 lets the owl be interesting when unplugged.
 
@@ -172,7 +172,7 @@ nearest person, and the one to follow.
   `AGENTS.md` counted. `FaceDetector.h` and `FaceDetector.cpp` were fixed when it
   was overturned, and that was enough to make the topic feel closed — a later
   sweep found `~180 ms` still stated as current in `src/main.cpp`,
-  `src/vision.cpp`, `include/config.h` and `rpi-brain/brain/serial_handler.py`.
+  `src/vision.cpp`, `include/config.h` and `orangepi-brain/brain/serial_handler.py`.
   The `config.h` one was the one that mattered: it was the stated *justification*
   for `FACE_DETECT_INTERVAL_MS`, so a dead number was still doing live work. When
   a measurement is overturned, grep for it and fix every copy in the same

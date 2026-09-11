@@ -14,7 +14,7 @@ namespace {
 
 // Verworfene Zeilen, seit dem Boot. Wird in der Telemetrie mitgeschickt, denn
 // ein stilles Verwerfen waere genau die Sorte unsichtbarer Ausfall, gegen die
-// vibration.pulses und face.attempts existieren: der RPi saehe eine Luecke und
+// vibration.pulses und face.attempts existieren: der Orange Pi saehe eine Luecke und
 // koennte nicht unterscheiden, ob die Eule nichts gesendet hat oder ob er
 // selbst zu langsam war.
 static uint32_t txDropped = 0;
@@ -29,13 +29,13 @@ static uint32_t txDropped = 0;
 // tx_timeout, bis zu 20 Wiederholungen) hielt EIN Telemetrieframe die Schleife
 // bis zu 2 s an, sobald der Leser am anderen Ende nicht mitkam - auf Hardware
 // gemessen 2026-08-31: loop_max_ms 2256 und 4023, loop_hz 3,3. Die Eule stand
-// dann still, weil der Raspberry Pi beschaeftigt war. Das darf nicht sein: die
+// dann still, weil der Orange Pi beschaeftigt war. Das darf nicht sein: die
 // Telemetrie ist ein Nebenprodukt, das Verhalten ist die Aufgabe.
 //
 // Zwei Teile, und beide werden gebraucht:
 //   1. availableForWrite() >= Laenge  ->  nur schreiben, wenn die GANZE Zeile
 //      in den Ring passt. Sonst verwerfen. Eine halb geschriebene NDJSON-Zeile
-//      ist schlimmer als keine: der RPi meldet dafuer einen Parse-Fehler.
+//      ist schlimmer als keine: der Orange Pi meldet dafuer einen Parse-Fehler.
 //   2. SERIAL_TX_TIMEOUT_MS 0 -> selbst wenn Punkt 1 sich irrte, wartet der
 //      Schreibvorgang nicht.
 //
@@ -66,7 +66,7 @@ void sendAck(const char* type) {
     sendJson(doc);
 }
 
-// Map an expression name (from the RPi) to an EyeExpression. Backed by the
+// Map an expression name (from the Orange Pi) to an EyeExpression. Backed by the
 // single NAMES table in Eyes.cpp, so adding a mood there makes it addressable
 // over the protocol automatically. An unknown name falls back to NEUTRAL rather
 // than being rejected, matching the long-standing behaviour of this command.
@@ -132,7 +132,7 @@ void handleCommand(const char* json) {
         // Persistent navigation command from the supervisor. Unlike the 3s
         // expression/gaze overrides, this HOLDS: active=true enters/keeps the
         // NAVIGATING state and points the head at `angle` until an active=false
-        // arrives (or the firmware's own timeout fires). The RPi recomputes the
+        // arrives (or the firmware's own timeout fires). The Orange Pi recomputes the
         // bearing from live GPS + heading and re-sends the angle each refresh,
         // so the head tracks the destination.
         float angle = doc["angle"];
@@ -183,7 +183,7 @@ void sendTelemetry() {
     // ~2000 ms = ein nicht mehr leergelesener USB-CDC-Port).
     doc["loop_max_ms"] = loopMaxMs;
     // Seit dem Boot verworfene Zeilen, weil der Leser am USB-Port nicht mitkam.
-    // Steigt = der RPi (oder das Terminal) haengt; die Eule laeuft weiter, was
+    // Steigt = der Orange Pi (oder das Terminal) haengt; die Eule laeuft weiter, was
     // der ganze Zweck ist. Bleibt es 0, war der Port nie der Engpass.
     doc["tx_dropped"] = txDropped;
     doc["fw"] = FW_VERSION;
@@ -261,7 +261,7 @@ void sendTelemetry() {
     doc["vibration"]["pulses"] = sensors.vibrationPulseTotal();
 
     // Navigation status (present only while the owl is NAVIGATING). Lets the
-    // RPi confirm the head is actually being held at the requested angle.
+    // Orange Pi confirm the head is actually being held at the requested angle.
     if (behavior::current() == State::NAVIGATING) {
         doc["navigation"]["active"] = true;
         doc["navigation"]["angle"] = behavior::navAngle();

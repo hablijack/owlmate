@@ -1,4 +1,4 @@
-# SPEC-010: NDJSON protocol between ESP32 and Raspberry Pi
+# SPEC-010: NDJSON protocol between ESP32 and Orange Pi
 
 Status: implemented
 Verified: 2026-08-27 — 39 dedicated contract tests (tests/test_protocol.py);
@@ -17,7 +17,7 @@ system can be debugged with a serial monitor and nothing else.
 * **R-010.3** Unknown fields must be ignored, so either side can be extended
   without breaking the other.
 * **R-010.4** Absence of a device must be visible, not guessed.
-* **R-010.5** Every field the firmware sends must be parsed by the RPi. A field
+* **R-010.5** Every field the firmware sends must be parsed by the Orange Pi. A field
   that is transmitted and discarded is worse than one that was never added: it
   reads as implemented on both sides while carrying nothing.
 * **R-010.6** Adding a field must require changing exactly one place per side.
@@ -52,7 +52,7 @@ times over during hardware debugging.
 only when the boot-time probe found them, which makes telemetry a presence
 indicator for free — no separate health field needed.
 
-**Commands** (RPi → ESP32): `sleep`, `wake`, `expression`, `servo`, `gaze`,
+**Commands** (Orange Pi → ESP32): `sleep`, `wake`, `expression`, `servo`, `gaze`,
 `nav`, `blink`, `heartbeat`. While in `UPDATE` every command except `heartbeat`
 is ignored, because the owl is on an isolated SoftAP and should not be steerable
 from a link that is not there.
@@ -89,16 +89,16 @@ Three parts, and all three are needed:
 * `SERIAL_TX_TIMEOUT_MS` 0, so the write cannot wait;
 * `sendJson()` asks `availableForWrite()` whether the **entire** line fits and
   drops the frame if not. Dropping beats truncating: a half-written NDJSON line
-  costs the RPi a parse error, while a dropped frame costs only a gap — telemetry
+  costs the Orange Pi a parse error, while a dropped frame costs only a gap — telemetry
   is a 500 ms snapshot and its counters are cumulative, so nothing is lost.
 
 `tx_dropped` carries the count, because a silent drop is exactly the invisible
-failure `vibration.pulses` and `face.attempts` exist to prevent: the RPi would
+failure `vibration.pulses` and `face.attempts` exist to prevent: the Orange Pi would
 otherwise see a gap and be unable to tell "the owl went quiet" from "I was too
 slow". Verified on hardware the same day, same condition (port unread for 73 s,
 then attached): `loop_max_ms` **23 ms**, `tx_dropped` 139. No stall.
 
-**This is a production requirement, not a bench nicety.** The RPi runs speech
+**This is a production requirement, not a bench nicety.** The Orange Pi runs speech
 recognition in the same process; if that thread starves the reader, the owl's
 eyes must not freeze. The behaviour is the job and the telemetry is the
 by-product, so the by-product yields.
@@ -109,7 +109,7 @@ that the owl renders smoothly for the first ~12 minutes and then lags and holds
 the eyes on their last position, recovering instantly on a power cycle. Reading
 the firmware ruled out a leak (every `esp_camera_fb_get()` is returned, esp-dl
 clears its result list per run and caps it at top_k, the crop buffer is
-allocated once) — but it could not rule out *fragmentation*, because the RPi had
+allocated once) — but it could not rule out *fragmentation*, because the Orange Pi had
 no heap field at all to look at. `free` alone would not have settled it either:
 a heap that is fragmented rather than leaking shows a flat `free` and a
 shrinking `largest`, so the pair is the measurement and either one alone is not.
@@ -152,13 +152,13 @@ mid-inference, so the headroom is reported continuously rather than checked
 once. Measured 5,584 bytes free of 8,192 (`VISION_TASK_STACK`).
 
 **Expression names come from one table** in `Eyes.cpp` (`NAMES[]`), which backs
-both directions. The RPi copy is **generated** from it
-(`rpi-brain/tools/gen_expressions.py` → `brain/expressions.py`), not
+both directions. The Orange Pi copy is **generated** from it
+(`orangepi-brain/tools/gen_expressions.py` → `brain/expressions.py`), not
 hand-maintained — see SPEC-004, where the two former mirrors are recorded as
 having already drifted. An unknown name renders as `neutral` rather than being
 rejected, so drift shows up as an eye that refuses to change.
 
-**The RPi side is a table, not a function.** `serial_handler.py` holds one row
+**The Orange Pi side is a table, not a function.** `serial_handler.py` holds one row
 per field — `(wire key, attribute, coercion)` — and the parser only handles the
 frame's *shape*. It was ~60 lines of hand-written `.get()` calls until
 2026-08-27, which is how seven fields came to be sent and never read (R-010.5).
@@ -169,8 +169,8 @@ than propagating `None` into the supervisor or raising into the read loop
 (R-010.7). An explicit JSON `null` is treated as absent for the same reason.
 
 **R-010.5 governs the INBOUND direction only, and that needed saying.** It says
-every field the *firmware* sends must be parsed by the RPi. It says nothing about
-what the RPi then re-publishes on `/api/telemetry`, and the web page is entitled
+every field the *firmware* sends must be parsed by the Orange Pi. It says nothing about
+what the Orange Pi then re-publishes on `/api/telemetry`, and the web page is entitled
 to render a subset. On 2026-08-31 the hand-written web payload was mistaken for a
 violation of this requirement and nearly got the inbound fix — a `_*_FIELDS`
 table — applied to a problem that was not the same shape. It was replaced with
@@ -201,7 +201,7 @@ lines are protocol garbage on a machine-to-machine link.
 * USB CDC ignores the nominal baud rate; real throughput is far above 115200,
   which is why image streaming to the Pi would have been viable as an
   alternative to on-device detection.
-* The RPi parser tolerates non-JSON lines, so bootloader output at reset does no
+* The Orange Pi parser tolerates non-JSON lines, so bootloader output at reset does no
   harm. Four ROM/bootloader `E (...)` lines appear at every boot (unflashed
   `ota_1`, no coredump partition) and are harmless.
 * **Seven fields were transmitted and discarded** until 2026-08-27:
@@ -222,7 +222,7 @@ lines are protocol garbage on a machine-to-machine link.
   subsystems, for the same reason. See the cumulative-counter decision above.
 * **"Specifying the wire format means both sides implement it."** This spec
   listed `imu.cal`, `vibration.pulses` and `face.total` in the telemetry object
-  above, and stated that the RPi's dataclasses were frozen. Neither was true:
+  above, and stated that the Orange Pi's dataclasses were frozen. Neither was true:
   the fields were parsed by nobody and the dataclasses were mutable. A spec
   written retroactively can describe the design as intended and be read as
   describing the code — and the closer it is to right, the less likely anyone
@@ -234,7 +234,7 @@ lines are protocol garbage on a machine-to-machine link.
 
 ## Acceptance
 
-1. `python3 rpi-brain/tests/run_tests.py` — 174 tests pass, of which 39 are the
+1. `python3 orangepi-brain/tests/run_tests.py` — 174 tests pass, of which 39 are the
    protocol contract (`tests/test_protocol.py`).
 2. A serial capture shows one JSON object per line and nothing else after boot.
 3. Removing a device from the I2C bus makes its sub-object disappear from
@@ -260,6 +260,6 @@ lines are protocol garbage on a machine-to-machine link.
   contract moved together — `_IMU_CAL_FIELDS` in `serial_handler.py`, the
   `IMUCalibration` dataclass, the web UI and `tests/test_protocol.py` — which is
   R-010.5 working as intended. See SPEC-006.
-* Changes here need a matching change on the RPi side. The `_*_FIELDS` tables in
+* Changes here need a matching change on the Orange Pi side. The `_*_FIELDS` tables in
   `serial_handler.py` are the other half of this contract, and R-010.5 is the
   rule that keeps them honest.

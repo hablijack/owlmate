@@ -7,7 +7,7 @@ Depends on: 001, 012, 013
 
 ## Intent
 
-The owl hears a short utterance, transcribes it offline on the RPi, and reacts
+The owl hears a short utterance, transcribes it offline on the Orange Pi, and reacts
 with an eye expression and an owl-call. It is a reaction engine, not a
 conversation: there is no dialogue state, no intent model, no reply. German.
 
@@ -16,7 +16,7 @@ pre-implementation design.
 
 ## Requirements
 
-* **R-014.1** ASR runs on the RPi. The ESP32 is not involved and needs no
+* **R-014.1** ASR runs on the Orange Pi. The ESP32 is not involved and needs no
   firmware change (it has no mic and no headroom).
 * **R-014.2** Reactions use the *existing* override protocol. Speech must not
   add a second way to drive the owl (inherits R-001.2).
@@ -28,14 +28,14 @@ pre-implementation design.
 
 ## Decisions
 
-**faster-whisper (CTranslate2), not openai-whisper.** No torch on a Pi. The
-default is the **`small` model with `compute_type="int8"`** — the combination
-faster-whisper itself recommends for a Pi 4, and the reason int8 is hardcoded
-in `speech.py` while the size stays configuration (R-014.6). `tiny`/`base` cut
-latency and RAM and remain valid values, at a real accuracy cost on German place
-names. The default was `tiny` until 2026-08-30; nothing measured on this
-hardware justified it, so the vendor recommendation wins until a measurement on
-the Pi says otherwise.
+**whisper.cpp (via pywhispercpp), not openai-whisper.** No torch on the Orange
+Pi. The default is the **`small` model**, a local `.bin`/`.gguf` file that
+`setup.sh` downloads so the brain runs fully offline; the model *path* is
+configuration (R-014.6). `tiny`/`base` cut latency and RAM and remain valid
+values, at a real accuracy cost on German place names. The default was `tiny`
+until 2026-08-30; nothing measured on this hardware justified it, so the larger
+model wins until a measurement on the Orange Pi says otherwise. The ASR engine
+changed with the board swap — see SPEC-015.
 
 **A three-part gate, not always-on transcription** (R-014.3). ASR runs only when
 the owl is awake *and* a face is in frame *and* the mic energy passes an RMS VAD
@@ -49,7 +49,7 @@ reached at all).
 queue; the worker drains it, runs the VAD, transcribes, and performs every
 reaction. Nothing touches the foreground serial read loop (R-014.5).
 
-**Heavy imports are lazy.** `faster_whisper` and `sounddevice` are imported
+**Heavy imports are lazy.** `whispercpp` and `sounddevice` are imported
 inside `start()`, so the brain runs on a machine with no mic and no ASR engine
 installed — and a machine with `speech.enabled: false` never imports them at
 all. `main.py` wraps the whole start in try/except (R-014.5, R-012.3).
@@ -69,7 +69,7 @@ the sofa, and including when the face has momentarily left frame.
 multi-word phrases still match as substrings.
 
 **Wake-on-speech is opt-in and separate.** The firmware self-wakes on a face or
-a tap; the RPi adds only "wake on an explicit `wake_keywords` entry" (R-014.4).
+a tap; the Orange Pi adds only "wake on an explicit `wake_keywords` entry" (R-014.4).
 An empty list means speech never wakes the owl.
 
 **Everything German lives in `config.yaml`** — keywords, clusters, reactions,
@@ -78,7 +78,7 @@ nav triggers, stop words (R-014.6). Adding a reaction is a config edit.
 ## Verified facts
 
 * The whole pipeline is tested on a dev machine with no mic, no PortAudio and no
-  faster-whisper: `tests/stubs.py` feeds synthetic audio chunks and a mocked
+  whisper.cpp: `tests/stubs.py` feeds synthetic audio chunks and a mocked
   model returning canned segments. See SPEECH-adjacent detail in SPEC-012.
 * Reaction expressions configured in `config.yaml` are validated against the
   firmware's `NAMES[]` by `tests/test_expressions.py` — a typo there would
@@ -96,13 +96,13 @@ nav triggers, stop words (R-014.6). Adding a reaction is a config edit.
   awake + face + energy gate.
 * **"Phase" is an unambiguous word in this repo.** The speech feature's
   implementation phases (1–4: VAD → ASR → reactions → auto-sleep) are cited in
-  `rpi-brain/brain/` comments and are **not** the BACKLOG's Steps. Two meanings
+  `orangepi-brain/brain/` comments and are **not** the BACKLOG's Steps. Two meanings
   for one word cost time on 2026-08-27; the BACKLOG's task list was renamed to
   "Step" for this reason.
 
 ## Acceptance
 
-1. `cd rpi-brain && python3 tests/run_tests.py` — the speech pipeline, ASR,
+1. `cd orangepi-brain && python3 tests/run_tests.py` — the speech pipeline, ASR,
    auto-sleep and navigation-trigger tests pass.
 2. With `speech.enabled: false` (the default), no audio module is imported and
    the brain starts normally.
@@ -112,11 +112,11 @@ nav triggers, stop words (R-014.6). Adding a reaction is a config edit.
 ## Open
 
 * **Never run against a real microphone.** Every test uses synthetic audio and a
-  stubbed model. Unknown until it runs on the Pi: real VAD threshold, actual
-  transcription latency for a 2.5 s window on Pi hardware, and whether the RMS
+   stubbed model. Unknown until it runs on the Orange Pi: real VAD threshold, actual
+   transcription latency for a 2.5 s window on Orange Pi hardware, and whether the RMS
   gate needs tuning for the room.
-* **Whether `small`/int8 is fast enough on the Pi 4 — unmeasured.** It is the
-  vendor's recommendation for that board, not a number taken here; transcription
+* **Whether `small` is fast enough on the Orange Pi — unmeasured.** It is the
+  default model `setup.sh` downloads, not a number taken here; transcription
   latency for a 2.5 s window on real hardware is still unknown, and `cooldown_s`
   (4.5 s) may need raising if a transcription outlasts it. Drop to `base` or
   `tiny` if the owl feels sluggish, and record the measurement here. Accuracy on

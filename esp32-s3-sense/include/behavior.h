@@ -4,7 +4,7 @@
 // The behaviour state machine -- the owl's autonomy.
 //
 // It runs from LOCAL inputs only (vibration sensor + on-device face detection +
-// timeouts from config.h). The RPi supervisor is NOT a second state machine: it
+// timeouts from config.h). The Orange Pi supervisor is NOT a second state machine: it
 // sends policy (sleep/wake) and temporary overrides, both of which arrive here
 // through the functions below. A duplicate machine used to exist on both sides
 // and the two fought over expressions; don't reintroduce one.
@@ -51,7 +51,7 @@ void overrideGaze(float x, float y);
 
 // active=true enters/holds NAVIGATING with the head pinned to `angle`, and
 // re-arms the NAV_TIMEOUT_MS self-timeout. active=false recenters and returns
-// to IDLE. The RPi recomputes the bearing from live GPS + heading and re-sends
+// to IDLE. The Orange Pi recomputes the bearing from live GPS + heading and re-sends
 // it on each refresh, so the head tracks the destination.
 void setNavTarget(float angle, bool active);
 

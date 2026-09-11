@@ -195,7 +195,7 @@ Diagnostics that changed a conclusion, and what they cost:
 
 1. `pio run` builds all environments; the diagnostic ones in seconds.
 2. Each diagnostic's output states which conclusion each outcome supports.
-3. Every host tool runs unchanged on macOS and on the Raspberry Pi.
+3. Every host tool runs unchanged on macOS and on the Orange Pi.
 
 ## Open
 

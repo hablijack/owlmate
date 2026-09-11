@@ -14,7 +14,7 @@
 // three things it used to also contain now live next to their own headers:
 //
 //   behavior.cpp        the state machine + the OTA update mode
-//   protocol.cpp        the NDJSON wire contract with rpi-brain
+//   protocol.cpp        the NDJSON wire contract with orangepi-brain
 //   vision.cpp          the face-detection task on core 0
 //   hardware_check.cpp  the -DHARDWARE_CHECK=1 wiring probe
 //
@@ -90,7 +90,7 @@ void setup() {
 
 #if !HARDWARE_CHECK
     // Wait for USB CDC to connect, but only briefly: the owl must boot
-    // standalone (for the 4-tap update mode) even without the RPi.
+    // standalone (for the 4-tap update mode) even without the Orange Pi.
     // Skipped in HARDWARE_CHECK mode: the check must run headless (power
     // adapter only, no host), so we must not block on a USB connection that
     // never comes.

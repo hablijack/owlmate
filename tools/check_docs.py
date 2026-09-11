@@ -12,7 +12,7 @@ file that *told* the reader it was authoritative:
   * AGENTS.md said the IMU calibration was present in NVS. It had been erased
     weeks earlier, and specs/006 plus BACKLOG both said so. AGENTS.md is the
     file an agent reads first.
-  * SPEC-010 listed three telemetry fields the RPi never parsed, and called its
+  * SPEC-010 listed three telemetry fields the Orange Pi never parsed, and called its
     dataclasses frozen while they were mutable.
   * README claimed Arduino core 2.0.17 / IDF 4.4 long after the move to
     pioarduino 3.3.11 / IDF 5.5, and described the SW420 as debounced when it is
@@ -30,7 +30,7 @@ Run:
     python3 tools/check_docs.py           # from the repo root
     python3 tools/check_docs.py -v        # list every check as it runs
 
-It also runs inside the RPi suite (rpi-brain/tests/test_docs.py), so a normal
+It also runs inside the Orange Pi suite (orangepi-brain/tests/test_docs.py), so a normal
 `run_tests.py` catches drift without anyone remembering to invoke this.
 """
 
@@ -130,13 +130,13 @@ def check_backlog_steps():
             check(f"{fname} references Step {n}, which is defined", n in defined,
                   f"BACKLOG.md has no '### Step {n}' heading")
 
-    # The Phase/Step collision is a real trap: rpi-brain code uses "Phase 1..4"
+    # The Phase/Step collision is a real trap: orangepi-brain code uses "Phase 1..4"
     # for the speech feature's implementation phases. The backlog must not
     # reintroduce "Phase N" for its task list.
     body = backlog.split("# Robot Owl — Backlog")[0]
     stray = [m for m in re.findall(r"### Phase \d+", body)]
     check("BACKLOG's task list uses Step, not Phase", not stray,
-          "'Phase N' means the SPEECH feature's phases in rpi-brain/ comments; "
+          "'Phase N' means the SPEECH feature's phases in orangepi-brain/ comments; "
           "do not reuse it for backlog tasks (see specs/014-speech.spec)")
 
 
@@ -157,13 +157,13 @@ def check_referenced_paths():
             if path.startswith(("http", "~", "/")) or "*" in path:
                 continue
             # Docs write paths relative to the subproject under discussion:
-            # "brain/audio.py" means rpi-brain/brain/audio.py, "src/main.cpp"
+            # "brain/audio.py" means orangepi-brain/brain/audio.py, "src/main.cpp"
             # means esp32-s3-sense/src/main.cpp. Accept any of the roots.
             found = any(os.path.exists(os.path.join(ROOT, base, path))
-                        for base in ("", "rpi-brain", "esp32-s3-sense"))
+                        for base in ("", "orangepi-brain", "esp32-s3-sense"))
             check(f"{fname} references {path}, which exists", found,
-                  f"{fname} names {path}; not found at the repo root, under "
-                  "rpi-brain/ or under esp32-s3-sense/ (renamed or deleted?)")
+                   f"{fname} names {path}; not found at the repo root, under "
+                   "orangepi-brain/ or under esp32-s3-sense/ (renamed or deleted?)")
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +315,7 @@ def check_expression_count():
         check(f"{f} quotes the expression count as {n} (or {n - 2} selectable)", not bad,
               f"NAMES[] has {n} entries ({n - 2} selectable) but {f} says "
               f"{sorted(bad)}. "
-              "Regenerate with rpi-brain/tools/gen_expressions.py and fix the prose.")
+               "Regenerate with orangepi-brain/tools/gen_expressions.py and fix the prose.")
 
 
 # ---------------------------------------------------------------------------
@@ -323,11 +323,11 @@ def check_expression_count():
 # ---------------------------------------------------------------------------
 def check_test_count():
     total = 0
-    tests_dir = os.path.join(ROOT, "rpi-brain", "tests")
+    tests_dir = os.path.join(ROOT, "orangepi-brain", "tests")
     for f in os.listdir(tests_dir):
         if f.startswith("test_") and f.endswith(".py"):
             total += len(re.findall(r"^\s+def test_", read(os.path.join(tests_dir, f)), re.M))
-    check("the RPi suite has tests to count", total > 0)
+    check("the Orange Pi suite has tests to count", total > 0)
 
     for fname, text in steering_texts().items():
         quoted = set(int(x) for x in re.findall(r"(\d+) tests\b", text))

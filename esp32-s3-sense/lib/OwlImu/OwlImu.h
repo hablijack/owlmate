@@ -51,7 +51,7 @@
 //   yaw            = compass bearing of the beak, 0..360, clockwise from north
 //
 // yaw is a TRUE GEOGRAPHIC bearing, not a magnetic one: IMU_HEADING_OFFSET_DEG
-// folds the magnetic declination in, because geo.bearing_deg() on the RPi
+// folds the magnetic declination in, because geo.bearing_deg() on the Orange Pi
 // computes a true bearing and both sides must share one north reference.
 
 // --- Konfiguration ----------------------------------------------------------

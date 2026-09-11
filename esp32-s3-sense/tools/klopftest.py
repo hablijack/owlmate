@@ -18,7 +18,7 @@ def find_port():
     """Serieller Port der ESP32 - plattformunabhaengig.
 
     Reihenfolge: Umgebungsvariable OWL_PORT, dann automatische Suche. Deckt
-    macOS (/dev/cu.usbmodem*) und Linux/Raspberry Pi (/dev/ttyACM*, ttyUSB*)
+    macOS (/dev/cu.usbmodem*) und Linux/Orange Pi (/dev/ttyACM*, ttyUSB*)
     ab, damit dasselbe Skript auf beiden Hosts laeuft.
     """
     import glob

@@ -17,7 +17,7 @@ away. The design has to survive that.
   the owl needs that the sheet does not cover.
 * **R-004.3** Adding or retuning a mood must not mean writing a drawing routine.
 * **R-004.4** Expression names, shapes and the enum cannot drift apart silently.
-* **R-004.6** The RPi's copy of the name list is derived from the firmware's, not
+* **R-004.6** The Orange Pi's copy of the name list is derived from the firmware's, not
   maintained alongside it. Any hand-kept mirror is a defect.
 * **R-004.5** Asymmetric shapes must mirror between the eyes, so the pair leans
   toward the beak rather than both leaning the same way.
@@ -60,9 +60,9 @@ worried and sad lower the *outer* one. `drawBlob()` mirrors it via its
 `NAMES[]` and `EyeExpression` are size-checked against `_COUNT` with
 `static_assert`, so a mismatch is a build error rather than a wrong eye.
 
-**The RPi's list is generated, not mirrored** (R-004.6).
-`rpi-brain/tools/gen_expressions.py` parses `NAMES[]` out of `Eyes.cpp` and
-writes `rpi-brain/brain/expressions.py`, following the precedent of
+**The Orange Pi's list is generated, not mirrored** (R-004.6).
+`orangepi-brain/tools/gen_expressions.py` parses `NAMES[]` out of `Eyes.cpp` and
+writes `orangepi-brain/brain/expressions.py`, following the precedent of
 `tools/preview_eyes.py`, which parses `SHAPES[]` from the same file so the
 preview sheet cannot drift. The generated file is committed, so a deployed Pi
 never needs the firmware tree; `tests/test_expressions.py` re-derives the list
@@ -122,7 +122,7 @@ replaces. `transitionTo()` returns early when the state is unchanged, so the
 flash fires once per genuine entry.
 
 Keeping `HAPPY` off the sustained face also keeps it **earnable**: it stays
-available for the RPi to send when speech recognises someone or the owl is
+available for the Orange Pi to send when speech recognises someone or the owl is
 tapped. Spending peak joy on mere presence leaves nothing in reserve for when
 something good actually happens.
 
@@ -191,11 +191,11 @@ something good actually happens.
   indexed by the enum. Every new expression would have shifted it and made
   telemetry report the wrong name. This is why names now come from one table.
 * **"One source of truth in the firmware is enough."** Removing `exprNames[]`
-  fixed the firmware and left two *more* copies on the RPi, which then drifted
+  fixed the firmware and left two *more* copies on the Orange Pi, which then drifted
   in exactly the way the firmware fix had prevented. The lesson generalises: a
   vocabulary shared across a process boundary needs generation or a test, and
   "it is documented as a mirror" is not either of those. `NAMES[]` even carried
-  a comment saying the RPi mirrors lived in `web_ui.py` and `config.yaml` — the
+  a comment saying the Orange Pi mirrors lived in `web_ui.py` and `config.yaml` — the
   duplication was known, written down, and still drifted.
 * **`Eyes::markDirty()` was public API nobody called.** Documented in
   `AGENTS.md` as the way to force a redraw "when state changes by some other
@@ -209,7 +209,7 @@ something good actually happens.
    field echoes the same name back.
 3. A build with a deliberately mismatched table fails at compile time
    (`static_assert` against `EyeExpression::_COUNT`).
-4. `cd rpi-brain && python3 tools/gen_expressions.py --check` exits 0. Adding a
+4. `cd orangepi-brain && python3 tools/gen_expressions.py --check` exits 0. Adding a
    name to `NAMES[]` without regenerating must fail this and two tests in
    `tests/test_expressions.py` — verified by doing exactly that.
 

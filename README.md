@@ -1,6 +1,7 @@
 # Robot Owl — Embedded Firmware & Brain
 
-A robotic owl companion with expressive LCD eyes, face detection, IMU, GPS, and servo-controlled ears/head/wings. The ESP32-S3 Sense owns the behavior state machine and runs on-device sensor fusion and eye rendering, communicating NDJSON telemetry to a Raspberry Pi "supervisor" for logging, health monitoring, and policy.
+A robotic owl companion with expressive LCD eyes, face detection, IMU, GPS, and servo-controlled ears/head/wings. The ESP32-S3 Sense owns the behavior state machine and runs on-device sensor fusion and eye rendering, communicating NDJSON telemetry to an Orange Pi "supervisor" for logging,
+health monitoring, and policy.
 
 ---
 
@@ -18,7 +19,7 @@ A robotic owl companion with expressive LCD eyes, face detection, IMU, GPS, and 
 | **GPS** | Adafruit PA1010D | I2C | SDA=1, SCL=2, addr 0x10 | Position/satellites |
 | **Servo Driver** | PCA9685 | I2C | SDA=1, SCL=2, addr 0x40 | 5-channel PWM for servos |
 | **Vibration** | SW420 | Digital GPIO | GPIO3 (D2), input | Wake-on-vibration trigger |
-| **Audio Amp** | MAX98357A (Adafruit) | I2S — **on the Raspberry Pi**, not the ESP32 | BCLK=GPIO18, LRCLK=GPIO19, DIN=GPIO21 (Pi 40-pin header) | Sound effects / voice |
+| **Audio Amp** | MAX98357A (Adafruit) | I2S — **on the Orange Pi**, not the ESP32 | BCLK=PB5, LRCLK=PB6, DIN=PB7 (Orange Pi 40-pin header) | Sound effects / voice |
 
 ### Servo Channels (PCA9685)
 
@@ -51,22 +52,20 @@ All I2C devices share the same bus: LSM303AGR @ 0x19 + 0x1E, PA1010D @ 0x10, PCA
 ### Power
 - LCD backlights tied directly to 3.3V (always on)
 - Servos powered separately (not from ESP32 3.3V rail)
-- MAX98357A amp powered from the Pi 5V rail; speaker is 4Ω or 8Ω
+- MAX98357A amp powered from the Orange Pi 5V rail; speaker is 4Ω or 8Ω
 
-### Audio (RPi-side)
-Sound lives **entirely on the Raspberry Pi** — the MAX98357A amp is driven
-over the Pi's I2S bus, so the ESP32 has no audio pins. Enable I2S with
-`dtoverlay=hifiberry-i2s-lite` in `/boot/config.txt`. The brain synthesizes
-short effects (beep/chirp/happy/sad/alert) in-process (`brain/audio.py`) and
-plays them with `aplay`; if the amp/I2S is absent it just logs and no-ops.
-Full pin map + the SD-MODE-to-3.3V gotcha are in `WIRING.md`.
-
-**Orange Pi variant.** `orangepi-brain/` runs the same brain on an Orange Pi
-Zero 3W (Allwinner A733) instead of the Pi. There the MAX98357A amp **and** an
-ICS43434 microphone share the A733's I2S0 bus on one 48 kHz ALSA card (`owl`),
-so the owl can both talk *and* hear. The A733's I2S controller needs a small
-custom kernel driver (a one-bit data-delay fix that is not expressible in a DT
-overlay) rather than the Pi's `hifiberry-i2s-lite` overlay — see
+### Audio (Orange Pi-side)
+Sound lives **entirely on the Orange Pi** — the MAX98357A amp **and** the
+ICS43434 microphone share the Orange Pi Zero 3W's I2S0 bus on one 48 kHz ALSA
+card (`owl`), so the owl can both talk *and* hear, and the ESP32 has no audio
+pins. The A733's I2S controller needs a small custom kernel driver (`owl_i2s` —
+a one-bit data-delay fix that is not expressible in a DT overlay) rather than a
+DT overlay; `setup.sh` builds the driver, installs the `owl-i2s-overlay` and the
+`asound.conf`, and reboots. The brain synthesizes short effects
+(beep/chirp/happy/sad/alert) in-process (`brain/audio.py`) and plays them with
+`aplay` on the `owl` card; if the amp/I2S is absent it just logs and no-ops.
+Full pin map + the SD-MODE-to-3.3V gotcha are in `WIRING.md`. The A733
+specifics — and what is still unverified on hardware — are in
 `specs/015-orangepi-audio.spec`.
 
 ---
@@ -75,7 +74,7 @@ overlay) rather than the Pi's `hifiberry-i2s-lite` overlay — see
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    RPi Brain (Python)                    │
+│                 Orange Pi Brain (Python)                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
 │  │ Serial Handler│  │  Supervisor  │  │  Policy / OTA │  │
 │  │ (NDJSON parse)│  │(log + health)│  │(sleep/wake)   │  │
@@ -111,15 +110,15 @@ inputs (vibration sensor + on-device face detection):
 | **DETECTING** | DETECTING | Face confirmed → INTERACTING; no face for 10s → IDLE |
 | **INTERACTING** | HAPPY for 1s, then AWE | Gaze follows face; face lost for 5s → IDLE |
 | **SLEEPING** | SLEEPING (closed) | Eyes closed, servos centered; wake command → IDLE |
-| **NAVIGATING** | SEARCHING | Head held at the RPi's compass bearing (a *persistent* `nav` override, not the 3s gaze override); `nav active:false` or a 5s no-refresh timeout → IDLE |
+| **NAVIGATING** | SEARCHING | Head held at the Orange Pi's compass bearing (a *persistent* `nav` override, not the 3s gaze override); `nav active:false` or a 5s no-refresh timeout → IDLE |
 | **UPDATE** | UPDATE (spinner) | SoftAP + `/update` HTTP server; 4-tap vibration enters, one tap exits |
 | **ERROR** | — | Hardware init failure |
 
 ### Navigation — "Guide me home" (live compass)
 The owl can point its head at a **named destination** and keep pointing there as
-you walk — a live compass. All the math lives on the RPi (it already parses the
+you walk — a live compass. All the math lives on the Orange Pi (it already parses the
 GPS fix + IMU yaw from every telemetry frame); the ESP32 just holds the head at
-the angle the RPi sends.
+the angle the Orange Pi sends.
 
 - **Teach places** in the web UI **Places** card: name + lat/lon, typed directly
   or dropped on the embedded OpenStreetMap/Leaflet picker (no API key).
@@ -133,7 +132,7 @@ the angle the RPi sends.
 - **Exit** (any one of four, whichever comes first): a spoken stop phrase
   (*"Danke"*, *"Stopp die navigation"*), the web UI **Stop** button, **arrival**
   (within `arrive_m` of the target), or a **timeout** (the head recenters if the
-  RPi stops sending).
+  Orange Pi stops sending).
 - The head only turns ±45°; a destination behind the owl is clamped to the
   nearest edge (the web UI says it's behind you).
 
@@ -159,7 +158,7 @@ Full design, math and open questions: `specs/013-navigation.spec`.
 
 ### NDJSON Protocol
 
-**ESP32 → RPi (telemetry, every 500ms):**
+**ESP32 → Orange Pi (telemetry, every 500ms):**
 ```json
 {
   "type": "telemetry",
@@ -183,7 +182,7 @@ Full design, math and open questions: `specs/013-navigation.spec`.
 }
 ```
 
-**RPi → ESP32 (commands):**
+**Orange Pi → ESP32 (commands):**
 | Command | Payload | Description |
 |---|---|---|
 | `sleep` | `{"type":"sleep"}` | Policy: put the owl to sleep |
@@ -241,7 +240,7 @@ went into believing a measurement that could not mean what it appeared to mean.
 
 | Decision | Spec |
 |---|---|
-| One behaviour state machine, on the ESP32; the RPi supervises | [001](specs/001-system-architecture.spec) |
+| One behaviour state machine, on the ESP32; the Orange Pi supervises | [001](specs/001-system-architecture.spec) |
 | `framework = arduino, espidf`, octal PSRAM, partitions, flashing | [002](specs/002-build-and-toolchain.spec) |
 | Two LCDs on one SPI bus, software chip-select, custom GC9D01 driver | [003](specs/003-display-bus.spec) |
 | Two colours, one parametric shape routine for all 26 moods | [004](specs/004-eye-expressions.spec) |
@@ -252,7 +251,7 @@ went into believing a measurement that could not mean what it appeared to mean.
 | On-device face detection with esp-dl v3 | [009](specs/009-face-detection.spec) |
 | The NDJSON wire contract | [010](specs/010-serial-protocol.spec) |
 | Diagnostic builds and host tools | [011](specs/011-diagnostics.spec) |
-| RPi internals: ownership, packaging, testing discipline | [012](specs/012-rpi-brain.spec) |
+| Orange Pi internals: ownership, packaging, testing discipline | [012](specs/012-orangepi-brain.spec) |
 | Navigation — the owl as a compass | [013](specs/013-navigation.spec) |
 | Speech — hearing the user and reacting | [014](specs/014-speech.spec) |
 
@@ -286,7 +285,7 @@ esp32-s3-sense/                    # ESP32 firmware
 ├── src/
 │   ├── main.cpp                   # Wiring only: construct, bring up, run the loop
 │   ├── behavior.cpp               # The state machine + OTA update mode
-│   ├── protocol.cpp               # NDJSON commands + telemetry (the RPi contract)
+│   ├── protocol.cpp               # NDJSON commands + telemetry (the Orange Pi contract)
 │   ├── vision.cpp                 # Face-detection task pinned to core 0; loop() only reads it
 │   ├── hardware_check.cpp         # -DHARDWARE_CHECK=1 wiring probe; else compiles to nothing
 │   ├── Sensors.cpp                # LSM303AGR IMU, PA1010D GPS, SW420 vibration
@@ -302,27 +301,40 @@ esp32-s3-sense/                    # ESP32 firmware
 │   └── preview_eyes.py            # Renders SHAPES[] to an HTML contact sheet, no flashing
 └── .pio/build/xiao_esp32s3/       # Build output (firmware.bin)
 
-rpi-brain/                         # Raspberry Pi brain (Python)
+orangepi-brain/                    # Orange Pi Zero 3W (A733) brain (Python)
 ├── main.py                        # Entry point, config loading, hands the main thread to read_loop
-├── config.yaml                    # Serial port + every feature block (all opt-in, enabled: false)
-├── requirements.txt               # pyserial, numpy, pyyaml, flask, sounddevice, faster-whisper
-├── setup.sh                       # Pi provisioning: venv, systemd unit, udev rule (idempotent)
-├── assets/sounds/                 # Owl-call WAVs played through the I2S amp
+├── config.yaml                    # Serial port + every feature block (all opt-in except audio)
+├── requirements.txt               # pyserial, numpy, pyyaml, flask, sounddevice, pywhispercpp, llama-cpp-python
+├── setup.sh                       # Orange Pi provisioning: kernel module + DT overlay + asound + wizard + model + reboot
+├── assets/sounds/                 # Owl-call WAVs played through the shared 'owl' I2S card
+├── audio/                         # The A733 'owl' sound card: custom driver + DT overlay + asound.conf
+│   ├── owl_i2s.c                  # Custom I2S0 driver (one-bit data-delay fix a DT overlay can't express)
+│   ├── owl-i2s-overlay.dts        # Muxes the I2S0 pins (BCLK/LRCK/DOUT/DIN) onto the 40-pin header
+│   ├── asound.conf                # The shared 48 kHz 'owl' card (amp + mic)
+│   └── Kbuild / Makefile          # in-tree kernel-module build
+├── deploy/                        # install.sh (light redeploy) + systemd unit + udev rule
+│   ├── install.sh
+│   ├── robot-owl-brain.service
+│   └── 99-robot-owl-serial.rules
 ├── tools/
 │   └── gen_expressions.py         # GENERATES brain/expressions.py from the firmware's NAMES[]
-├── tests/                         # 188 tests; run on a plain Mac, no Pi or audio stack needed
+├── tests/                         # 201 tests; run on a plain Mac, no Orange Pi or audio stack needed
 │   ├── run_tests.py               # unittest discovery
 │   ├── stubs.py                   # fakes third-party modules ONLY when not importable
-│   ├── test_protocol.py           # the ESP32<->RPi wire contract (39 tests)
-│   └── test_expressions.py        # drift guard: RPi list vs firmware NAMES[]
+│   ├── test_protocol.py           # the ESP32<->Orange Pi wire contract (48 tests)
+│   ├── test_expressions.py        # drift guard: Orange Pi list vs firmware NAMES[] (11)
+│   ├── test_navigation*.py        # geo + controller + speech/web triggers (90)
+│   ├── test_speech_*.py           # ASR, VAD pipeline, auto-sleep (39)
+│   └── test_emotion.py, test_docs.py  # emotion layer + the docs checker (13)
 └── brain/
     ├── serial_handler.py          # NDJSON parse/send; the _*_FIELDS tables ARE the wire contract
     ├── supervisor.py              # Logs telemetry, sends policy; owns the amp, state and locations
     ├── navigation.py              # "Guide me home": computes the head aim, streams it to the ESP32
     ├── geo.py                     # Bearing, haversine, angle wrap, aim clamp (pure functions)
     ├── locations.py               # Named places + JSON persistence + fuzzy name matching
-    ├── speech.py                  # Mic -> VAD -> faster-whisper -> reaction pipeline (German)
-    ├── audio.py                   # WAV/tone playback via aplay on the MAX98357A amp
+    ├── speech.py                  # Mic -> VAD -> whisper.cpp (pywhispercpp) -> reaction pipeline (German)
+    ├── emotion.py                 # Optional: transcript -> emotion (llama.cpp GGUF) -> eye expression
+    ├── audio.py                   # WAV/tone playback via aplay on the shared 'owl' I2S card
     ├── web_ui.py                  # Flask control page (LAN only, no auth, disabled by default)
     ├── templates/index.html       # The web UI page (HTML/CSS/JS; not a Python string)
     ├── expressions.py             # GENERATED from NAMES[] -- do not edit by hand
@@ -330,18 +342,10 @@ rpi-brain/                         # Raspberry Pi brain (Python)
 ```
 
 ```
-orangepi-brain/                    # Orange Pi Zero 3W (A733) brain — same brain, real I2S mic + amp
-├── main.py, config.yaml, requirements.txt   # as rpi-brain, but speech uses whisper.cpp (not faster-whisper)
-├── setup.sh                       # full provisioning: kernel module + DT overlay + asound + wizard + model + reboot
-├── deploy/                        # install.sh (light redeploy) + systemd unit + udev rule
-├── audio/                         # owl_i2s kernel driver + DT overlay + asound.conf (the A733 'owl' sound card)
-└── brain/                         # same modules as rpi-brain/brain; speech via whisper.cpp
-```
-
-> The RPi mirrors nothing by hand. `brain/expressions.py` is generated from the
+> The Orange Pi mirrors nothing by hand. `brain/expressions.py` is generated from the
 > firmware's `NAMES[]`, and the telemetry field tables in `serial_handler.py` are
 > the single place a new field is added. Both are drift-guarded by tests — see
-> `specs/010-serial-protocol.spec` and `specs/012-rpi-brain.spec`.
+> `specs/010-serial-protocol.spec` and `specs/012-orangepi-brain.spec`.
 
 ---
 
@@ -358,49 +362,6 @@ pio run --target monitor   # Serial monitor (115200 baud)
 **Build size:** RAM 11.2% (36,644 / 327,680 bytes), Flash 25.5% (851,585 / 3,342,336 bytes)
 
 ---
-
-### Raspberry Pi Brain — one-command setup
-
-On a fresh Raspberry Pi OS install, the whole RPi side is set up with a single script:
-
-```bash
-cd rpi-brain
-sudo ./setup.sh
-```
-
-`setup.sh` (idempotent — safe to re-run) does, in order:
-
-1. **apt** — installs `python3-venv`, `python3-pip`, `alsa-utils` (for `aplay`), `rsync`, `portaudio19-dev`.
-2. **I2S audio** — adds `dtoverlay=hifiberry-i2s-lite` to the right `config.txt`
-   (handles both `/boot` and Bookworm's `/boot/firmware`) so the MAX98357A amp works.
-3. **Config wizard** — asks a few questions (ESP32 serial port, web UI, speech
-   recognition + Whisper model, auto-sleep) and writes `config.yaml` with your
-   choices. **Useful defaults are pre-filled — just press Enter to accept.** It
-   auto-detects the ESP32 serial port and any USB mic.
-4. **Install** — copies the brain to `/opt/robot-owl/rpi-brain`, builds a `.venv`,
-   installs `requirements.txt` (incl. **faster-whisper** — offline ASR, no torch).
-5. **Pre-download the Whisper model** — so the first live transcription is instant
-   instead of a several-minute download. The default is **`small` with
-   `compute_type="int8"`**, faster-whisper's recommendation for a Pi 4 (~0.5 GB);
-   pick `tiny`/`base` in the wizard for lower latency and less accuracy.
-6. **User + permissions** — creates the `robotowl` system user in the `dial` group
-   and installs a udev rule so it can open the ESP32 USB CDC serial port.
-7. **systemd** — installs + enables `robot-owl-brain.service`.
-8. **Reboot** — reboots to apply the I2S overlay; the robot auto-starts on boot
-   (a one-shot hook guarantees it, then clears itself).
-
-After the reboot the owl is running. Then:
-
-```bash
-journalctl -u robot-owl-brain -f      # watch it
-systemctl status robot-owl-brain       # check state
-aplay -l                                # confirm the I2S amp is visible
-```
-
-> The wizard already set the web UI / speech / auto-sleep options. To change
-anything later, edit `/opt/robot-owl/rpi-brain/config.yaml` (or re-run
-`sudo ./setup.sh` to go through the wizard again). For an unattended install use
-`sudo ./setup.sh --non-interactive` to skip the wizard and keep the bundled defaults.
 
 ### Orange Pi Brain — one-command setup
 
@@ -433,9 +394,9 @@ hardware — are in `specs/015-orangepi-audio.spec`.
 
 > ⚠️ **GPIO 10 belongs to the camera.** It is the Sense camera's XCLK, so no LCD line may use it. As wired and verified on 2026-08-26 neither eye does: the **left** eye's CS is D7/GPIO 44 (`LCD_CS_L`) and the **right** eye's is D9/GPIO 8 (`LCD_CS_R`). Earlier revisions of this note named the wrong eye — `config.h` is authoritative, and `WIRING.md` has the full harness including cable colours.
 
-### 0. Flash firmware — use USB-C first, not the Pi
+### 0. Flash firmware — use USB-C first, not the Orange Pi
 
-The XIAO's native USB D+/D− pads share the same lines as the USB-C port, so **never keep the direct solder link to the Pi connected while flashing**. Flash over USB-C, then attach the native USB link afterwards.
+The XIAO's native USB D+/D− pads share the same lines as the USB-C port, so **never keep the direct solder link to the Orange Pi connected while flashing**. Flash over USB-C, then attach the native USB link afterwards.
 
 ```bash
 cd esp32-s3-sense
@@ -493,38 +454,38 @@ Paste one of these into the monitor:
 
 Expect an `*_ack` reply and a visible eye/servo reaction.
 
-### 5. Connect the native USB link to the Pi 4
+### 5. Connect the native USB link to the Orange Pi
 
 1. Power down, remove the USB-C cable.
-2. Solder XIAO D+/D− (backside pads) + 5V + GND to a **USB 2.0** port's underside pads on the Pi 4 (see `WIRING.md`).
-3. Power the Pi — the XIAO powers from the Pi's 5V rail.
-4. On the Pi check the device appeared: `ls /dev/ttyACM0` (or `ttyUSB0`).
+2. Terminate the XIAO D+/D− (backside pads) + 5V + GND with a USB cable whose other end is a micro-USB plug for the Orange Pi Zero 3W (see `WIRING.md`).
+3. Power the Orange Pi — the XIAO powers from the Orange Pi's 5V rail.
+4. On the Orange Pi check the device appeared: `ls /dev/ttyACM0` (or `ttyUSB0`).
 5. `dmesg | tail` should show a USB CDC device enumerating; `lsusb` shows the ESP32-S3.
 
 **If it does not enumerate:** re-check DP↔D+ vs DN↔D− (most common swap), then GND continuity and wire length (< 10 cm).
 
-### 6. Run the RPi brain
+### 6. Run the Orange Pi brain
 
 ```bash
-cd rpi-brain
+cd orangepi-brain
 pip install -r requirements.txt
 python main.py        # connects to /dev/ttyACM0 @ 115200 by default (see config.yaml)
 ```
 
-Expect log lines like `Robot Owl Brain started (supervisor mode)` and `ESP32 owns behavior; waiting for telemetry...`, then state-change and face-detection log lines. The ESP32 drives expressions/servos; the RPi supervisor only observes and can send policy (sleep/wake).
+Expect log lines like `Robot Owl Brain started (supervisor mode)` and `ESP32 owns behavior; waiting for telemetry...`, then state-change and face-detection log lines. The ESP32 drives expressions/servos; the Orange Pi supervisor only observes and can send policy (sleep/wake).
 
 ### 7. Test the OTA update mode end-to-end
 
 **Validated end to end on hardware 2026-08-26**: 4 taps entered update mode, the SoftAP came up, a phone connected and loaded the page, and a single tap returned the owl to normal operation.
 
-1. **Enter update mode:** tap the owl's body (the SW420 vibration sensor) **4 times** within ~1.5 s. The eyes switch to the green spinner and the RPi supervisor logs the SoftAP credentials.
+1. **Enter update mode:** tap the owl's body (the SW420 vibration sensor) **4 times** within ~1.5 s. The eyes switch to the green spinner and the Orange Pi supervisor logs the SoftAP credentials.
 2. **Join the SoftAP:** on a phone or laptop, connect to WiFi **`RobotOwl-Update`** (password **`robotowl123`**). The owl is on an isolated AP — you lose normal internet while connected, which is expected.
 3. **Open the update page:** go to **`http://192.168.4.1/update`** in a browser. (The exact IP is also printed in the supervisor log / telemetry `update` object.)
 4. **Flash:** select the new `firmware.bin` (from `esp32-s3-sense/.pio/build/xiao_esp32s3/firmware.bin`) and upload. Watch the progress bar.
-5. **Confirm the new version:** after flashing, the owl reboots into the new firmware. The RPi supervisor logs `Owl firmware changed: <old> -> <new>` — this is the confirmation the OTA took.
+5. **Confirm the new version:** after flashing, the owl reboots into the new firmware. The Orange Pi supervisor logs `Owl firmware changed: <old> -> <new>` — this is the confirmation the OTA took.
 6. **Exit update mode:** tap the owl **once** (after the ~1 s grace period). The eyes return to normal and the owl rejoins normal operation.
 
-> ℹ️ Tap roughly once per second. The gap between taps must be **under 1.5 s** (`UPDATE_TAP_GAP_MS`) but also over ~0.75 s — a tap's own chatter rings for ~0.5 s, and two taps closer than that merge into one. `esp32-s3-sense/tools/klopftest.py` shows each tap's exact interval live if the timing needs checking. The owl boots standalone (5 s USB wait), so update mode works without the RPi attached — you just won't get the credential log lines.
+> ℹ️ Tap roughly once per second. The gap between taps must be **under 1.5 s** (`UPDATE_TAP_GAP_MS`) but also over ~0.75 s — a tap's own chatter rings for ~0.5 s, and two taps closer than that merge into one. `esp32-s3-sense/tools/klopftest.py` shows each tap's exact interval live if the timing needs checking. The owl boots standalone (5 s USB wait), so update mode works without the Orange Pi attached — you just won't get the credential log lines.
 
 ---
 
@@ -532,9 +493,9 @@ Expect log lines like `Robot Owl Brain started (supervisor mode)` and `ESP32 own
 Face detection is enabled by default (`platformio.ini`: `-DFACE_DETECTION_ENABLED=1`). To disable, set it to `0` in `platformio.ini` (and `config.h`).
 The esp-dl model libraries ship with the Arduino SDK — no extra component installation needed.
 
-### RPi Brain
+### Orange Pi Brain
 ```bash
-cd rpi-brain
+cd orangepi-brain
 pip install -r requirements.txt
 python main.py [config.yaml]   # Default config path
 ```
@@ -553,13 +514,13 @@ python main.py [config.yaml]   # Default config path
 | **PCA9685 Servo Ctrl** | ✅ Complete | 5 channels, smooth interpolation (2°/iteration) |
 | **State Machine** | ✅ Complete | 8 states on ESP32 (owns behavior): BOOT/IDLE/DETECTING/INTERACTING/SLEEPING/NAVIGATING/UPDATE/ERROR |
 | **NDJSON Protocol** | ✅ Complete | Telemetry (500ms) + commands (expression/servo/gaze/nav/wake/blink/heartbeat) |
-| **Navigation "guide me home"** | ✅ Implemented | RPi computes the compass bearing to a named destination and streams the head aim; ESP32 holds it in the NAVIGATING state (live compass). Start via voice ("Bring mich nach Home") or web UI; exit via spoken keyword, web UI, arrival, or timeout. See `specs/013-navigation.spec`. On-hardware `aim_sign` verification pending (BACKLOG Step 5) |
+| **Navigation "guide me home"** | ✅ Implemented | Orange Pi computes the compass bearing to a named destination and streams the head aim; ESP32 holds it in the NAVIGATING state (live compass). Start via voice ("Bring mich nach Home") or web UI; exit via spoken keyword, web UI, arrival, or timeout. See `specs/013-navigation.spec`. On-hardware `aim_sign` verification pending (BACKLOG Step 5) |
 | **Face Detection (ESP32)** | ✅ Complete | esp-dl **v3** `HumanFaceDetect` (managed IDF component, *not* the old `HumanFaceDetectMSR01`), OV3660 QVGA RGB565BE, `set_vflip(1)` mandatory, 48-91 ms inference **on core 0** since 2026-08-31 so it no longer stalls the eye render, gaze offsets + state transitions on-device. Hit rate is 100 % at a normal seating distance; it is dominated by face size in frame, and glasses cost about a third of it — see `specs/009-face-detection.spec` |
 | **OTA Update Mode** | ✅ Complete | 4-tap vibration → SoftAP `RobotOwl-Update` + `/update` HTTP page (HTTPUpdateServer); one tap exits; dual-bank ota_0/ota_1; standalone boot (5s USB wait) |
-| **Face Detection (RPi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
-| **Web UI (RPi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and magnetometer calibration state, and a map place-picker for navigation. Page lives in `brain/templates/index.html`; the `/api/telemetry` payload is derived from the parsed telemetry dataclass, so it cannot fall behind the firmware (the SoftAP password is the one field deliberately withheld) |
-| **Speech (RPi)** | ✅ Implemented | German. Mic → RMS VAD gate → faster-whisper (`small`, int8 on CPU — the combination recommended for a Pi 4; CTranslate2, not torch) → keyword clusters / navigation triggers. Gated on awake + face + energy so the owl does not react to the TV. Disabled by default. See `specs/014-speech.spec` |
-| **RPi test suite** | ✅ 188 tests | Runs on a plain dev machine with no Pi, mic, PortAudio, faster-whisper, Flask, Jinja2 or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔RPi wire contract (48, `test_protocol.py`) and firmware-vs-RPi drift guards (11, `test_expressions.py`) |
+| **Face Detection (Orange Pi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
+| **Web UI (Orange Pi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and magnetometer calibration state, and a map place-picker for navigation. Page lives in `brain/templates/index.html`; the `/api/telemetry` payload is derived from the parsed telemetry dataclass, so it cannot fall behind the firmware (the SoftAP password is the one field deliberately withheld) |
+| **Speech (Orange Pi)** | ✅ Implemented | German. Mic → RMS VAD gate → whisper.cpp (via the `pywhispercpp` binding, an offline `.bin`/`.gguf` model — no torch/CTranslate2) → keyword clusters / navigation triggers. Gated on awake + face + energy so the owl does not react to the TV. Disabled by default. See `specs/014-speech.spec` |
+| **Orange Pi test suite** | ✅ 201 tests | Runs on a plain dev machine with no Orange Pi, mic, PortAudio, whisper.cpp, llama.cpp, Flask or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔Orange Pi wire contract (48, `test_protocol.py`) and firmware-vs-Orange Pi drift guards (11, `test_expressions.py`) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
 
 ---

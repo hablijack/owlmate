@@ -3,7 +3,7 @@
 // ============================================================================
 // The NDJSON wire protocol: one JSON object per line, over the USB CDC port.
 //
-// This is the ESP32 half of the contract with rpi-brain/brain/serial_handler.py
+// This is the ESP32 half of the contract with orangepi-brain/brain/serial_handler.py
 // -- a change on one side needs the matching change on the other, and SPEC-010
 // R-010.5 requires that every field sent here is parsed there. It lives in its
 // own file so it is as findable as its Python counterpart.

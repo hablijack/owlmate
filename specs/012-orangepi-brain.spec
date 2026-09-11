@@ -1,14 +1,14 @@
-# SPEC-012: RPi brain internals — ownership, packaging, testing
+# SPEC-012: Orange Pi brain internals — ownership, packaging, testing
 
 Status: implemented
-Verified: 2026-08-27 — 174 tests, `python3 rpi-brain/tests/run_tests.py`
+Verified: 2026-08-27 — 174 tests, `python3 orangepi-brain/tests/run_tests.py`
 Depends on: 001, 010
 
 ## Intent
 
-SPEC-001 settles *what* the RPi is allowed to decide (policy and temporary
+SPEC-001 settles *what* the Orange Pi is allowed to decide (policy and temporary
 overrides, never behaviour). This spec covers how the supervisor process is put
-together: which module owns which resource, what ships to the Pi, and what the
+together: which module owns which resource, what ships to the Orange Pi, and what the
 test suite is actually allowed to claim.
 
 Written after a refactoring pass on 2026-08-27 which found that most defects on
@@ -23,7 +23,7 @@ for the same resource, or a fact written in three places.
   test-guarded. "It is documented as a mirror" is neither.
 * **R-012.3** Every optional subsystem degrades to "running without it"
   (inherits R-001.4). A missing dependency must not stop the brain.
-* **R-012.4** A failure that will be read from a Pi log must name its likely
+* **R-012.4** A failure that will be read from an Orange Pi log must name its likely
   cause, not only its symptom.
 * **R-012.5** A test must be verified to fail against the defect it claims to
   cover. An unverified regression test is assumed to be broken.
@@ -85,7 +85,7 @@ could not be exercised even once. Feeding the file's source to the renderer
 already proven in this deployment keeps the change to *where the bytes live*
 rather than *how rendering works*. The Jinja syntax in the file is already
 compatible — switching is a two-line change for whoever can verify it on a real
-Pi.
+Orange Pi.
 
 The risk this trades into is packaging: "the file did not deploy" replaces "a
 stray backslash broke the module". `setup.sh` rsyncs the tree wholesale so a new
@@ -137,7 +137,7 @@ assembled from the real type cannot drift.
   counts NDJSON lines the ESP32 threw away rather than block its render loop on
   (SPEC-001, SPEC-010). It is therefore a measurement *of this process*: a rising
   value means the read loop fell behind, and the likeliest cause is the speech
-  thread — `faster_whisper` inference holding the GIL — starving it. Verified
+  thread — `whisper.cpp` inference holding the GIL — starving it. Verified
   2026-08-31 from the firmware side: 2838 lines dropped across 22 minutes with no
   reader, then **not one** across the following 15 minutes with `cat` attached.
   A gap in telemetry is therefore diagnosable rather than ambiguous, which is the
@@ -145,7 +145,7 @@ assembled from the real type cannot drift.
   the gap.
 * `web_ui.py` 746 → ~360 lines; `brain/templates/index.html` 429 lines, verified
   byte-for-byte identical to the extracted literal (20,257 characters).
-* The whole suite runs on a plain Mac with no Pi, mic, PortAudio, faster-whisper,
+* The whole suite runs on a plain Mac with no Orange Pi, mic, PortAudio, whisper.cpp,
   **Flask, Jinja2 or PyYAML**. `tests/stubs.py` substitutes a module only when
   the real one is not importable. numpy is the single hard dependency.
 * Consequence of the above worth knowing: `config.yaml` cannot be parsed by the
@@ -196,7 +196,7 @@ assembled from the real type cannot drift.
 
 ## Acceptance
 
-1. `cd rpi-brain && python3 tests/run_tests.py` — 184 tests pass.
+1. `cd orangepi-brain && python3 tests/run_tests.py` — 184 tests pass.
 2. `grep -rn 'getattr(supervisor, "audio"' brain/` returns nothing, and
    `supervisor.py` is the only module touching `Audio` (R-012.1).
 3. Deleting `brain/templates/index.html` makes the brain log

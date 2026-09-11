@@ -54,13 +54,13 @@ app slots:
 Dual-bank OTA is kept: the owl can be updated over its own SoftAP (SPEC-007).
 
 **Core logging is off in the firmware** (`CORE_DEBUG_LEVEL=0`). That USB CDC port
-carries the NDJSON protocol the RPi parses; stray `[E][esp32-hal-i2c]` lines are
+carries the NDJSON protocol the Orange Pi parses; stray `[E][esp32-hal-i2c]` lines are
 protocol garbage. Diagnostic envs override `build_flags` and keep their logs.
 
 **It only covers the Arduino core, not ESP-IDF components** — found 2026-08-31,
 the first time anyone captured the OTA transition. `WiFi.softAP()` emits about
 forty `I (…) wifi:` / `phy_init` / `esp_netif_lwip` lines directly onto the
-protocol port, and the RPi logs a parse warning for each. The flag that would
+protocol port, and the Orange Pi logs a parse warning for each. The flag that would
 cover those is `CONFIG_LOG_DEFAULT_LEVEL_NONE` in `sdkconfig.defaults`, not
 `CORE_DEBUG_LEVEL`. Unfixed; BACKLOG Step 6 item 6, SPEC-007 Open.
 

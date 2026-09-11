@@ -57,7 +57,7 @@
 // Sobald ein Leser anhing, war der hoechste Wert 228 ms.
 //
 // 4096 fasst gut vier Telemetriezeilen, also rund 2 s Rueckstand bei 2 Hz. Das
-// ueberbrueckt einen Leser, der kurz haengt - und der Raspberry Pi TUT das:
+// ueberbrueckt einen Leser, der kurz haengt - und der Orange Pi TUT das:
 // dort laeuft die Spracherkennung im selben Prozess. Laenger als das wird
 // verworfen statt gewartet, siehe sendJson() in src/protocol.cpp.
 //
@@ -70,7 +70,7 @@
 // 0 = gar nicht warten. Das ist hier RICHTIG und nicht etwa riskant, weil
 // sendJson() vorher fragt, ob die ganze Zeile hineinpasst, und sonst gar nicht
 // erst schreibt. Damit kann der Schreibvorgang weder blockieren NOCH eine Zeile
-// halb hinausschicken - eine abgeschnittene NDJSON-Zeile kostet den RPi einen
+// halb hinausschicken - eine abgeschnittene NDJSON-Zeile kostet den Orange Pi einen
 // Parse-Fehler und ist schlimmer als ein sauber verworfener Frame.
 //
 // Die Voreinstellung 100 ist der Wert, der oben die 2 s erzeugt.
@@ -218,7 +218,7 @@
 // Deshalb NICHT hergeleitet, sondern auf Hardware bestimmt (2026-08-29): mit
 // +1 wanderten die Augen nach links, waehrend der Betrachter nach rechts ging.
 // Wenn die Kamera neu eingebaut wird, hier wieder ausprobieren - genau wie
-// navigation.aim_sign auf der RPi-Seite.
+// navigation.aim_sign auf der Orange-Pi-Seite.
 #define EYE_GAZE_SIGN_X (-1)
 
 // Kein Blickfilter, und das ist gemessen so gewollt.
@@ -405,7 +405,7 @@
 //
 //  * Magnetic declination, +4.594 deg EAST at this location (WMM, via the
 //    British Geological Survey service). REQUIRED, not cosmetic: the compass
-//    computes a MAGNETIC heading while geo.bearing_deg() on the RPi computes a
+//    computes a MAGNETIC heading while geo.bearing_deg() on the Orange Pi computes a
 //    TRUE geographic bearing, and both sides must share one north reference
 //    (true = magnetic + declination). Drifts ~0.1 deg/year and is location
 //    dependent, so re-check it if the owl changes region:
@@ -640,15 +640,15 @@
 // event, a plateau for the state.
 #define INTERACT_GREET_MS 1000      // how long HAPPY flashes on noticing you
 
-// Temporary overrides sent by the RPi supervisor (do not change state)
-#define EXPRESSION_OVERRIDE_MS 3000 // how long an RPi expression override lasts
-#define GAZE_OVERRIDE_MS 3000       // how long an RPi gaze override lasts
+// Temporary overrides sent by the Orange Pi supervisor (do not change state)
+#define EXPRESSION_OVERRIDE_MS 3000 // how long an Orange Pi expression override lasts
+#define GAZE_OVERRIDE_MS 3000       // how long an Orange Pi gaze override lasts
 
-// Navigation: the RPi re-sends the nav angle on each refresh. If it stops
-// (serial link dropped, RPi crashed/rebooted) for this long, the owl recenters
+// Navigation: the Orange Pi re-sends the nav angle on each refresh. If it stops
+// (serial link dropped, Orange Pi crashed/rebooted) for this long, the owl recenters
 // its head and leaves NAVIGATING so it is never left stuck pointing somewhere.
-// Must be comfortably larger than the RPi's refresh interval (see
-// rpi-brain config.yaml navigation.refresh_min_s) but small enough that a dead
+// Must be comfortably larger than the Orange Pi's refresh interval (see
+// orangepi-brain config.yaml navigation.refresh_min_s) but small enough that a dead
 // link is noticed quickly.
 #define NAV_TIMEOUT_MS 5000
 

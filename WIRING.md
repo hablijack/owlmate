@@ -52,14 +52,14 @@ Both panels also take **VCC (red) → 3.3 V**, **GND (black) → GND** and
 | Rail | Devices to combine |
 |------|-------------------|
 | **3.3V** | LSM303AGR IMU, **PA1010D GPS**, PCA9685 Servo Driver, both LCDs (logic + backlight) |
-| **5V (optional)** | Servo motor supply (recommended: external 5V for servos, not the Pi rail) |
+| **5V (optional)** | Servo motor supply (recommended: external 5V for servos, not the Orange Pi rail) |
 | **GND** | Everything — all I2C devices, both LCDs, vibration sensor, servo driver, GPS |
 
 > 💡 **Tip**: Use a small breadboard or perfboard as a power rail to daisy-chain 3.3V and GND instead of running individual wires from the ESP32 to every component.
 
 ---
 
-## 📡 Raspberry Pi Connection — Direct Native USB (no cable)
+## 📡 Orange Pi Connection — USB via the OTG port (short cable)
 
 > **⚠️ NOT YET BUILT as of 2026-09-01.** Everything else in this file is the
 > harness as physically wired; this section is the *planned* link, documented
@@ -73,18 +73,18 @@ Both panels also take **VCC (red) → 3.3 V**, **GND (black) → GND** and
 > once assembled — and `tools/kalibrieren.py` needs it. (Firmware updates alone
 > would survive via OTA, 4 taps → SoftAP `RobotOwl-Update` → `/update`.)
 
-The firmware runs **USB CDC** (`ARDUINO_USB_CDC_ON_BOOT=1`, `ARDUINO_USB_MODE=1`), so `Serial` maps to the chip's **native USB**. Instead of a USB-C cable, solder the XIAO's **backside D+/D− pads** directly to the Raspberry Pi 4's USB pads for a compact, cable-free link (perfect for embedding both boards in the owl body).
+The firmware runs **USB CDC** (`ARDUINO_USB_CDC_ON_BOOT=1`, `ARDUINO_USB_MODE=1`), so `Serial` maps to the chip's **native USB**. Instead of a USB-C cable, solder the XIAO's **backside D+/D−/5V/GND pads** to a short custom cable whose other end is a **Micro-USB plug** into the Orange Pi Zero 3W's **OTG port** — compact enough to embed both boards in the owl body, with no soldering on the Orange Pi side.
 
-`Serial` appears on the Pi as **`/dev/ttyACM0`** (USB 2.0 Full-Speed, 12 Mbps CDC).
+`Serial` appears on the Orange Pi as **`/dev/ttyACM0`** (USB 2.0 Full-Speed, 12 Mbps CDC).
 
 ### Wire mapping
 
-| XIAO ESP32-S3 | Raspberry Pi 4 (USB pads) | Wire colour | Notes |
-|:--------------|:------------------------|:-----------:|-------|
-| **`TP8`** — bottom pad, net `ESP_USB_D+` (GPIO20) | USB **D+** | Green | twist with D− |
-| **`TP7`** — bottom pad, net `ESP_USB_D−` (GPIO19) | USB **D−** | White | twist with D+ |
-| **`5V`** — **edge castellation** (net `VBUS`) | USB **5V** | Red | powers the XIAO, any USB port works |
-| **`GND`** — **edge castellation** (or bottom pad `TP1`) | USB **GND** | Black | mandatory, common ground |
+| XIAO ESP32-S3 | Micro-USB plug (→ Orange Pi OTG) | Wire colour | Notes |
+|:--------------|:---------------------------------|:-----------:|-------|
+| **`TP8`** — bottom pad, net `ESP_USB_D+` (GPIO20) | **D+** (pin 3) | Green | twist with D− |
+| **`TP7`** — bottom pad, net `ESP_USB_D−` (GPIO19) | **D−** (pin 2) | White | twist with D+ |
+| **`5V`** — **edge castellation** (net `VBUS`) | **VBUS** (pin 1) | Red | powers the XIAO |
+| **`GND`** — **edge castellation** (or bottom pad `TP1`) | **GND** (pin 5) | Black | mandatory, common ground |
 
 Only the **data pair** needs the fiddly bottom pads. `5V` and `GND` are ordinary
 edge castellations sitting next to each other, and the edge `5V` pad is
@@ -154,14 +154,13 @@ free — **but meter the colours, cheap cables lie.**
   (12 Mbps) their absence is fine, and tapping the connector pads instead is far
   harder for no real gain. `C1`/`C2` on these lines are marked **DNP** and there
   is no ESD array or common-mode choke, so nothing protective is being skipped.
-- **Pi 4 side:** the Pi 4 has **4 USB-A ports** on the right edge (2× USB 3.0 using the blue ports, 2× USB 2.0 using the black ports). All four are behind the same VL805 hub, so any of them works. The solder pads are the **through-hole pads on the underside of the PCB**, directly below each USB connector.
-  - **Pick a USB 2.0 (black) port.** The USB 3.0 (blue) ports still carry the D+/D− lines, but the connector has 9 pins and the super-speed pairs sit right beside the signal pads — much easier to bridge accidentally. A black port's 4 pads are: **VBUS, D−, D+, GND** (verify order with a multimeter).
-  - Mark the chosen port and **never plug anything into it** afterwards.
-  - Use the bottom pads on the board → no connector removal needed; tin them gently and keep wires under ~6 cm.
+- **Orange Pi side:** the Zero 3W has a single **Micro-USB OTG port** on its edge — it carries VBUS, D−, D+ and GND, and the A733 enumerates the XIAO as a CDC device on it. There is **no soldering on the Orange Pi**: the four XIAO wires terminate in a Micro-USB plug that simply inserts into this port.
+  - Build the cable from a known-good Micro-USB lead (red = VBUS, white = D−, green = D+, black = GND — **meter the colours, cheap cables lie**) and solder only the XIAO end; the Orange Pi end is a standard plug.
+  - Reserve the OTG port for the XIAO and **never plug a charger or a second host into it** afterwards — a second USB host on the same data lines is exactly what the direct link is trying to avoid.
 
 ### Soldering recipe
 
-1. **Tin** each XIAO pad and each Pi pad with a fresh, small solder bead (leaded solder, flux core).
+1. **Tin** each XIAO pad and each Micro-USB connector pin with a fresh, small solder bead (leaded solder, flux core).
 2. Use short **30–32 AWG** silicone or enameled (magnet) wire. Cut four lengths of ~3–6 cm.
 3. **Twist the DP + DN pair** tightly together (~3–6 twists/cm) and keep them far from the 5V and GND wires — this preserves the USB differential signal.
 4. **Common ground is critical**: GND must be joined between the two boards (do not rely on a shared supply only).
@@ -172,58 +171,75 @@ free — **but meter the colours, cheap cables lie.**
 
 ### Powering the XIAO
 
-- With this method the XIAO is powered from the **Pi's 5V rail** via the USB VBUS wire; its onboard regulator produces 3.3V.
+- With this method the XIAO is powered from the **Orange Pi's 5V rail** via the USB VBUS wire; its onboard regulator produces 3.3V.
 - Do **not** also plug a USB-C cable into the XIAO while the direct solder link
   is live. This is not mere caution: the edge `5V` pad and the connector's VBUS
   are **literally the same net** with no isolation diode between them, so you
   would tie two 5 V supplies together *and* put two USB hosts on one device's
   data lines.
-- Servos draw high current — power the PCA9685 motor rail from a **separate 5V supply with a common GND**, not from the Pi's rail.
+- Servos draw high current — power the PCA9685 motor rail from a **separate 5V supply with a common GND**, not from the Orange Pi's rail.
 
-> ⚠️ If the Pi doesn't enumerate the XIAO (`/dev/ttyACM0` missing), first check a
+> ⚠️ If the Orange Pi doesn't enumerate the XIAO (`/dev/ttyACM0` missing), first check a
 > **`TP7`/`TP8` swap** (most common — D+/D− reversed simply never enumerates),
 > then GND continuity, then wire length. Re-check contrast with a normal USB-C cable to isolate firmware vs. solder issues.
 
 ---
 
-## 🔊 Audio — MAX98357A (Adafruit) on the Raspberry Pi
+## 🔊 Audio — MAX98357A amp + ICS43434 mic on the Orange Pi (A733 I2S0)
 
-The owl's voice/output is a **MAX98357A** mono class-D amplifier (Adafruit 2980 / 3322) driven over the Pi's **I2S** bus. It takes a small speaker (4Ω or 8Ω) directly. It is **entirely on the Raspberry Pi side** — no ESP32 pins are used, so it does not touch the pin map above.
+The owl's voice/output is a **MAX98357A** mono class-D amplifier (Adafruit 2980 / 3322) driven over the Orange Pi's **I2S0** bus, and its ears are an **ICS43434** MEMS microphone on the same bus. Both live **entirely on the Orange Pi side** — no ESP32 pins are used, so they do not touch the pin map above.
 
-The RPi brain generates short procedural sound effects (beeps/chirps) in-process and plays them through the amp with `aplay` (ALSA). All audio lives on the Pi; the ESP32 is not involved in sound.
+The Orange Pi brain generates short procedural sound effects (beeps/chirps) in-process and plays them through the amp with `aplay` (ALSA); the microphone feeds speech recognition (SPEC-014). All audio lives on the Orange Pi; the ESP32 is not involved in sound.
 
-### Wire mapping (Pi 40-pin header → MAX98357A)
+### Wire mapping (Orange Pi 40-pin header → amp + mic)
 
-| MAX98357A pin | Raspberry Pi pin | Function |
-|:-------------:|:----------------:|----------|----------|
-| **GND** | GND (pin 6/9/14/20/25) | Common ground |
-| **BCLK** | GPIO 18 (pin 12) | Bit clock |
-| **LRCLK** | GPIO 19 (pin 21) | Word-select (L/R) |
-| **DIN** | GPIO 21 (pin 40) | Serial data in |
-| **SD MODE** | 3.3V (pin 1) | **Tie to 3.3V** for I2S (leave floating = PWM) |
-| **GAIN** | 3.3V (pin 1) | High-gain mode (0 dB); tie to GND for −6 dB if too loud |
-| **VSUP** | 5V (pin 2/4) | Amp supply (5–35 V). 5 V is fine for a small speaker |
-| **Speaker +** | speaker + | 4Ω or 8Ω speaker |
-| **Speaker −** | speaker − | Speaker ground |
+The A733's I2S0 is muxed onto the 40-pin header by `owl-i2s-overlay.dts`.
+Both devices share the BCLK/LRCLK pair; the amp uses **DOUT** and the mic uses
+**DIN**. MCLK (PB4, header pin 7) is **unconnected** — neither device uses it.
 
-> ⚠️ The **SD MODE pin must be tied to 3.3V** for I2S operation. Left floating, the amp defaults to PWM mode and the Pi's I2S output will be silent. This is the #1 "no sound" mistake.
+| Device pin | Orange Pi header pin | A733 pin | Function |
+|:----------:|:--------------------:|:--------:|----------|
+| (shared) **BCLK** | pin 12 | PB5 | Bit clock — MAX98357A SCLK + ICS43434 SCK |
+| (shared) **LRCLK** | pin 35 | PB6 | Word-select — MAX98357A LRCLK + ICS43434 WS |
+| MAX98357A **DIN** | pin 40 | PB7 (I2S0 DOUT) | Amp serial data **in** (playback) |
+| ICS43434 **SD** | pin 38 | PB8 (I2S0 DIN) | Mic serial data **out** (capture) |
+| MAX98357A **SD MODE** | 3.3V (pin 1) | — | **Tie to 3.3V** for I2S (floating = PWM) |
+| MAX98357A **GAIN** | 3.3V (pin 1) | — | High-gain (0 dB); tie to GND for −6 dB if too loud |
+| MAX98357A **VSUP** | 5V (pin 2/4) | — | Amp supply (5–35 V); 5 V is fine for a small speaker |
+| (both) **GND** | GND (pin 6/9/14/20/25) | — | Common ground |
+| MAX98357A **Speaker +/−** | speaker +/− | — | 4Ω or 8Ω speaker |
 
-### Enable I2S on the Pi
-Add to `/boot/config.txt` (or `/boot/firmware/config.txt` on Bookworm) and reboot:
-```
-dtoverlay=hifiberry-i2s-lite
-```
-This maps the standard I2S pins (BCLK=18, LRCLK=19, DIN=21) to the `snd-soc-bcm2835` driver, so `aplay -l` shows a `bcm2835` playback device. (The MAX98357A needs no codec I2C address — it's a dumb amp — so no `dtparameter` is required.)
+> ⚠️ The **SD MODE pin must be tied to 3.3V** for I2S operation. Left floating, the amp defaults to PWM mode and the Orange Pi's I2S output will be silent. This is the #1 "no sound" mistake.
+
+### Enable I2S on the Orange Pi
+The A733's I2S0 needs a **custom kernel driver**, not just a DT overlay: its
+one-bit data-delay quirk (SPEC-015, R-015.2) lives behind a private notifier in
+the stock driver that no overlay can reach, so an overlay alone yields an amp that
+plays one bit off and a mic that returns garbage. `orangepi-brain/audio/` ships
+the whole stack:
+
+- `owl_i2s.c` — the `owl_i2s` ASoC machine driver (dummy codec, 48 kHz, the
+  data-delay fix re-applied after every `set_fmt()`)
+- `owl-i2s-overlay.dts` — muxes the I2S0 pins onto the 40-pin header and
+  disables the stock `i2s0_mach`
+- `asound.conf` — names the card **`owl`** and exposes `dmix`/`dsnoop`
+  (S16_LE / 48000 / 2 ch) with a `plug` layer on top
+
+`setup.sh` builds and loads the module, installs the overlay and `asound.conf`
+to `/etc/asound.conf`, and enables the overlay for the next boot. Enablement on
+DietPi/Armbian is probed, not assumed (see SPEC-015 Open).
 
 ### Verify
 ```
-aplay -l                      # should list a bcm2835-I2S-hw-0 playback device
-sudo apt install espeak-ng    # optional: test with a real voice
-espeak-ng "hello owl"         # should speak through the speaker
+aplay -l                                        # should list a card named "owl"
+aplay -D owl:playback tone.wav                  # audible through the MAX98357A, not one bit off
+arecord -D owl:capture -f S16_LE -r 48000 -d 3 out.raw   # mic: non-silent, not 0/full-scale
 ```
+These are the SPEC-015 acceptance checks; the first flash of `setup.sh` on the
+board is the real test, since none of it has been run on the A733 yet.
 
 ### Software
-`brain/audio.py` generates WAV bytes in-process (no external assets) and plays them via `aplay` in a daemon thread, so the serial read loop is never blocked. See the **NDJSON Protocol** table in `README.md` for the `sound` command the RPi forwards.
+`brain/audio.py` generates WAV bytes in-process (no external assets) and plays them via `aplay` in a daemon thread, so the serial read loop is never blocked. It targets the `owl` card (or `audio.device` in `config.yaml` if set). See the **NDJSON Protocol** table in `README.md` for the `sound` command the Orange Pi forwards.
 
 ---
 
@@ -296,7 +312,7 @@ The old `gpsSerial.begin(..., 1, 2)` on the I2C pins has been removed, so GPIO 1
 10. **LCD DC Right** → D10
 11. **LCD CS Right** → D7
 12. **LCD RST** → D6 (shared by both LCDs)
-13. **USB data pair** → XIAO D+/D− (backside) to Pi 4 USB 2.0 port pads
-14. **Power to Pi link** → 5V (VBUS) + GND to Pi 4 USB port pads
+13. **USB data pair** → XIAO D+/D− (backside) to the Orange Pi OTG port (Micro-USB cable)
+14. **Power to Orange Pi link** → 5V (VBUS) + GND to the Orange Pi OTG port (Micro-USB cable)
 
-With common power rails this collapses to ~12 signal wires plus the 4-wire native-USB link to the Raspberry Pi.
+With common power rails this collapses to ~12 signal wires plus the 4-wire native-USB link to the Orange Pi.

@@ -20,7 +20,7 @@ unit built from the same parts.
 Revised on **2026-08-27** after a refactoring pass. That pass turned up a trap
 specific to retroactive specs, recorded in SPEC-010: a spec can describe the
 design as *intended* and be read as describing the code. SPEC-010 listed three
-telemetry fields the RPi never parsed and called its dataclasses frozen when
+telemetry fields the Orange Pi never parsed and called its dataclasses frozen when
 they were mutable — and the closer a document is to right, the less likely
 anyone checks it. Where a claim here is now backed by a test, the spec says so;
 treat an unbacked claim as a description of intent.
@@ -67,9 +67,9 @@ commit messages.
 | [007](007-vibration-and-ota.spec) | Vibration sensing and OTA entry | implemented |
 | [008](008-camera.spec) | Camera module, mounting, compatibility | implemented |
 | [009](009-face-detection.spec) | On-device face detection | implemented |
-| [010](010-serial-protocol.spec) | NDJSON contract between ESP32 and RPi | implemented |
+| [010](010-serial-protocol.spec) | NDJSON contract between ESP32 and Orange Pi | implemented |
 | [011](011-diagnostics.spec) | Diagnostic builds and host tools | implemented |
-| [012](012-rpi-brain.spec) | RPi brain internals: ownership, packaging, testing | implemented |
+| [012](012-orangepi-brain.spec) | Orange Pi brain internals: ownership, packaging, testing | implemented |
 | [013](013-navigation.spec) | Navigation — the owl as a compass | partial |
 | [014](014-speech.spec) | Speech — hearing the user and reacting | partial |
 | [015](015-orangepi-audio.spec) | Orange Pi A733 I2S audio stack (amp + mic) | open |
