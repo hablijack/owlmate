@@ -44,6 +44,7 @@ struct VibrationData {
     bool detected;
     uint32_t lastDetected;
     uint16_t count;
+    bool knock;            // Doppelklopfen bestaetigt (haelt VIBRATION_HOLD_MS); das ist, was Verhalten und Schreck brauchen
 };
 
 class Sensors {
@@ -94,6 +95,8 @@ private:
     // Pegel selbst wird NICHT ausgewertet - der SW-420 prellt mit ~1 kHz.
     bool _vibState;            // true solange das letzte Buendel noch "haelt"
     uint32_t _vibLastPulse;    // millis() der letzten gezaehlten Flanke
+    uint32_t _prevBurstStart;  // Beginn des vorigen Buendels (fuer das Doppelklopfen)
+    uint32_t _knockUntil;      // bis dahin gilt ein bestaetigtes Doppelklopfen
     uint32_t _selfMotionUntil; // bis dahin zaehlen Flanken nicht (eigene Servobewegung)
     uint32_t _vibLastEvent;    // millis() des letzten bestaetigten Klopfers
     uint16_t _vibCount;        // Anzahl bestaetigter Klopfer

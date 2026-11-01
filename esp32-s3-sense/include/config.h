@@ -662,10 +662,15 @@
 #define VIBRATION_PULSE_MIN 2        // Flanken pro Auswertung (~16 ms) ab denen es zaehlt
 #define VIBRATION_HOLD_MS 500        // so lange bleibt detected nach der letzten Flanke true
 #define VIBRATION_BURST_GAP_MS 250   // Ruhe, die zwei Klopfer voneinander trennt
+// Doppelklopfen: Das Aufwecken aus dem Idle (und der Schreck) verlangt ZWEI getrennte Buendel
+// innerhalb dieser Zeit. Einzelne Ausreisser (gemessen im stillen Raum bei geschlossener Tuer,
+// Drucker aus: 2 Stueck in 4 Minuten, im Abstand von 47 s, beide waehrend die Servos fuhren)
+// reichen dann nicht mehr. `vibration.detected`/`count` in der Telemetrie bleiben die rohen Werte.
+#define VIBRATION_DOUBLE_WINDOW_MS 1500
 // Die Servos erschuettern den SW-420 selbst (Idle-Blick, Ohrzucken, Fluegel): ohne Gegenmassnahme
 // weckt sich die Eule mit ihrer Idle-Animation aus dem Idle (Endlosschleife, Besitzer 2026-11-01).
 // Waehrend eine Servobewegung laeuft und so lange danach werden Flanken nicht als Klopfen gewertet.
-#define VIBRATION_SELF_MOTION_TAIL_MS 600
+#define VIBRATION_SELF_MOTION_TAIL_MS 1500
 #define SERVO_SMOOTH_SPEED 2  // degrees per loop iteration
 
 // ============================================================================

@@ -65,10 +65,10 @@ void update() {
         default: mode = OM_REST; break;
     }
 
-    // Klopfen (Beginn eines Pulsbursts) = erschrecken: Ohren hoch, ein Fluegelschlag, grosse Augen.
+    // Doppelklopfen = erschrecken: Ohren hoch, ein Fluegelschlag, grosse Augen.
     // Nach behavior::update() aufgerufen, damit der Zustandswechsel IDLE->DETECTING den
     // Ausdruck nicht wieder loescht. Im Schlaf (REST) spielt die Choreografie nichts.
-    const bool knock = sensors.getVibration().detected;
+    const bool knock = sensors.getVibration().knock;
     if (knock && !knockSeen && mode != OM_REST) react("startle");
     knockSeen = knock;
 

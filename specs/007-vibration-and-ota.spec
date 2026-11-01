@@ -80,11 +80,29 @@ confirms the actual state. Entry requires browser confirmation.
 
 ## Falsified
 
+* **"Noise and the printer wake the owl through the speech recognition" (2026-11-01).** They do
+  not: the log showed `idle -> detecting` every ~30 s with no utterance before it and no face in
+  frame, and `vibration.count` rose by one each time. It is the SW-420 picking up the table.
+* **"The self-motion mask alone stops the owl waking itself" (2026-11-01).** In a silent dark room,
+  door shut, printer off, nobody near: 2 self-wakes in 240 s (at 114.8 s and 162.2 s, 12 and 26
+  edges), both while the servos were moving. 833 raw edges arrived in that time, so the mask caught
+  nearly all of them but not every one. Decision (owner's idea): waking from IDLE and the startle
+  gesture need a DOUBLE knock - a second burst within `VIBRATION_DOUBLE_WINDOW_MS` (1500) of the
+  first. `VibrationData.knock` carries it; `detected`/`count` stay raw. A knock-knock faster than
+  `VIBRATION_BURST_GAP_MS` (250 ms) merges into one burst and does not count: knock about twice a
+  second. Verify: 10+ minutes of idle in a quiet room with no self-wake, and a double knock wakes.
+* **"A knock is bigger than the printer, so a minimum burst size separates them" (2026-11-01).**
+  Measured the same day, 60 s of ambient vs five finger knocks: ambient events 8, 20, 26, 83, 87
+  and 94 edges; knocks 42, 57, 73, 82 and 86. The ranges overlap completely, and a rule of 80 edges
+  in the first 300 ms counted none of the five knocks. Edge count does NOT discriminate; the rule
+  was removed. (An earlier "knock = 100-150" figure was ambient events the owner had not caused.)
+  What is left is the module's own potentiometer: turn the sensitivity down until the table and
+  printer stay silent and a finger knock still counts, and re-measure with the same protocol.
 * **"The owl wakes itself from IDLE" (2026-11-01).** The SW-420 sits in the same body as the
   servos, so the idle animation (glance, ear twitch, wing ruffle) shakes the sensor, the burst
   moves IDLE to DETECTING, and the owl has woken itself with its own idle life: an endless loop,
   found by the owner, not by a test. Fix: while any driven servo is still on its way to its
-  target, and `VIBRATION_SELF_MOTION_TAIL_MS` (600) after, `Sensors::updateVibration()` discards
+  target, and `VIBRATION_SELF_MOTION_TAIL_MS` (1500; was 600 until the same evening, when 1 self-wake in 10 min remained) after, `Sensors::updateVibration()` discards
   the edges (`ServoController::moving()` -> `Sensors::setSelfMotion()` in `loop()`).
   `vibration.pulses` still counts raw, so a sensor that fires with the servos at rest remains
   visible. Cost: a knock during the owl's own movement is not noticed. Verify on the owl: leave it

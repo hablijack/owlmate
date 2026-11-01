@@ -148,6 +148,8 @@ bool Sensors::begin() {
     _vibState = false;
     _vibLastPulse = 0;
     _selfMotionUntil = 0;
+    _prevBurstStart = 0;
+    _knockUntil = 0;
     _vibLastEvent = 0;
     _vibCount = 0;
 
@@ -330,6 +332,11 @@ void Sensors::updateVibration() {
             _vibCount++;
 
             _vibLastEvent = now;
+            // Zweites Buendel kurz nach dem ersten = Doppelklopfen.
+            if (_prevBurstStart != 0 && now - _prevBurstStart <= VIBRATION_DOUBLE_WINDOW_MS) {
+                _knockUntil = now + VIBRATION_HOLD_MS;
+            }
+            _prevBurstStart = now;
         }
         _vibLastPulse = now;
     }
@@ -349,6 +356,7 @@ VibrationData Sensors::getVibration() {
     data.detected = _vibState;
     data.lastDetected = _vibLastEvent;
     data.count = _vibCount;
+    data.knock = _knockUntil != 0 && millis() < _knockUntil;
     return data;
 }
 

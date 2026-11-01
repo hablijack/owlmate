@@ -235,8 +235,9 @@ void update() {
 
         case State::IDLE: {
             applyExpression(EyeExpression::NEUTRAL);
-            if (vib.detected) {
-                // Vibration wakes us up to look for a face.
+            if (vib.knock) {
+                // A double knock wakes us up to look for a face. A single burst does not: the
+                // owl's own servos, a table or a printer produce lone bursts (specs/007).
                 lastFaceSeen = millis();
                 transitionTo(State::DETECTING);
                 servos.setAngle(CH_HEAD, 0); // Look forward
