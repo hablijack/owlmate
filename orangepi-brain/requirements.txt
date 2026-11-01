@@ -23,11 +23,11 @@ flask>=3.0.0
 sounddevice>=0.4.6
 # ASR engine is whisper.cpp (NOT faster-whisper): a single self-contained C++
 # runtime with no torch / CTranslate2 dependency, which is what makes it a good
-# fit for the OrangePi. 'pywhispercpp' is the Python binding (import whispercpp);
+# fit for the OrangePi. The binding is `from pywhispercpp.model import Model`;
 # it bundles/links the whisper.cpp runtime. The model is a LOCAL .bin/.gguf file
 # downloaded by setup.sh (see config.yaml speech.model), not pulled from a hub at
 # runtime -- the OrangePi runs offline.
-pywhispercpp
+pywhispercpp>=1.5,<2
 # Optional emotion layer (brain/emotion.py): a small GGUF language model
 # (ringorsolya/Emotion_RoBERTa_german6_v7) run through llama.cpp to tag a
 # transcript with a sentence-level emotion. 'llama-cpp-python' is the binding

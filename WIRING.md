@@ -185,6 +185,39 @@ free — **but meter the colours, cheap cables lie.**
 
 ---
 
+## PCA9685 servo signal plugs
+
+Owner-reported assignment after relocating plugs for casing clearance.
+Left/right are the owl's own, not the viewer's. `config.h` is authoritative
+for the firmware mirror; the servo safety test checks this table against it.
+
+| Port | Function |
+|---|---|
+| CH8 | Right wing |
+| CH9 | Left wing |
+| CH10 | Head |
+| CH12 | Left ear |
+| CH13 | Right ear |
+
+Servo types reported by the owner:
+- Both ears and both wings: **SOL-EXPERT S18JST**, 1.8 g micro servo.
+- Head: **Longruner Micro Servo 9g KY66** (owner, 2026-10-30; this was recorded as
+  an SG90 before, which was wrong). No datasheet was found for the KY66, so
+  whether it is a 180° or a continuous-rotation unit and its pulse range are
+  unknown. Do not transfer values from the SG90.
+
+The [S18JST manufacturer's product description](https://www.sol-expert-group.de/1zu87modellbau/Mikro-Servos/Mikro-Servo-S18JST-1-8-Gramm::851.html)
+specifies **3.5–6 V** and **0.15 s / 60 degrees**. The latter is travel speed,
+not PWM input timing. That description supplies neither input pulse limits nor
+idle/holding/stall current. Do not invent these values or transfer them from the
+other servos. Confirm actual V+ rail voltage and connector polarity before calibration;
+PWM full-off does not disconnect servo power. The shared PCA9685 frequency
+must suit both servo types; pulse limits/start positions remain per-servo values.
+
+This identifies plugs, **not safe movement limits or startup positions**.
+The safety image remains locked; do not center, probe or enable these outputs
+until individual mechanical limits and an arming procedure have been verified.
+
 ## 🔊 Audio — MAX98357A amp + ICS43434 mic on the Orange Pi (A733 I2S0)
 
 The owl's voice/output is a **MAX98357A** mono class-D amplifier (Adafruit 2980 / 3322) driven over the Orange Pi's **I2S0** bus, and its ears are an **ICS43434** MEMS microphone on the same bus. Both live **entirely on the Orange Pi side** — no ESP32 pins are used, so they do not touch the pin map above.

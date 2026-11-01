@@ -6,15 +6,16 @@ After=network.target
 
 [Service]
 Type=simple
-# Run as a dedicated user; setup.sh creates it and adds it to the dial group
+# Run as a dedicated user; setup.sh adds it to dialout, audio and i2c groups
 # (for /dev/ttyACM*). Adjust User= if you prefer your own account.
 User=robotowl
-Group=dial
+Group=robotowl
+SupplementaryGroups=dialout audio i2c
 WorkingDirectory=/opt/robot-owl/orangepi-brain
 ExecStart=/opt/robot-owl/orangepi-brain/.venv/bin/python main.py /opt/robot-owl/orangepi-brain/config.yaml
 Restart=on-failure
 RestartSec=3
-# Mild hardening. USB serial access is covered by the udev rule + dial group.
+# Mild hardening. USB serial access is covered by the udev rule + dialout group.
 # The I2S audio card ('owl') is up by the time multi-user.target is reached,
 # so speech capture works without an extra ordering dependency.
 NoNewPrivileges=true

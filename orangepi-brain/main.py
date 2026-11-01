@@ -8,6 +8,8 @@ send policy commands (sleep/wake) and temporary overrides.
 
 import sys
 import os
+import argparse
+import time
 import yaml
 import logging
 
@@ -19,6 +21,7 @@ from brain.supervisor import Supervisor
 from brain.banner import print_banner
 from brain.audio import Audio
 from brain.speech import Speech
+from brain.display import StatusDisplay
 
 
 def load_config(config_path: str = "config.yaml") -> dict:
@@ -36,7 +39,12 @@ def main():
     logger = logging.getLogger(__name__)
 
     # Load configuration
-    config_path = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('config', nargs='?', default='config.yaml')
+    parser.add_argument('--no-serial', action='store_true',
+                        help='Maintenance mode: never open USB; web commands cannot reach the XIAO')
+    args = parser.parse_args()
+    config_path = args.config
     try:
         config = load_config(config_path)
     except FileNotFoundError:
@@ -56,7 +64,7 @@ def main():
         timeout=serial_cfg['timeout']
     )
 
-    if not serial.connect():
+    if not args.no_serial and not serial.connect():
         logger.error("Failed to connect to ESP32. Check serial port.")
         sys.exit(1)
 
@@ -70,13 +78,16 @@ def main():
     # Startup banner (printed to stdout; also mirrored to the log).
     print_banner(
         firmware=supervisor._last_fw or "",
-        port=serial_cfg['port'],
+        port='DISABLED (maintenance)' if args.no_serial else serial_cfg['port'],
         baudrate=serial_cfg['baudrate'],
         config_path=config_path,
         web_ui=bool(web_cfg.get('enabled', False)),
         audio=bool(audio.enabled and audio._ready),
     )
-    logger.info("Robot Owl Brain started (supervisor mode); waiting for telemetry...")
+    if args.no_serial:
+        logger.warning("MAINTENANCE: USB serial disabled; no XIAO commands or live telemetry")
+    else:
+        logger.info("Robot Owl Brain started (supervisor mode); waiting for telemetry...")
 
     # Optional speech recognition: hears the user (I2S mic) and reacts via the
     # owl's existing expression/gaze overrides + amp audio. Disabled by default
@@ -88,6 +99,14 @@ def main():
     except Exception as e:
         logger.error(f"Speech failed to start (continuing without it): {e}")
         speech = None
+
+    # Optional status OLED (0.91" 128x32 on one of the OrangePi's I2C buses): shows
+    # the owl's current mode. Disabled by default; a missing panel only logs once.
+    status_display = StatusDisplay(supervisor, config)
+    try:
+        status_display.start()
+    except Exception as e:
+        logger.error(f"Status display failed to start (continuing without it): {e}")
 
     # Optional web UI for manually testing features. Runs in a daemon thread
     # so the serial read loop (below) stays the foreground loop.
@@ -112,15 +131,22 @@ def main():
         # iterations so we can warn when telemetry goes stale AND (Phase 4)
         # evaluate the autonomous sleep-on-inactivity policy. check_stale and
         # check_auto_sleep are both no-ops unless their feature is enabled.
-        serial.read_loop(supervisor.on_telemetry,
-                          lambda: (supervisor.check_stale(), supervisor.check_auto_sleep()))
+        if args.no_serial:
+            # Do not enter read_loop: it would reconnect to the physical port.
+            while True:
+                time.sleep(0.5)
+        else:
+            serial.read_loop(supervisor.on_telemetry,
+                             lambda: (supervisor.check_stale(), supervisor.check_auto_sleep()))
     except KeyboardInterrupt:
         logger.info("Shutting down...")
     finally:
+        status_display.stop()
         if speech:
             speech.stop()
         if web_server:
             web_server.stop()
+        audio.close()  # capture is closed before the optional silent TX stream
         serial.disconnect()
         logger.info("Disconnected from ESP32")
 

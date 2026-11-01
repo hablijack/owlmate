@@ -145,9 +145,9 @@ class VibrationData:
 class UpdateMode:
     """Firmware update mode (SoftAP + /update HTTP server).
 
-    Populated only while the owl is in the UPDATE state (entered by a 4-tap
-    vibration sequence). The owl is on an isolated SoftAP during this time, so
-    the OrangePi can no longer reach it over the normal USB serial link.
+    Populated only while the owl is in the UPDATE state (entered by an explicit
+    serial command). The isolated SoftAP serves the firmware upload page;
+    USB serial remains available for heartbeat and update-mode control.
     """
     active: bool = False
     ssid: str = ""
@@ -165,6 +165,17 @@ class NavigationState:
     """
     active: bool = False
     angle: float = 0.0
+
+
+@dataclass(frozen=True)
+class ServoSafety:
+    """Normal commands and maintenance probes are blocked by the firmware lock.
+
+    Missing data defaults to locked: old firmware is not evidence of safety.
+    ready only means the PCA9685 acknowledged, not that PWM was initialized.
+    """
+    locked: bool = True
+    ready: bool = False
 
 
 @dataclass(frozen=True)
@@ -246,6 +257,7 @@ class Telemetry:
     eye_expression: str = "neutral"
     navigation: NavigationState = field(default_factory=NavigationState)
     heap: HeapData = field(default_factory=HeapData)
+    servo_safety: ServoSafety = field(default_factory=ServoSafety)
 
 
 # ============================================================================
@@ -309,6 +321,10 @@ _UPDATE_FIELDS = (
 _NAVIGATION_FIELDS = (
     ("active", "active", bool),
     ("angle", "angle", float),
+)
+_SERVO_SAFETY_FIELDS = (
+    ("locked", "locked", bool),
+    ("ready", "ready", bool),
 )
 _HEAP_FIELDS = (
     ("free", "free", int),
@@ -447,6 +463,12 @@ class SerialHandler:
         """
         return self.send_command({"type": "sleep"})
 
+    def set_update_mode(self, active: bool) -> bool:
+        """Explicitly enter/leave firmware OTA mode over USB; never via vibration."""
+        if not isinstance(active, bool):
+            raise ValueError("active must be a boolean")
+        return self.send_command({"type": "update_mode", "active": active})
+
     def wake(self) -> bool:
         """Wake the owl from sleep (only meaningful while SLEEPING)."""
         return self.send_command({"type": "wake"})
@@ -523,6 +545,8 @@ class SerialHandler:
             servos=servos,
             face=_section(FaceDetection, _FACE_FIELDS, _as_dict(data.get("face"))),
             heap=_section(HeapData, _HEAP_FIELDS, _as_dict(data.get("heap"))),
+            servo_safety=_section(ServoSafety, _SERVO_SAFETY_FIELDS,
+                                  _as_dict(data.get("servo_safety"))),
         )
 
     def _handle_message(self, line: str, callback: Optional[Callable[[Telemetry], None]] = None):

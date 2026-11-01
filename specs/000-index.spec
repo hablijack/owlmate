@@ -72,7 +72,8 @@ commit messages.
 | [012](012-orangepi-brain.spec) | Orange Pi brain internals: ownership, packaging, testing | implemented |
 | [013](013-navigation.spec) | Navigation — the owl as a compass | partial |
 | [014](014-speech.spec) | Speech — hearing the user and reacting | partial |
-| [015](015-orangepi-audio.spec) | Orange Pi A733 I2S audio stack (amp + mic) | open |
+| [015](015-orangepi-audio.spec) | Orange Pi A733 I2S audio stack (amp + mic) | implemented |
+| [016](016-servo-safety.spec) | Closed-owl servo lock and controlled deployment | implemented |
 
 ## Conventions used throughout
 

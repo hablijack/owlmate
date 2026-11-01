@@ -45,7 +45,8 @@ hands:
 | tool | purpose |
 |---|---|
 | `kalibrieren.py` | guided LSM303AGR magnetometer calibration: one slow full turn, live per-axis span, saves hard-iron offsets. Until 2026-09-01 this drove the BNO055 and enforced the figure-8 **before** the static poses; that ordering constraint no longer exists |
-| `klopftest.py` | live tap intervals against the OTA window |
+| `klopftest.py` | live vibration counts and raw edges; no OTA gesture |
+| `servo_probe.py` | identify a physical PCA9685 port (0–15) using one relative PWM tick via servo_step; no centering or return; refuses inactive outputs |
 | `preview_eyes.py` | renders `SHAPES[]` to an HTML contact sheet |
 | `schnappschuss.py` | decodes `camsnap`'s Base64 JPEGs to files; syncs on a sweep start so the four orientations are one comparable set |
 

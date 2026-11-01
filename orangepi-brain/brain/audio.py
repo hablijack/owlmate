@@ -20,9 +20,10 @@ Two OrangePi-specific notes (vs the RPi brain):
     upmixes mono to stereo. The amp reads (L+R)/2, so a mono source upmixed
     to both slots plays at full level -- no level loss.
   * The SAME I2S card also carries the microphone (ICS43434 on the RX path).
-    The owl_i2s module sets `clk-keep`, so the shared PLL/BCLK/LRCLK stay up
-    when the last stream closes; aplay playback and the mic capture therefore
-    coexist on one card without one dropping the other's clocks.
+    On the installed vendor kernel, capture falls silent after a TX stream
+    closes, even while RX remains enabled. Opt-in keep_playback_clock holds a
+    silent dmix TX stream open so short owl calls cannot stop the microphone.
+    This is a measured workaround, not a claim about the exact hardware cause.
 """
 
 import array
@@ -34,6 +35,7 @@ import shutil
 import struct
 import subprocess
 import threading
+import time
 import wave
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,12 @@ class Audio:
         self._ready = False
         self._warned = False
         self._lock = threading.Lock()
+        self._clock_process = None
+        self._feedback_lock = threading.Lock()
+        self._active_players = 0
+        self._playback_generation = 0
+        self._capture_safe_after = 0.0
+        self.feedback_tail_s = max(0.0, float(cfg.get("feedback_tail_s", 0.6)))
 
         # Resolve the sounds directory and pre-load any samples that exist.
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -86,6 +94,32 @@ class Audio:
                     logger.info("Audio: no recorded samples found in %s - using synthesized tones", self.sounds_dir)
                 logger.info("Audio enabled (I2S amp), device=%s, volume=%.2f",
                              self.device or "default", self.volume)
+                if cfg.get("keep_playback_clock", False):
+                    # Shared dmix PCM required: other aplay clients must be
+                    # able to mix into this stream without closing hardware TX.
+                    try:
+                        self._clock_process = subprocess.Popen([
+                            "aplay", "-q", "-D", self.device or "owl_playback",
+                            "-t", "raw", "-f", "S16_LE", "-r", "48000",
+                            "-c", "2", "/dev/zero",
+                        ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+                        logger.info("Audio: silent shared-I2S TX keepalive started")
+                    except OSError as e:
+                        logger.warning("Audio: could not start TX keepalive: %s", e)
+
+    def close(self) -> None:
+        """Reap the optional silent player after microphone capture has stopped."""
+        process = self._clock_process
+        self._clock_process = None
+        if process is None:
+            return
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
 
     # ------------------------------------------------------------------
     # Sample loading: read each recorded .wav, resample to SAMPLE_RATE, and
@@ -225,17 +259,41 @@ class Audio:
     # ------------------------------------------------------------------
     # Playback via aplay (daemon thread, non-blocking)
     # ------------------------------------------------------------------
+    def capture_guard(self):
+        """Atomic (generation, safe-after monotonic time) for speech input.
+
+        The silent TX keepalive never enters this guard. Real players reserve
+        it BEFORE spawning; overlap is counted and the tail starts at exit.
+        """
+        with self._feedback_lock:
+            return (self._playback_generation,
+                    float('inf') if self._active_players else self._capture_safe_after)
+
+    def _begin_playback(self):
+        with self._feedback_lock:
+            self._active_players += 1
+            self._playback_generation += 1
+
+    def _end_playback(self):
+        with self._feedback_lock:
+            self._active_players -= 1
+            self._playback_generation += 1
+            self._capture_safe_after = max(self._capture_safe_after,
+                                           time.monotonic() + self.feedback_tail_s)
+
     def _aplay(self, pcm: bytes) -> bool:
         wav = self._wrap_wav(pcm)
         args = ["aplay", "-q"]
         if self.device:
-            args += ["-c", self.device]
+            args += ["-D", self.device]
+        self._begin_playback()
         try:
             proc = subprocess.Popen(
                 args, stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
         except Exception as e:
+            self._end_playback()
             self._note("aplay failed to start: %s" % e)
             return False
         # Feed the WAV over stdin in a daemon thread so play() returns at once.
@@ -244,14 +302,22 @@ class Audio:
 
     def _feed(self, proc, wav):
         try:
-            proc.stdin.write(wav)
-            proc.stdin.close()
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=15)
-        except Exception:
-            pass
+            # communicate() bounds stdin writes too; write()+wait() could hang
+            # forever in write(), before reaching the old wait timeout.
+            proc.communicate(input=wav, timeout=15)
+        except Exception as e:
+            logger.warning("Audio playback failed: %s", e)
+            try:
+                proc.kill()
+                proc.communicate(timeout=2)
+            except Exception:
+                logger.exception("Audio: could not reap failed player")
+        finally:
+            if proc.poll() is None:
+                # Fail closed: don't let speech listen to a still-live player.
+                logger.error("Audio: player still alive; retaining capture guard")
+            else:
+                self._end_playback()
 
     def _wrap_wav(self, pcm: bytes) -> bytes:
         buf = io.BytesIO()

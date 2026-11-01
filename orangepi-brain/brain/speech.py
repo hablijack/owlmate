@@ -59,8 +59,7 @@ logger = logging.getLogger(__name__)
 
 # States the owl must be in for speech to be allowed to react. (SLEEPING is
 # deliberately excluded: a sleeping owl should not be woken by ambient words.)
-# UPDATE is excluded because the owl is then on an isolated SoftAP and the
-# OrangePi can no longer reach it over the normal USB serial link.
+# UPDATE is excluded so speech cannot interrupt firmware maintenance.
 REACTIVE_STATES = {"idle", "detecting", "interacting"}
 
 
@@ -141,6 +140,7 @@ class Speech:
         self._utterance = []
         self._voice_started = 0.0
         self._silence_frames = 0
+        self._utterance_generation = None
         # Lazy-loaded whisper.cpp model (loaded on the worker thread in start()).
         self._whisper = None
 
@@ -176,7 +176,7 @@ class Speech:
         # if the emotion layer is on) when the feature is actually enabled.
         import numpy as np  # noqa: F401  (ensures numpy is present early)
         import sounddevice as sd
-        import whispercpp
+        from pywhispercpp.model import Model
 
         # Load the whisper.cpp model once on the worker thread. It is a local
         # file (setup.sh downloads it), so there is no first-run hub fetch and
@@ -184,7 +184,8 @@ class Speech:
         if not self.model:
             raise RuntimeError("speech is enabled but speech.model (whisper.cpp model path) is empty")
         try:
-            self._whisper = whispercpp.WhisperModel(model_path=self.model, language=self.language)
+            self._whisper = Model(self.model, language=self.language, n_threads=2,
+                                  print_realtime=False, print_progress=False)
         except Exception as e:
             raise RuntimeError(f"Could not load whisper.cpp model {self.model!r}: {e}") from e
 
@@ -258,13 +259,26 @@ class Speech:
         """PortAudio input callback. Non-blocking: just enqueue the chunk."""
         if status:
             logger.debug("Mic status: %s", status)
+        generation, safe_after = self.supervisor.audio_capture_guard()
+        now = time.monotonic()
+        age = frames / self.capture_rate
+        if time_info is not None:
+            adc_age = time_info.currentTime - time_info.inputBufferAdcTime
+            if time_info.inputBufferAdcTime > 0 and math.isfinite(adc_age):
+                age = max(age, adc_age)
+        captured_at = now - age
+        # Drop whole overlapping blocks, including delayed PortAudio delivery.
+        # Do not close the mic or the silent TX stream to suppress feedback.
+        if safe_after > 0 and captured_at < safe_after:
+            return
+        packet = (indata.copy(), generation, captured_at)
         try:
-            self._queue.put_nowait(indata.copy())
+            self._queue.put_nowait(packet)
         except queue.Full:
             # Drop the oldest chunk if we're falling behind (ASR is slow).
             try:
                 self._queue.get_nowait()
-                self._queue.put_nowait(indata.copy())
+                self._queue.put_nowait(packet)
             except queue.Empty:
                 pass
 
@@ -275,7 +289,7 @@ class Speech:
 
         while not self._stop.is_set():
             try:
-                chunk = self._queue.get(timeout=0.5)
+                chunk, generation, captured_at = self._queue.get(timeout=0.5)
             except queue.Empty:
                 continue
             except Exception:
@@ -292,7 +306,8 @@ class Speech:
             # then resample from the card rate down to the ASR rate. The VAD
             # below is written for the ASR rate, so it sees 16 kHz mono.
             self._process_chunk(self._resample(self._to_float(mono),
-                                                self.capture_rate, self.sample_rate))
+                                                self.capture_rate, self.sample_rate),
+                                captured_generation=generation, captured_at=captured_at)
 
     def _to_float(self, raw):
         """Normalize captured samples to float32 in [-1, 1].
@@ -328,7 +343,13 @@ class Speech:
         frac = (pos - i0).astype(np.float32)
         return (x[i0] * (1.0 - frac) + x[i1] * frac).astype(np.float32)
 
-    def _process_chunk(self, chunk) -> None:
+    def _reset_utterance(self):
+        self._utterance = []
+        self._voice_started = 0.0
+        self._silence_frames = 0
+        self._utterance_generation = None
+
+    def _process_chunk(self, chunk, captured_generation=None, captured_at=None) -> None:
         """VAD state machine over one (ASR-rate, mono) chunk; transcribe a
         closed utterance.
 
@@ -343,13 +364,17 @@ class Speech:
         timing would mis-measure the silence gap. Audio duration is independent
         of processing speed, which keeps the VAD correct and testable.
         """
+        generation, safe_after = self.supervisor.audio_capture_guard()
+        if (time.monotonic() < safe_after
+                or (captured_generation is not None and captured_generation != generation)
+                or (captured_at is not None and safe_after > 0 and captured_at < safe_after)):
+            self._reset_utterance()
+            return
+        if self._utterance_generation not in (None, generation):
+            self._reset_utterance()
         # --- Gate: is the owl in a state where it may react? ---
         if not self._gate_open():
-            # Owl is asleep / in update mode / face-gate closed: drop audio.
-            if self._utterance:
-                self._utterance = []
-                self._voice_started = 0.0
-                self._silence_frames = 0
+            self._reset_utterance()
             return
 
         energy = self._rms(chunk)
@@ -361,6 +386,7 @@ class Speech:
             self._silence_frames = 0
             if not self._utterance:
                 self._voice_started = time.time()
+                self._utterance_generation = generation
             self._utterance.append(chunk)
 
             total = sum(len(c) for c in self._utterance)
@@ -396,9 +422,8 @@ class Speech:
     def _transcribe_and_feed(self) -> None:
         """Transcribe the accumulated window (if worth it) and run the pipeline.
 
-        whisper.cpp's transcribe() returns a Transcription object. We read the
-        text defensively (a .text property, else the joined segment texts) so
-        the code works across pywhispercpp versions and against the test stub.
+        pywhispercpp.Model.transcribe() returns a list of Segment objects.
+        Join their text before passing the transcript to the behavior pipeline.
         If the optional emotion layer is on, we also tag the transcript with a
         sentence-level emotion and hand both to feed().
         """
@@ -406,10 +431,13 @@ class Speech:
 
         if not self._utterance:
             return
+        generation, safe_after = self.supervisor.audio_capture_guard()
+        captured_generation = self._utterance_generation
         utterance = np.concatenate(self._utterance)
-        self._utterance = []
-        self._voice_started = 0.0
-        self._silence_frames = 0
+        self._reset_utterance()
+        if (time.monotonic() < safe_after
+                or captured_generation not in (None, generation)):
+            return
 
         # Ignore fragments shorter than a tenth of a second (noise clicks).
         if utterance.size < int(0.1 * self.sample_rate):
@@ -419,21 +447,21 @@ class Speech:
 
         try:
             result = self._whisper.transcribe(utterance, language=self.language)
-            text = getattr(result, "text", None)
-            if text is None:
-                text = " ".join(seg.text for seg in result.segments)
-            transcript = (text or "").strip()
+            transcript = " ".join(seg.text.strip() for seg in result).strip()
         except Exception as e:
             logger.warning("Speech: transcription failed: %s", e)
             return
 
         if not transcript:
             return
-        logger.debug("Speech: heard %r", transcript)
-
         # Optional sentence-level emotion tag (llama.cpp). Empty when the layer
         # is off or has no opinion; feed() then just falls through to keywords.
         emotion = self.emotion.classify(transcript) if self.emotion.enabled else ""
+        latest_generation, safe_after = self.supervisor.audio_capture_guard()
+        if latest_generation != generation or time.monotonic() < safe_after:
+            logger.debug("Speech: discarding ASR result invalidated by playback")
+            return
+        logger.debug("Speech: heard %r", transcript)
         self.feed(transcript, emotion=emotion)
 
     # ==================================================================

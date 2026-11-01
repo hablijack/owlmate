@@ -18,7 +18,7 @@ import tempfile
 import types
 import unittest
 
-from stubs import install_stub_modules, FakeSerial, FakeSupervisor, make_config
+from stubs import install_stub_modules, FakeSerial, FakeSupervisor, make_config, call_web_view
 
 install_stub_modules()
 
@@ -29,7 +29,7 @@ from brain.web_ui import WebUI  # noqa: E402
 # brain.web_ui (NOT an attribute of the supervisor). The fake's get_json returns
 # {}, so to exercise a POST endpoint we patch webui_mod.request.get_json to
 # return the test's body for the duration of the call.
-_orig_get_json = webui_mod.request.get_json
+# Request contexts are created by call_web_view when real Flask is installed.
 
 
 def make_webui(nav_enabled=True, locations_file=None):
@@ -55,12 +55,7 @@ class TestWebUINavEndpoints(unittest.TestCase):
         self.path = os.path.join(self._dir, "locations.json")
 
     def _call(self, ui, sup, view_name, body):
-        # Point the module-level Flask request at this test's body for the call.
-        webui_mod.request.get_json = lambda **k: body
-        try:
-            return ui.app.view_functions[view_name]()
-        finally:
-            webui_mod.request.get_json = _orig_get_json
+        return call_web_view(ui, view_name, body)
 
     # ------------------------------------------------------------------
     # /api/locations
@@ -163,7 +158,7 @@ class TestWebUINavEndpoints(unittest.TestCase):
                              imu=IMUData(yaw=0.0, calibrated=True),
                              gps=GPSData(valid=True, latitude=48.0, longitude=11.0, satellites=8),
                              update=UpdateMode(active=False), servos=[0.0] * 5)
-        d = ui.app.view_functions["api_telemetry"]()
+        d = call_web_view(ui, "api_telemetry")
         self.assertIn("navigation", d)
         self.assertFalse(d["navigation"]["active"])
 
@@ -188,7 +183,7 @@ class TestWebUINavEndpoints(unittest.TestCase):
                                            restored=True)),
             gps=GPSData(valid=True, latitude=48.0, longitude=11.0, satellites=8),
             update=UpdateMode(active=False), servos=[0.0] * 5)
-        d = ui.app.view_functions["api_telemetry"]()
+        d = call_web_view(ui, "api_telemetry")
 
         self.assertEqual(d["imu"]["cal"], {"axes": 1, "heading_ok": False,
                                           "restored": True})
@@ -364,7 +359,7 @@ class TestTelemetryPayloadCannotDrift(unittest.TestCase):
         from brain.serial_handler import Telemetry
         ui, serial, sup = make_webui(locations_file=self.path)
         sup.last = Telemetry() if telemetry is None else telemetry
-        return ui.app.view_functions["api_telemetry"]()
+        return call_web_view(ui, "api_telemetry")
 
     def test_every_top_level_telemetry_field_is_present(self):
         import dataclasses

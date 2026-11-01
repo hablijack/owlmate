@@ -80,12 +80,12 @@ pio run -e xiao_esp32s3              # build the main firmware
 pio run -e xiao_esp32s3 -t upload    # flash it over USB-C
 pio run -e xiao_esp32s3 -t monitor   # serial monitor, 115200 baud
 pio run -e dualtest -t upload        # flash a diagnostic env instead
-pio run                              # build ALL 11 envs (the regression check)
+pio run                              # build ALL 13 envs (the regression check)
 ```
 
 **`-e` is not optional on `-t upload`, and leaving it off is silently
 destructive.** There is no `[platformio] default_envs` in `platformio.ini`, so a
-bare `pio run -t upload` does not flash "the default"; it flashes **all eleven
+bare `pio run -t upload` does not flash "the default"; it flashes **all thirteen
 envs in file order**, and `[env:softimu]` is last — so the owl ends up running
 the bit-banged IMU probe, printing `Lesefehler` every 500 ms and no NDJSON at
 all. It looks exactly like dead firmware. Cost a flash cycle and a confused
@@ -95,7 +95,7 @@ described it as flashing the default env.
 A bare `pio run` (no target) is fine and useful: it builds all 11, which is the
 "builds clean on every env" check `BACKLOG.md` refers to.
 
-Ten diagnostic envs, each selected with `-e` and each compiling exactly one source file via
+Eleven diagnostic envs, each selected with `-e` and each compiling exactly one source file via
 `build_src_filter`. All guard their `setup()`/`loop()` behind a `#if defined(..._ACTIVE)` flag so
 they compile to nothing in the main build — keep that pattern for new sources in `src/`, otherwise
 their `setup()`/`loop()` collide with `main.cpp`'s.
@@ -111,6 +111,7 @@ their `setup()`/`loop()` collide with `main.cpp`'s.
 | `bushigh` | drives SDA/SCL high and tests a **bare pin** four ways (pull-up, pull-down, driven high, driven low) against `D5` as a known-good control. Use with the wires desoldered to tell a dead pin from a dead wire |
 | `softimu` | talks to the LSM303AGR over `lib/SoftI2C` (bit-banged), reporting **which protocol step** fails — so it separates "bus/wiring broken" from "driver misused". Built for the BNO055, whose clock stretching the ESP32's I2C controller could not handle; the LSM303AGR has no such problem, so that original reason is gone and only the per-step diagnosis remains |
 | `camsnap` | returns the **actual JPEG** over serial (Base64), one per vflip/hmirror combination, decoded by `tools/schnappschuss.py`. The only check that catches a camera aimed at the wrong place — brightness looks perfect on a ceiling. Added 2026-08-28 after exactly that cost a session |
+| `servocal` | the **servo calibration tool**: one servo at a time, raw PCA9685 registers, `ARM`/`FIRST`+`YES`/`STEP`/`LIMIT`/`STOP`, a 1000–2000 µs @ ~50 Hz envelope and no centering or automatic return. `setup()` writes nothing. The normal image stays locked; this is a separate env with its own source (`lib/ServoCal`, `src/servocal.cpp`), tested natively against a fake PCA9685. Use only de-energised with just the servo under test plugged in; see `specs/016-servo-safety.spec` |
 | `powerprobe` | rolling 5 V-input reading from a genuinely minimal image (no PSRAM/LCD/camera/I2C/servos), to tell "rail dragged down by a peripheral" from "rail dead". Was a `#if POWER_PROBE` branch inside `main.cpp` until 2026-08-27, which linked the whole firmware and so measured nothing useful |
 
 The main env sets `-DCORE_DEBUG_LEVEL=0`: this USB CDC port carries the NDJSON protocol the Orange Pi
@@ -176,7 +177,7 @@ taking the IMU calibration with it. Flash the pieces separately:
 ### Orange Pi brain (`orangepi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (201 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (251 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
@@ -186,7 +187,7 @@ sudo ./setup.sh [--non-interactive]     # full Orange Pi provisioning (idempoten
 
 The suite runs on a plain Mac with **no** Orange Pi, mic, PortAudio, whisper.cpp or llama.cpp:
 `tests/stubs.py`
-`install_stub_modules()` fakes `serial`/`flask`/`yaml`/`whispercpp`/`llama_cpp` *only when the
+`install_stub_modules()` fakes `serial`/`flask`/`yaml`/`pywhispercpp.model`/`llama_cpp` *only when the
 real module is not importable*. Every test file calls it before importing `brain.*`, so keep new
 tests in that order (`install_stub_modules()` then `from brain... # noqa: E402`). numpy is the one
 hard dependency. There is no linter configured.
@@ -230,9 +231,35 @@ are **self-contained and do not see `include/`** — `lib/Eyes` carries its own 
 Eight states: `BOOT → IDLE → DETECTING → INTERACTING`, plus `SLEEPING`, `NAVIGATING`, `UPDATE`,
 `ERROR`. Transitions are driven by local inputs only (vibration + on-device face detection +
 timeouts from `config.h`). `NAVIGATING` is a *persistent* head override that expires on
-`NAV_TIMEOUT_MS` without a refresh — unlike the 3 s expression/gaze overrides. `UPDATE` is entered by
-4 vibration taps, brings up SoftAP `RobotOwl-Update` + an `HTTPUpdateServer` at `/update`, and
-ignores every command except `heartbeat`.
+`NAV_TIMEOUT_MS` without a refresh — unlike the 3 s expression/gaze overrides. `UPDATE` is entered only by an explicit serial `update_mode` command, brings up SoftAP `RobotOwl-Update` + an `HTTPUpdateServer` at `/update`, and
+ignores every command except `heartbeat` and `update_mode`. Vibration never enters or exits OTA mode.
+
+### Servo safety
+
+The closed owl's plug mapping is recorded in config.h/WIRING; the five servos were
+calibrated 2026-10-30/31 (table in `include/servo_profiles.h`, record in BACKLOG).
+In a **locked** build (`SERVO_SAFETY_LOCKED=1`: `xiao_esp32s3_locked` and every
+diagnostic env) a build assertion forbids unlocking by accident, controller boot is
+address-ACK-only, and nothing may call the PWM library's begin/reset/frequency setup;
+all movement paths, including centering and maintenance probes, stay gated at the
+driver boundary. There is no serial/NVS unlock. See `specs/016-servo-safety.spec`;
+deployment status and open mechanical work belong in BACKLOG. Never restore an old,
+pre-calibration motion-enabled app as an automatic flash-failure fallback.
+
+**The owl moves; the lock is a build choice, not a switch.** The main env `xiao_esp32s3`
+carries `-DSERVO_MOTION_ENABLED=1` (owner decision 2026-10-31, made the one main image on
+2026-11-01 - "there is one owl we work towards"); only builds with that flag have
+`SERVO_SAFETY_LOCKED=0` (`config.h` defaults to 0, so every diagnostic env stays locked), and only there do `lib/ServoMotion` (limits, easing, bus
+safety) and `lib/ServoMotion/OwlChoreo` (ears, head tracking, idle life, called from
+`src/motion.cpp`) move anything. The measured limits **with margin** are the table in
+`include/servo_profiles.h` - ends of the table are the only limits, nothing outside them
+is ever written. `xiao_esp32s3_locked` (same image, servos locked) exists for mechanical
+work and as a deliberate way back - never as an automatic fallback. Deploy through the
+two-phase flasher (never `-t upload`) and with the owner near the mechanism; a first flash of
+a changed motion/limit table is a with-the-owner event.
+In the main image the servos are driven by their own 50 Hz task, so any new code that touches
+`Wire` from `loop()` must hold `I2cGuard` (`include/i2c_lock.h`) around the single bus
+operation; a bare `Wire` call can collide with a servo write.
 
 ### The shared SPI bus
 
@@ -634,7 +661,7 @@ without it" rather than exiting. The idle callback runs `supervisor.check_stale(
 - `serial_handler.py` — pyserial + NDJSON. Frozen dataclasses (`Telemetry`, `IMUData`,
   `IMUCalibration`, `GPSData`, `FaceDetection`, `VibrationData`, `NavigationState`, `UpdateMode`)
   are the parsed telemetry shape; command senders (`set_expression`, `set_servo`, `set_gaze`, `nav`,
-  `sleep`, `wake`, `blink`, `heartbeat`) are the outbound protocol. This is the contract with
+  `sleep`, `wake`, `blink`, `heartbeat`, `set_update_mode`) are the outbound protocol. This is the contract with
   `handleCommand()`/`sendTelemetry()` in `src/protocol.cpp` — a change on one side needs the matching
   change on the other.
   **Adding a telemetry field is one row in a `_*_FIELDS` table plus one dataclass field**, nothing
@@ -667,6 +694,19 @@ without it" rather than exiting. The idle callback runs `supervisor.check_stale(
 - `audio.py` — plays WAVs from `assets/sounds/` (or synthesizes tones) through `aplay` on the Orange Pi's
    I2S MAX98357A amp. No-ops with a log line when the amp/I2S is absent. **All audio is on the Orange Pi;
    the ESP32 has no audio pins.**
+
+**A733 audio: do not infer capture health from process exit or aggregate RMS.**
+On the installed vendor kernel, TX closing silences ongoing RX even with direct
+hardware PCMs. The opt-in `audio.keep_playback_clock` silent shared-TX stream
+prevents the reproduced fault; Audio owns/reaps that child and main stops capture
+before closing Audio. Run the duplex checker and inspect post-playback samples.
+SPEC-015 records the failure and measurements; a PLL shutdown is not established.
+
+Speech's own-voice barrier comes from `Supervisor.audio_capture_guard()`, never
+by lifting its Audio handle. Real playback reserves a generation and monotonic
+tail; silent TX must not reserve it. Carry capture generation/time through the
+queue and re-check after inference: a current busy flag alone cannot reject
+stale frames/results. Suppress processing, not the live I2S stream (SPEC-014).
 
 Every feature block in `config.yaml` (`supervisor.auto_sleep`, `web`, `navigation`, `speech`) is
 `enabled: false` by default so existing deployments are unaffected — keep new features opt-in the

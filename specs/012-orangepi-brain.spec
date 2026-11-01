@@ -32,6 +32,22 @@ for the same resource, or a fact written in three places.
 
 ## Decisions
 
+**Explicit USB-disabled maintenance mode.** `main.py --no-serial` starts the
+Web UI/supervisor without calling either `SerialHandler.connect()` or
+`read_loop()` (the latter reconnects automatically). The disconnected sender
+returns false, so Web UI control requests cannot move hardware. The foreground
+thread only sleeps; there is no simulated telemetry presented as real data.
+This allows provisioning a closed owl with unknown mechanical limits without
+opening USB, which can reboot the XIAO and center servos. It does NOT make a
+host reboot or the firmware's own autonomous behavior mechanically safe.
+A regression test is verified against an accidental `connect()` in this mode.
+
+**Real Flask contexts in web tests when Flask is installed.** `call_web_view`
+uses `test_request_context()` and decodes the response with `get_json()`. With
+no Flask it keeps the existing minimal stub. Direct view calls without context
+worked only on the Mac's stubbed environment, not on a provisioned Orange Pi;
+unit tests must work with either dependency environment.
+
 **Ownership, one line each.** The pass that produced this spec fixed four
 violations of R-012.1:
 
@@ -128,7 +144,43 @@ hand-rolled `SimpleNamespace`s, i.e. a fourth mirror of the wire format, and it
 had drifted: it broke the moment the seven dropped fields were parsed. A double
 assembled from the real type cannot drift.
 
+**Status OLED (`brain/display.py`, 2026-11-01, owner request).** A 0.91" 128x32 SSD1306
+on one of the Orange Pi's own I2C buses shows the owl's mode (`IDLE`, `DETECTING`, ...) and,
+small, the firmware loop rate and whether a face is seen. Decisions: (1) **no new package** -
+`/dev/i2c-N` with the `I2C_SLAVE` ioctl and a built-in 5x7 font (upper case only), so
+`requirements.txt` is unchanged; (2) **a pure `render()`** returns the 512-byte page buffer, so
+the layout is tested without hardware (`tests/test_display.py`), and the device gets a frame
+only when the picture changed; (3) it follows R-012.3: a missing bus or panel logs once, the
+thread retries every `retry_s`, a write error closes the device and never reaches the read
+loop; (4) it reads the supervisor (`last`, `last_state`) and never talks to the serial port;
+(5) two states exist only on the brain side: `STARTING` (no frame yet; the firmware's own
+`boot` also shows as `STARTING`) and `NO LINK` (telemetry went stale), plus `BRAIN OFF` left on
+the panel at shutdown; (6) dims to minimum contrast while the owl sleeps. The service user
+needs the `i2c` group (`setup.sh`, `deploy/install.sh` and the unit add it).
+**Do not read bus 20 as the panel:** `i2cdetect -l` names `i2c-20` "SUNXI HDMI" - the HDMI DDC
+channel. A device at `0x30` there is the monitor link (E-DDC segment address), not an OLED;
+the panel answers at `0x3C`/`0x3D` on the bus of the header pins it is wired to.
+**Installed 2026-11-01:** SDA on PE2, SCL on PE1 = TWI2, which is `disabled` in the stock DT, so
+the panel is invisible until it is enabled. **The `overlays=` line in `/boot/dietpiEnv.txt` does
+nothing on this image** (`overlay_path=amlogic` points at a directory that does not exist, so
+`i2c3-ph` was never applied); only `user_overlays=` works. TWI2 comes from
+`/boot/overlay-user/owl-i2c2.dtbo` (`status = "okay"` on `/soc@3000000/twi@2512000`, compiled
+with `dtc -@`), and appears as `/dev/i2c-2`, panel at `0x3C`. Config: `i2c_bus: 2`.
+**Portrait mount (2026-11-01):** the panel stands in the owl's backpack with its long side
+vertical, so `display.portrait: true` draws the mode bold and centred, upright letters one under
+the other, first letter on top (`render_portrait()`, 32x128 canvas): 3x for up to 4 letters, 2x up
+to 7. Long names are abbreviated (`PORTRAIT_LABELS`: DETECT, CHAT for interacting, NAVI, ...).
+Below a rule come the metrics as two small horizontal lines (`28HZ`, `FACE`/`NONE`). The first
+version put the mode in a 1x column and was too small to read. The canvas is turned onto the panel by a quarter turn;
+if it comes out upside down, set `rotate: true` (hardware 180 degree flip).
+
 ## Verified facts
+
+* On 2026-10-18 a native full-process smoke test used real Flask, pyserial and
+  YAML with a PTY simulating the XIAO. HTTP page/telemetry, update-mode entry and
+  exit forwarding, malformed requests, servo forwarding and place persistence
+  passed. Every command went to the PTY, never the physical USB port. This does
+  not establish live firmware behavior or mechanical correctness.
 
 * 174 tests at the close of that pass, up from 104 before it (188 as of
   2026-08-31). `tests/test_protocol.py` (48) and

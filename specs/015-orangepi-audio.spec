@@ -1,10 +1,9 @@
 # SPEC-015: Orange Pi audio — the A733 I2S stack
 
-Status: open — implemented in code (driver, overlay, asound.conf, installer);
-        never run on the A733 board (built on a Mac; the vendor kernel module
-        cannot be neither compiled nor loaded here)
-Verified: not yet — first flash of `orangepi-brain/setup.sh` on a DietPi
-          Orange Pi Zero 3W is the acceptance test (see Acceptance)
+Status: implemented with opt-in silent-TX workaround — boot, WAV, mic and
+        post-playback capture continuity verified; speech acceptance in SPEC-014
+Verified: 2026-10-18 — DietPi Debian 13, kernel 6.6.98-vendor-sun60iw2;
+          cold boot, owner-confirmed WAV, ALSA/sounddevice capture and duplex
 Depends on: 001, 010, 012, 014
 
 ## Intent
@@ -64,9 +63,21 @@ reference driver does — not from a component callback.
 driver, no registers to program), so the card is paired with
 `snd-soc-dummy` rather than a real codec DAI.
 
-**Continuous clock ON by default, with a DT opt-out.** `SND_SOC_DAIFMT_CONT`
-keeps the ICS43434 powered between captures (a stopped MCLK/LRCK can leave the
-mic silent until the next stream re-clocks it). It is on by default and can be
+**Silent TX keepalive is an opt-in runtime workaround.** On the installed
+kernel, ending TX makes an already-running RX stream become digitally silent.
+It reproduces with both direct hw and dmix/dsnoop, so changing ALSA topology is
+not the fix. CTL still has GLOBAL_EN/RXEN set after TX ends; the exact underlying
+hardware/BSP cause has not been established. Do not describe it as a measured
+PLL shutdown. Keeping a zero-valued dmix TX stream open prevents the failure.
+`audio.keep_playback_clock` starts that stream in Audio, using the shared output
+PCM, before capture; default false. Audio owns/reaps the child, and main closes
+capture before closing Audio. It consumes resources throughout the brain's
+lifetime, including when speech is disabled; enabling it is an explicit choice.
+No patch to the vendor driver or firmware is required.
+
+**Continuous-clock format requested by default, with a DT opt-out.** `SND_SOC_DAIFMT_CONT`
+requests continuous operation but did not prevent the measured TX-close/RX
+failure on this kernel. The request is on by default and can be
 disabled with the `robotowl,no-continuous-clock` DT property if the A733
 misbehaves — a one-line overlay edit, no recompile.
 
@@ -85,6 +96,44 @@ rather than guessed away.
 
 ## Verified facts
 
+* Native `owl_i2s.ko` build succeeded on DietPi kernel 6.6.98-vendor-sun60iw2
+  with matching `linux-headers-vendor-sun60iw2=26.08.0-trunk-dietpi2`.
+  The compiler-version warning (GCC 14 vs kernel GCC 13) did not prevent the
+  build. After power restoration, the module loads and registers card `owl`.
+* This DietPi boot script loads `/boot/dtb/${fdtfile}` and overlays from
+  `/boot/overlay-user/` named by `user_overlays=` in `dietpiEnv.txt`. An offline
+  merge of the owl overlay into the actual base DTB succeeds. The running
+  kernel has no CONFIG_OF_OVERLAY, so activation requires a reboot.
+* ALSA helper names are `owl_playback`, `owl_capture`, `owl_dmixed`, `owl_array`;
+  default and `owl` select the asymmetric shared card. Name resolution now
+  reaches the registered physical card. Playback is audible (owner confirmation).
+* Run ALSA diagnostics as `robotowl` or root. The SSH user `dietpi` is not in
+  audio: its `aplay -l`/`arecord -l` reports no sound cards despite the card being
+  registered. Service user `robotowl` has the required audio group; do not weaken
+  device permissions to fix a diagnostic invocation.
+* Real `owl_capture`, S16_LE/48 kHz/mono: 144000 samples in three seconds,
+  RMS 32.08 raw units, mean -0.39, min/max -161/+187, no clipped samples.
+  This is room noise, not a speech loudness/accuracy measurement.
+* The actual sounddevice input path also captures at 16 kHz/mono: three seconds,
+  normalized RMS 0.000688, peak 0.00784. It is nonzero and unclipped.
+* Simultaneous five-second dsnoop capture plus a one-second, low-amplitude 660 Hz
+  dmix playback completes in 5.049 s without reported xruns. Stereo capture has
+  left RMS 33.02 / peak 496, right exactly zero, no clipping. The mic occupies
+  the expected left slot. **Later per-second analysis falsified continuity:**
+  the last two seconds were all zero despite successful command exit.
+* Controlled eight-second capture with one-second playback at t=2 reproduced
+  the failure with both plughw and dmix/dsnoop: each produced all-zero seconds
+  4–7 after TX stopped. Capture-only eight-second runs remained nonzero.
+* With silent dmix TX held open, eight-second capture remains nonzero after
+  one-shot playback closes. The committed duplex checker was observed to fail
+  with the brain/keepalive stopped, then pass with the real Audio keepalive:
+  left RMS/s 37.450, 33.882, 19.747, 8.268, 11.343, 32.224, 55.313, 27.194.
+  A later 15-second real stereo/sounddevice capture also remained nonzero in
+  every second, with no PortAudio status flags.
+* After the stream, live I2S regmap reads are TX0CHSEL 0x00110003,
+  TX1/2/3CHSEL 0x00100000 and RXCHSEL 0x00110000: data_late is 1 on every
+  tested TX/RX field. Real capture does not show the zero/full-scale failure.
+
 * **Pin map (40-pin header):** PB5 = I2S0 BCLK, PB6 = I2S0 LRCK, PB8 = I2S0 DIN
   (mic in), PB7 = I2S0 DOUT (amp out), PB4 = I2S0 MCLK (**unconnected**).
 * **Clock math:** at 48 kHz, BCLK = 64× fs = **3.072 MHz**, derived from a
@@ -97,6 +146,36 @@ rather than guessed away.
   data-delay fix were taken from it.
 
 ## Falsified
+
+* **"No xruns and successful command exit prove duplex works."** Both
+  processes completed normally while capture's tail was entirely zero. Inspect
+  samples after playback stops, not just aggregate RMS or process status.
+* **"CONT/clk_keep already prevents capture loss."** It did not on this
+  kernel. The audio module docstring and config comments claimed it without
+  measurement; they now describe the observed opt-in silent-TX workaround.
+* **"dmix/dsnoop causes this particular dropout."** Direct plughw reproduced
+  it too. Capture alone worked, and silent TX fixed the transition in the
+  shared topology. This does not rule out other plugin timing issues.
+
+* **"aplay says no sound cards, so overlay/probe failed."** That was a
+  permissions artifact: `/proc/asound/cards` and kernel logs showed `owl` already
+  registered. The same query as robotowl/root listed it; the owner could already
+  hear the owl WAV. Check both card registration and caller permissions first.
+
+* **"The uncompiled driver uses valid kernel/ASoC names."** The first native
+  build failed: `SND_SOC_DAIFMT_CFC_CFC` does not exist. The codec-consumer
+  format is `SND_SOC_DAIFMT_CBC_CFC`; the dummy codec also needs component
+  name `snd-soc-dummy` and DAI name `snd-soc-dummy-dai`, not just the former
+  as its DAI name. The running kernel's ASoC DAI listing confirms the latter.
+* **"Dotted PCM names are harmless."** `owl.playback` and `owl.capture`
+  resolved to Unknown PCM even after quoting the definitions. Underscore names
+  reach the expected hardware-card lookup. This was tested without opening
+  the XIAO serial port or enabling the audio controller.
+* **"The generic installer matches DietPi."** The package is
+  `device-tree-compiler` (not `dtc`); headers use the vendor package above;
+  the serial group is `dialout` (not `dial`); and DietPi uses `user_overlays`,
+  not `dtoverlay=`. The installer now preserves deployed config on unattended
+  re-runs and supports `--no-reboot --no-enable-service` for safe staging.
 
 * **"Just add a DT overlay, like the Pi's hifiberry-i2s-lite."** No. That works
   on the clean `snd-soc-bcm2835` driver. The A733 vendor controller needs the
@@ -115,33 +194,25 @@ rather than guessed away.
 ## Acceptance
 
 1. On the board, `aplay -l` lists a card named **`owl`**.
-2. A test tone through `owl:playback` is audible from the MAX98357A (and is not
+2. A test tone through `owl_playback` is audible from the MAX98357A (and is not
    one bit off — no DC offset / no hard clipping at the edge).
-3. `arecord -D owl:capture -f S16_LE -r 48000 -d 3 out.raw` captures the mic:
+3. `arecord -D owl_capture -f S16_LE -r 48000 -d 3 out.raw` captures the mic:
    non-silent, and **not** the data-delay failure signature (samples alternating
    0 / full-scale).
-4. `cd orangepi-brain && python3 tests/run_tests.py` is still green.
-5. `bash -n setup.sh` and `bash -n deploy/install.sh` both pass.
+4. Run `orangepi-brain/tools/check_audio_duplex.py` as robotowl: every second
+   after one-shot playback closes must still contain nonzero mic data. Run it
+   against the broken condition first; a successful process exit is not enough.
+5. `cd orangepi-brain && python3 tests/run_tests.py` is still green.
+6. `bash -n setup.sh` and `bash -n deploy/install.sh` both pass.
 
 ## Open
 
-* **Never run on the A733 board.** Everything here was written on a Mac; the
-  `owl_i2s` module cannot be compiled or loaded without the
-  `orange-pi-6.6-sun60iw2` kernel build tree. The first `setup.sh` flash is the
-  real test, and any of the "Verified facts" above may need correcting against
-  it.
-* **DT-overlay enablement on DietPi is unverified.** Armbian/DietPi images select
-  overlays differently (`armbianEnv.txt` `dtoverlay=`, U-Boot `fdtoverlay`, or
-  `extlinux.conf`). `setup.sh` probes the boot dir, tries `armbianEnv.txt`, and
-  **warns** (not dies) if it is absent, pointing here. Fallback: merge the
-  overlay into the base `.dtb` (dtc decompile → edit → recompile).
-* **Whether the base `.dts` already sets `i2s0_plat` pinctrl.** The overlay sets
-  it; a conflict would surface as a `dtc` warning at compile time.
-* **Whether `snd-soc-dummy` is the correct DAI name on this kernel.** Assumed
-  from the Whisplay reference; unconfirmed against the 3W kernel.
+* **Other OS images/kernels remain unverified.** This acceptance is for the
+  installed DietPi/vendor kernel, not a generic A733 driver compatibility claim.
 * **Whether `CONT` is needed or beneficial on the A733.** It is on by default
   (R-015.6) with a DT opt-out; whether it must be on for the mic to stay awake,
   or is neutral, is unknown until the board runs.
-* **`dmix`/`dsnoop` vs `plug`-on-`hw:` timing on the 3W.** Default is
-  dmix/dsnoop; if capture underruns or playback stutters, switch to the a7z-style
-  config documented in `asound.conf` and record which worked here.
+* **Underlying TX-close/RX failure and sustained timing.** Silent TX prevents
+  the reproduced failure; it does not establish its exact hardware cause or
+  validate hours of operation. If capture underruns or playback stutters,
+  compare the a7z-style config documented in `asound.conf` and record the result.

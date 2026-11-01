@@ -9,7 +9,7 @@
 // used to be a fourth #define carrying a second copy of the same string, which
 // only had to be kept in sync manually.
 #define FW_VERSION_MAJOR 1
-#define FW_VERSION_MINOR 2
+#define FW_VERSION_MINOR 3
 #define FW_VERSION_PATCH 0
 
 #define FW_VERSION_STR_(x) #x
@@ -281,9 +281,6 @@
 // ============================================================================
 // Firmware update mode (4-tap vibration trigger -> WiFi SoftAP + OTA)
 // ============================================================================
-#define UPDATE_TAP_REQUIRED 4       // consecutive taps to enter update mode
-#define UPDATE_TAP_GAP_MS 1500      // max gap between taps in a sequence
-#define UPDATE_EXIT_GRACE_MS 1000   // ignore exit taps right after entering
 #define UPDATE_AP_SSID "RobotOwl-Update"
 #define UPDATE_AP_PASSWORD "robotowl123"
 #define USB_WAIT_TIMEOUT_MS 5000    // max wait for USB CDC before continuing boot
@@ -460,16 +457,14 @@
 // Sides follow the convention at the top of this file: the owl's own left and
 // right, not the viewer's.
 //
-// The ears are NOT on channels 0 and 1. They were moved to 15 and 14 on
-// 2026-08-27 because the servo cables were too short to reach the low channels.
-// The numbers are therefore SPARSE - see the note on array sizing below, this
-// is not merely cosmetic.
+// Owner-reported port assignment after relocation for casing clearance.
+// The numbers remain SPARSE - see the array-sizing note below.
 // ============================================================================
-#define CH_LEFT_EAR 15
-#define CH_RIGHT_EAR 14
-#define CH_HEAD 2
-#define CH_LEFT_WING 3
-#define CH_RIGHT_WING 4
+#define CH_LEFT_EAR 12
+#define CH_RIGHT_EAR 13
+#define CH_HEAD 10
+#define CH_LEFT_WING 9
+#define CH_RIGHT_WING 8
 
 // Number of servos actually fitted. Used for the telemetry "servos" array and
 // for iterating the populated channels.
@@ -482,7 +477,45 @@
 // silently: the ear would simply never move, with no error anywhere.
 #define PCA9685_NUM_CHANNELS 16
 
-// Servo center positions (pulse width in microseconds, 50Hz)
+// Geschlossene Eule: Portbelegung vom Besitzer mitgeteilt; sichere mechanische
+// Grenzen und Startpositionen sind noch UNBEKANNT.
+// Sicherheitsabbild: KEINE PCA9685-Initialisierung, Frequenzaenderung oder
+// PWM-Schreibzugriffe, auch nicht fuer Probe/Boot/Sleep/OTA/Fehlerpfade.
+// Absichtlich im Image verankert, nicht per Serial/NVS entriegelbar. Erst nach
+// verifizierter Belegung UND individuellen Grenzen durch neue Firmware ersetzen.
+//
+// BEWEGUNG (2026-10-31, Besitzerentscheidung, SPEC-016; am 2026-11-01 zum Haupt-Image gemacht):
+// Das Haupt-Env xiao_esp32s3 setzt -DSERVO_MOTION_ENABLED=1; xiao_esp32s3_locked und alle
+// Diagnose-Envs nicht (Standard hier: 0 = gesperrt). Nur mit dem Flag ist die Sperre aus,
+// und nur dann kommen die Servos ueber lib/ServoMotion
+// und include/servo_profiles.h (gemessene Grenzen MIT Reserve) in Bewegung. Das ist
+// ein Build-Schalter, kein Laufzeit-Schalter: weder Serial noch NVS koennen entsperren.
+#ifndef SERVO_MOTION_ENABLED
+#define SERVO_MOTION_ENABLED 0
+#endif
+#if SERVO_MOTION_ENABLED
+#define SERVO_SAFETY_LOCKED 0
+#else
+#define SERVO_SAFETY_LOCKED 1
+#endif
+
+// Kopfverfolgung und Idle-Bewegungen (nur im Bewegungs-Image wirksam), lib/OwlChoreo.
+// HEAD_TRACK_SIGN war NICHT hergeleitet; auf Hardware bestaetigt 2026-10-31 (Besitzer:
+// der Kopf folgt in die richtige Richtung, Start mittig). Bei neu eingebauter Kamera
+// erneut pruefen: dreht der Kopf vom Gesicht WEG, auf +1 umstellen. Der Rutschschutz in
+// OwlChoreo faengt eine falsche Richtung nach ~3 s ab (Tracking 30 s aus, Kopf zentriert).
+#define HEAD_TRACK_SIGN (-1.0f)
+#define HEAD_TRACK_DEG_PER_S 50.0f   // erwartete Kopfgeschwindigkeit einer Sakkade (bestimmt nur die Sperrzeit)
+#define HEAD_TRACK_FOV_DEG 16.5f     // geschaetzter halber Kamerasichtwinkel (nicht gemessen): gaze_x=1 ~ so viele Grad
+#define HEAD_SACCADE_GAIN 1.3f       // Anteil des Versatzes pro Sakkade; <1 = lieber nachsetzen als ueberschiessen
+#define HEAD_SACCADE_SETTLE_MS 250   // Pause nach der Sakkade, bis das Kamerabild die neue Lage zeigt
+#define HEAD_TRACK_DEADBAND 0.28f    // |gaze_x| darunter: Kopf ruhig
+#define HEAD_TRACK_LIMIT_DEG 55.0f   // Kopf folgt hoechstens +-55 Grad
+#define HEAD_GLANCE_MAX_DEG 22.0f    // Idle-Blick zur Seite
+
+// Nominal pulse parameters (microseconds, 50Hz), NOT calibrated mechanical
+// limits/start positions. Different fitted servo types need individual limits;
+// the safety lock must remain active until those are established.
 #define SERVO_CENTER_US 1500
 #define SERVO_MIN_US 1000
 #define SERVO_MAX_US 2000
@@ -590,6 +623,10 @@
 // Preis: kleineres Blickfeld. Wer weiter aussen steht, wird nicht mehr gesehen.
 // 1 schaltet den Ausschnitt ab und liefert das alte Verhalten.
 #define CAM_DETECT_CROP_DIV 2
+// 1: der Ausschnitt wandert reihum (Mitte, links, Mitte, rechts), solange kein Gesicht
+// gefunden wird, und bleibt bei einem Treffer stehen. Ohne das sieht die Eule nur die mittlere
+// Haelfte des Bildes und folgt einem Gesicht am Rand nicht (Besitzer 2026-10-31). 0: nur Mitte.
+#define CAM_DETECT_SCAN 1
 // Nachhaltezeit fuer die Telemetrie. Die Erkennung laeuft alle
 // FACE_DETECT_INTERVAL_MS, die State-Machine sieht mit ~60 Hz jeden Treffer -
 // die Telemetrie tastet aber nur alle 500 ms einen Momentanwert ab und greift

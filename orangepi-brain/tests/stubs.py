@@ -26,6 +26,17 @@ import sys
 import types
 
 
+def call_web_view(ui, name, body=None):
+    """Exercise the registered view with either real Flask or the minimal stub."""
+    if hasattr(ui.app, 'test_request_context'):
+        with ui.app.test_request_context(json=body):
+            return ui.app.view_functions[name]().get_json()
+    from unittest.mock import patch
+    import brain.web_ui as webui
+    with patch.object(webui.request, 'get_json', return_value=body or {}):
+        return ui.app.view_functions[name]()
+
+
 def install_stub_modules() -> None:
     """Install minimal stand-ins for third-party modules into sys.modules.
 
@@ -89,12 +100,13 @@ def install_stub_modules() -> None:
         m.safe_load = lambda f: {}
         sys.modules["yaml"] = m
 
-    # whispercpp: brain/speech.py imports it lazily inside start() (ASR). The
+    # pywhispercpp: brain/speech.py imports it lazily inside start() (ASR). The
     # default stub returns an EMPTY transcript, so a test that forgets to
     # override it gets a no-op (feed("") returns immediately) rather than a
     # crash. The ASR test installs its own transcript-specific stub on top.
-    if not _has("whispercpp"):
-        m = types.ModuleType("whispercpp")
+    if not _has("pywhispercpp.model"):
+        package = types.ModuleType("pywhispercpp")
+        m = types.ModuleType("pywhispercpp.model")
 
         class _WhisperModel:
             def __init__(self, model_path=None, language=None, **kw):
@@ -105,10 +117,12 @@ def install_stub_modules() -> None:
             def transcribe(self, audio, language=None, **kw):
                 self.transcribed.append(audio)
                 # Default: no speech recognised (empty text -> feed() no-ops).
-                return types.SimpleNamespace(text="", segments=[])
+                return []
 
-        m.WhisperModel = _WhisperModel
-        sys.modules["whispercpp"] = m
+        m.Model = _WhisperModel
+        package.model = m
+        sys.modules["pywhispercpp"] = package
+        sys.modules["pywhispercpp.model"] = m
 
     # llama_cpp: brain/emotion.py imports it lazily inside start() (only when
     # emotion.enabled). The default stub returns an EMPTY label, so classify()
@@ -135,6 +149,9 @@ def install_stub_modules() -> None:
 
 class FakeAudio:
     """Stand-in for brain.audio.Audio: records play() calls."""
+    def capture_guard(self):
+        return (0, 0.0)
+
     def __init__(self):
         self.played = []
         self.enabled = True
@@ -287,6 +304,9 @@ class FakeSupervisor:
                 count=1 if vibration_detected else 0)
         self.last = replace(self.last, state=state, **changes)
         self.last_state = state
+
+    def audio_capture_guard(self):
+        return self.audio.capture_guard() if self.audio is not None else (0, 0.0)
 
     def play_sound(self, sound):
         """Mirrors Supervisor.play_sound(): the supervisor owns the amp."""

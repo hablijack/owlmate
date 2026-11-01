@@ -2,6 +2,7 @@
 #include <SPI.h>
 #include "config.h"
 #include "owl.h"
+#include "motion.h"
 #include "behavior.h"
 #include "protocol.h"
 #include "vision.h"
@@ -243,7 +244,8 @@ void loop() {
     // Render eyes
     eyes.render();
 
-    // Update servos (smooth motion)
+    // Ohren/Kopf/Fluegel-Ziele aus dem Verhalten (nur Bewegungs-Image), dann glatt fahren
+    motion::update();
     servos.update();
 
     // Send telemetry at interval

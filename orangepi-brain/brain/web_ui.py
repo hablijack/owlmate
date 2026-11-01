@@ -31,14 +31,13 @@ logger = logging.getLogger(__name__)
 # "left"/"right" are the OWL's own left and right: standing in front of it, its
 # left ear is the one on YOUR right.
 #
-# The ears are on 15 and 14, not 0 and 1 — moved 2026-08-27 because the servo
-# cables were too short to reach the low channels. The numbers are sparse on
-# purpose; do not assume they are contiguous.
-CH_LEFT_EAR = 15
-CH_RIGHT_EAR = 14
-CH_HEAD = 2
-CH_LEFT_WING = 3
-CH_RIGHT_WING = 4
+# Owner-reported casing remap; test_servo_safety guards this mirror and WIRING.
+# Channels remain sparse; do not assume they are contiguous.
+CH_LEFT_EAR = 12
+CH_RIGHT_EAR = 13
+CH_HEAD = 10
+CH_LEFT_WING = 9
+CH_RIGHT_WING = 8
 
 # Absolute head servo angles for the left/right buttons (degrees, -45..45).
 # The head only pans left/right (it does not tilt up/down), so there are no
@@ -280,6 +279,13 @@ class WebUI:
             # has no audio pins at all, so there is nothing to forward.
             ok = self.supervisor.play_sound(value)
             return jsonify({"ok": ok, "sound": value})
+
+        @app.route("/api/update-mode", methods=["POST"])
+        def api_update_mode():
+            body = request.get_json(silent=True)
+            if not isinstance(body, dict) or not isinstance(body.get("active"), bool):
+                return jsonify({"ok": False, "error": "active must be a boolean"})
+            return jsonify({"ok": self.serial.set_update_mode(body["active"])})
 
         @app.route("/api/sleep", methods=["POST"])
         def api_sleep():

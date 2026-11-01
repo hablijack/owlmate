@@ -1,5 +1,339 @@
 ## >>> NEXT SESSION — priority order <<<
 
+### Next session: staged servo calibration plan
+
+**(Superseded 2026-11-01, owner: one owl we work towards.)** The servos were calibrated
+2026-10-30/31 and the main env `xiao_esp32s3` now moves them within the measured table
+(`include/servo_profiles.h`); `xiao_esp32s3_locked` is the locked build. Still no guessed
+center, first pulse, sweep or dormant probe outside the calibrated table.
+Port/model assignments and electrical source references live in WIRING; the
+safety rationale is SPEC-016. A model name or speed label is not calibration.
+
+1. [x] **Power interruption — owner-resolved 2026-10-29.** Servo power is cut
+   per servo by unplugging its connector at the PCA9685, **only with the whole
+   owl de-energised** (never hot-plug). Horns/linkages are *not* reachable in
+   the assembled owl and need not be: nothing can fall when torque is lost and
+   holding torque is irrelevant (light loads). The real hazard is an arm driven
+   into its housing limit, where the plastic gears slip/"durchdrehen" — that
+   can break teeth and leave the servo mis-indexed, so it is damage, not a
+   harmless event. Test rule: **only the servo under test is plugged in; all
+   other connectors stay off the PCA9685.** An OS shutdown or PWM full-off is
+   still not isolation.
+2. [x] **Establish the electrical prerequisites — owner-confirmed 2026-10-29.**
+   Voltage: **5 V at the PCA9685, and the servos were checked earlier to
+   tolerate 5 V**; **common ground is correct (all to battery "−")** and
+   **servo plug polarity is correct** (all owner statements, not measurements
+   made in this record). Servo variants (owner):
+   neck = **Longruner KY66 9 g** (owner, 2026-10-30; first thought to be an SG90); the other servos = 3.7 g nano servos,
+   label missing. **Owner ruled out the GH-S37D**; the owner judged the
+   **D-Power AS-106** to match visually (photo of the wing servo: translucent
+   smoky-blue case, white single-arm horn — not identifiable from the photo
+   alone), so it is the working assumption, not a verified fact. Retail
+   listings only (no manufacturer datasheets found): **AS-106 is analog,
+   4.8–6.0 V** (5 V is in range); owner-supplied retail text (2026-10-29):
+   **1000–2000 µs for the full travel, 1500 µs neutral, 50 Hz typical**, with
+   an electronically extendable ~900–2100 µs that must be approached carefully
+   because of the plastic gears. **SG90 (not the fitted neck servo): 50 Hz, 1000–2000 µs usable** (500–2400
+   µs is a theoretical limit). These agree, so 50 Hz and 1000–2000 µs serve as
+   an **outer safety envelope, not a calibration**: actual per-servo bounds
+   come from observed steps (step 5). The 1500 µs "neutral" is not a safe
+   installed start pose. Do not invent idle/holding/stall currents. Do not
+   seek an endstop by deliberately stalling a servo.
+3. [x] **DONE 2026-10-29 (built and tested offline, NOT yet flashed or run on the owl):** `pio run -e servocal` — `lib/ServoCal` + `src/servocal.cpp`, rules in SPEC-016, tests in `esp32-s3-sense/tests/servocal/` (also run by the Orange Pi suite). Original requirement: **Prepare and test a separate calibration image/tool offline.** Keep
+   boot/behavior writes blocked, with no automatic center, frequency reset or
+   output enabling. Require explicit arming of one physical channel, small
+   individually requested pulse-width steps, no automatic return/retry and a
+   STOP that issues no invented target. Use correct microsecond/tick units.
+   Any explicitly armed shared-frequency setup must account for all 16 outputs,
+   including other servos that could still be holding an existing pulse.
+   Reject inactive outputs without inventing a starting position: small steps
+   do not make the first pulse safe. Define communication-loss behavior without
+   assuming loss of torque is mechanically harmless. Test all write paths and
+   review a controlled deployment that cannot fall back to old motion firmware.
+4. [ ] **Establish one mechanically safe reference at a time.** Horns are
+   already fitted and cannot be decoupled, so there is no decoupled reference
+   and the start pose of every servo is unknown. Plug in one servo only. The
+   owner can **see and hear** the servos with the casing open and is present
+   throughout: approach from one side in small explicit steps and stop at the
+   first sign of contact, tension, buzzing, grinding or gear clicking — not at
+   a hard stop. The first pulse onto an inactive channel is itself the risk
+   (it may command a jump); choose it conservatively inside the supported
+   input range, never the generic center, and only after step 2 confirms
+   voltage and timing. Do not force the shaft or linkage.
+5. [ ] **Measure individual usable bounds under direct observation.** Move one
+   servo at a time using small explicit steps; stop before contact, tension,
+   buzzing or binding, not at a hard stop. Establish conservative margins in
+   both directions. Record per-servo minimum/start/maximum pulse, direction,
+   slew limit and the physical reference pose; never substitute one global
+   angle/pulse range. Check potentially colliding combinations as well as
+   individual endpoints. Keep notes until all five mechanisms are accepted.
+6. [ ] **Implement and verify calibrated operation before normal arming.**
+   Validate/persist per-servo calibration and enforce it at the driver boundary
+   for every command/behavior path. Missing/invalid calibration must stay
+   disarmed. Review startup from a physically displaced/unpowered pose: even a
+   known safe target does not guarantee a safe path to it. Verify explicit
+   arming, STOP/disconnect handling and cold/warm boot without default centering.
+   Only then deploy reviewed motion firmware and permit autonomous movement.
+   Re-check camera aim and IMU mounting/calibration/heading if opening the head
+   disturbed them, before navigation acceptance.
+
+**Servo calibration record — right wing, PCA9685 channel 8 (2026-10-30, owner
+observing, `servocal`; pulse values are nominal µs, angles are the owner's visual
+estimates, no sound or fighting at any step):**
+
+| | pulse | opening |
+|---|---|---|
+| **fully open (100 %)** | **1147 µs** | ~90° — the crank's turning point; past it the wing would close again (not tried) |
+| **closed (accepted)** | **1996 µs** | owner: not quite fully shut (a few degrees), "good enough"; envelope limit |
+| in between | 1586 µs | ~45° |
+
+Direction: **smaller pulse = further open**. The owner asked for a simple linear
+model (~10 µs per degree, 1147 µs = 90°, ~2025 µs would be 0°); the wing was
+never driven past the 2000 µs envelope, and widening it to reach the last few
+degrees was declined as not worth it. The arm started at the left (closed) stop
+with free travel. **These are measurements, not yet an operational calibration:**
+the persisted per-servo limits, margins and slew belong to Step 6, and the other
+four servos are untested.
+
+**Servo calibration record — left wing, PCA9685 channel 9 (2026-10-30, owner
+observing, `servocal`; nominal µs, owner's visual angle estimates, no sound or
+fighting at any step).** Direction is **opposite to the right wing: larger pulse =
+further open** (mirrored build). The arm started fully closed.
+
+| | pulse | opening |
+|---|---|---|
+| **fully open (100 %)** | **1469 µs** | ~90° (maximum; first pulse 1498 µs was just past it) |
+| in between | ~1176–1235 µs | ~75° |
+| **closest to closed within the 1000–2000 µs envelope** | **1015 µs** | **~45° — NOT closed** |
+
+**The left wing cannot be closed inside the envelope.** At ~10 µs/° the fully
+closed pose would be near 565 µs, below any pulse this tool is allowed to send
+and below what a 3.7 g servo is rated for; no pulse below 1000 µs was tried and
+none should be without an explicit owner decision. In software the usable range
+is therefore ~45°..90° (1015..1469 µs). Full closure would need the horn re-indexed
+by a spline step (mechanical work, owner's decision, not before step 5 is
+accepted for all servos); the right wing needed no such change. Not an operational
+calibration yet (Step 6). Other three servos untested.
+
+**Left wing, PCA9685 channel 9 — FINAL RECORD (2026-10-30, owner observing, nominal
+µs, owner's angle estimates; larger pulse = further open, mirrored vs ch 8):**
+the horn was re-seated twice (the first mount could not close inside 1000–2000 µs).
+
+| | pulse | opening |
+|---|---|---|
+| **closed** | **1000 µs** | wing shut, arm touching the wing |
+| first visible movement | ~1240 µs | flat start near the closed turning point (not a mounting error) |
+| **maximum usable open** | **1747 µs** | owner: "passt so", quiet, no jitter |
+| **FORBIDDEN** | **~1776 µs and above** | the servo hunts violently there, reproducibly (3×); stops only on `STOP` |
+
+Use 1000..1747 µs for this servo, never the full 1000–2000 µs envelope. Not an
+operational calibration yet (Step 6: persisted per-servo limits, margins, slew).
+The temporary 498 µs floor that `servocal` had for ch 9 was removed afterwards;
+official limits only.
+
+**Left wing (ch 9) — arm re-seated, then a jitter fault (2026-10-30):** the owner
+unscrewed the arm and re-mounted it closed with the shaft held at 1044 µs (closed
+now ~1044 µs, ~40° at 1484, ~45° at 1630, ~49° at 1747; larger pulse = more open,
+smooth and quiet up to 1762 µs). **At ~1776 µs the servo jitters/hunts violently
+back and forth, reproducibly (twice, the second time with slow 0.7 s steps), with
+no arm contact anywhere; the owner unplugged it each time.** Nothing suggests
+the command path: the same pulse values drove channel 8 cleanly and ch 9 below
+1762 µs. A position-specific hunt points at the servo itself (worn or dirty
+feedback potentiometer, or sticking gear at that shaft angle), not at a stop.
+Reproduced a third time after the owner re-seated the connector (so not a loose cable): it hunts again at ~1776 µs, stopping only when `STOP` is sent. (Separately, re-plugging an idle servo made it jump on its own to ~100° with no signal from the PCA9685: **hot-plugging can move a servo; plug only with the owl de-energised.**) **Do not command ch 9 above ~1760 µs.** Before re-plugging, `STOP` must have
+been sent (it was) so the PCA9685 is not still outputting the bad pulse. Options
+for the owner: replace this nano servo (cheap), or re-seat the horn so the used
+range stays clear of ~1776 µs. The temporary 498 µs floor for ch 9 in `servocal`
+should be removed again (official 1000–2000 µs only) — to do in the next build.
+
+**Head servo (neck, plug on PCA9685 channel 10) did not respond at all
+(2026-10-30, owner observing):** `servocal` drove it on channel 10 from 1498 to
+1732 µs and, after the owner moved the plug to the channel-9 header (known good
+with the wing servo), again from 1498 µs up to 1791 and down to 1440 µs, with the
+PCA9685 registers confirming the pulses. No movement, no hum, no jitter either
+time. So the PCA9685 and both headers are fine and the servo/its cable is the
+suspect (no power or signal reaching it, a broken wire where the neck flexes, a
+wrong connector pin order, or a dead servo). Follow-up the same day: the plug order is the standard brown(GND)/red(V+)/orange(signal) on the right pins, and with a held 1498 µs pulse on channel 10 the head **turns completely freely and silently by hand** — so the servo is neither holding nor humming: no power or signal reaches its electronics, or it is dead. **A second, spare KY66 plugged onto the same channel-10 header moved when driven (1498 -> 1586 µs, small but visible), so the PCA9685, the channel-10 header and `servocal` are fine and the original head servo (or its cable) is the fault.** Owner-supplied retail text calls the KY66 an analog SG90-compatible 9 g servo (50 Hz, 500–2500 µs, 4.2–6 V); that is not verified. The owner reports it is a Longruner
+KY66, not an SG90; no datasheet found (a continuous-rotation 9 g unit would still
+have turned at 1791 µs, so that alone does not explain it). **Next:** with the
+owl de-energised, check the plug's pin order/continuity, then measure V+ and GND
+at the plug while powered. Do not send any other pulses to this servo until it
+shows life on a bench. Owner, 2026-10-30: the ear servos are the same hardware as the wing servos. Also unresolved: WIRING says the wings and ears are
+SOL-EXPERT S18JST 1.8 g servos, but the owner named 3.7 g nano servos
+(AS-106 / GH-S37D) today; the wing values above were measured, not taken from
+either datasheet.
+
+**Left ear, PCA9685 channel 12 — RECORD (2026-10-30, owner observing, nominal µs,
+owner's estimates; larger pulse = ear further up):** the ear started at its upper
+stop. The ear servo is the same hardware as the wing servos, but the ear's travel
+lies **outside 1000–2000 µs** and the horn cannot be re-seated (the head is one
+unit), so `servocal` allows 500–2500 µs on channels 12 and 13 only (owner decision,
+stepwise, owner watching).
+
+| | pulse | position |
+|---|---|---|
+| 1000–1600 µs (tested briefly, 0.6–1.5 s each) | — | ear driven hard into its **lower** stop, servo buzzed and fought |
+| 2000 µs | | ear ~5–8 % up from the lower stop, not pressing |
+| **down (full)** | **1972 µs** | owner: fully down and quiet ("ideal"); reached by two extra 15 µs steps below 2001 µs |
+| 2074 µs | | about half way |
+| 2147 µs | | just over half |
+| 2264 µs | | just before the top |
+| **up (full)** | **2323 µs** | ear fully up, quiet |
+
+Use **1972..2323 µs** for this ear, full travel driven min->max->min once without buzzing or
+fighting; never go below ~1950 µs (that presses the lower stop). Not an operational calibration yet (Step 6: persisted limits with
+margin at the top).
+
+**Right ear, PCA9685 channel 13 — RECORD (2026-10-30, owner observing, nominal µs,
+owner's estimates; MIRRORED to the left ear: smaller pulse = ear further up):** the
+ear first seemed to ignore every pulse from 700 to 2250 µs (buzzing, no movement). It was
+snagged at the bottom ("pushed into the head" earlier); the retest at 700 µs freed it.
+The 1.5 s tests below were each followed by `STOP`.
+
+| pulse | position |
+|---|---|
+| 700 µs | ~40 % up |
+| 600 µs | over 50 % up |
+| 522 µs | too high: buzzing at the **upper** stop |
+| 561 µs | up, quiet |
+| 542 µs | higher, quiet |
+| **up (full)** | **532 µs**: upper stop reached, quiet; nothing higher possible |
+| **down (full)** | **800 µs**: fully down, quiet (confirmed twice, 2 s hold) |
+| 849 µs | down, quiet once; buzzed on the return of the full run |
+| 898 µs | buzzing: past the **lower** stop |
+
+Use **532..800 µs** for this ear (upper stop between 522 and 532 µs, lower stop at about
+840 µs, so 800 keeps ~40 µs margin). Full run 849 -> 542 -> 849 in 15 µs steps (0.45 s each):
+quiet except the very last step (849 µs), where it buzzed. The ear's travel lies far below
+1000 µs, so it needs the extended 500–2500 µs envelope; the 498 µs floor is only 34 µs below
+the upper stop, keep margin there. Not an operational calibration (Step 6).
+
+**Head, PCA9685 channel 10 — RECORD (2026-10-30, owner observing, nominal µs, owner's
+estimates; larger pulse = head turns LEFT, seen from the owl).** The original head servo was
+dead (see above); the owner fitted a working Longruner KY66 (9 g, retail text 500–2500 µs).
+`servocal` now allows 500–2500 µs on channel 10 as well (owner decision, like the ears,
+because the KY66 has much more travel by hand than 1000–2000 µs). Tests were 1–2 s each,
+followed by `STOP`; the owner watched head and cable.
+
+| pulse | position |
+|---|---|
+| 1498 µs | straight ahead (no visible movement from a 1 s pulse) |
+| 1601 µs | head turns left |
+| 1698 µs | ~10° left |
+| 1850, 1923, 2001, 2098 µs | further left, quiet, no cable pull |
+| 2201 µs | **safe: quiet, no fighting** (owner's last accepted value) |
+| 2298 µs | probably at the left stop: servo fights very quietly ("kämpft"/hums) — treat as too far |
+
+Right side, measured 2026-10-31 (owner's scale: 90° = centre, 180° = full left; tests 1.5 s each,
+quiet, no cable pull): 1401 µs minimal movement; 1249 µs ~80° (about 10° right); 1098 µs ~45°;
+952 µs ~30°; 800 µs ~25°; 649 µs ~17°; 551 µs ~10°; **498 µs (the tool's floor) still quiet**,
+the owner called it enough. The right stop was not reached, so 498 µs is the right limit by
+tool floor, not by mechanics.
+
+Use **498..2201 µs**, centre ~1498 µs. The head is **linear** (it sits directly on the servo
+axis, owner 2026-10-31); the degree figures above were rough visual estimates and are not a
+curve to build on. A complete slow sweep
+(15 µs / 0.2 s, then 8 µs / 0.16 s ~ 50 µs/s) right -> centre -> left -> centre -> right was
+smooth to the owner; a few jerky moments right after the left stop (2201 µs), probably cable
+friction in the head (owner will check the cables). Not an operational calibration (Step 6).
+
+**STATE 2026-11-01 — one owl: the main image moves.** Owner decision: there is one image we
+work towards. `[env:xiao_esp32s3]` is the moving owl (`-DSERVO_MOTION_ENABLED=1`, limits with
+margin in `include/servo_profiles.h`, springs/bus safety in `lib/ServoMotion`, behaviour in
+`lib/ServoMotion/OwlChoreo`, wired by `src/motion.cpp`); `[env:xiao_esp32s3_locked]` is the same
+image with the servo lock, for mechanical work. Owner confirmed on hardware (2026-10-31/11-01):
+head tracking direction (`HEAD_TRACK_SIGN = -1`), head starts centred, idle life and wing beats
+liked, head tracking as a **saccade** ("fuehlt sich gut an, so lassen wir es": gain 1.3,
+settle 250 ms, deadband 0.28), side search windows (`CAM_DETECT_SCAN`) so a face at the edge is
+followed. 100 Hz PWM was tried and did nothing (SPEC-016 Falsified); the default is 50 Hz.
+Deployed 2026-11-01: SHA256 `6964c144…fb56` (50 Hz) in both slots, copy at `/opt/robot-owl/firmware-safe/firmware.bin`
+(`firmware-locked.bin` = the locked build, `firmware-locked-20261031.bin` = the previous locked image).
+The first boot after the 100 Hz tests refuses to change the PCA9685 frequency while pulses run, so
+the owl's power must be cut once. Deploy with `tools/flash_servo_locked.py` (two-phase, never `-t upload`); if it aborts with
+"Bootloader/Partitionen/NVS seit Backup veraendert" and the differing bytes are all inside NVS
+(0x9000-0xF000), that is the IMU calibration being refreshed: take a new `backup` phase under a
+new name and flash against it (done twice on 2026-10-31/11-01).
+**Still to watch/tune:** idle ear twitches/glances, ear and wing amplitudes, `HEAD_TRACK_FOV_DEG`
+(16.5, estimated, not measured), servos hold their pulse (possible hum when idle), the web UI's
+direct `servo` controls are refused in this image (`servo_autonomous`), `servos` telemetry reports
+profile units (ears/wings 0..100, head degrees). Step 5 (reactions to knock/speech) is to be
+concepted with the owner first.
+Backups: Orange Pi `/var/backups/robot-owl/` (2026-10-18, 2026-10-30, `xiao-before-saccade-*`,
+`xiao-before-saccade2-*`), Mac copy in `~/owl-flash-backups/`. `servocal` was last flashed with
+the head extension (SHA256 `1cebbba3…ea7c`); rebuild with `pio run -e servocal` when needed.
+**Servo calibration status:** right wing (ch 8) 1147..1996, left wing (ch 9) 1000..1747 (never
+≥1776), left ear (ch 12) 1972..2323, right ear (ch 13) 532..800, head (ch 10) 498..2201. Still open:
+the doc conflict on servo types (WIRING S18JST 1.8 g vs the owner's 3.7 g nano/AS-106).
+Tool note: opening the owl's port (reset) sometimes leaves it silent; a read-only
+`esptool … --before usb-reset --after hard-reset chip_id` brings it back.
+
+**Orange Pi provisioning — live on Owlmate, 2026-10-18:**
+- Installed on `dietpi@owlmate` (192.168.178.127), DietPi Debian 13,
+  kernel 6.6.98-vendor-sun60iw2. Deployed brain/config live under
+  `/opt/robot-owl/orangepi-brain`; source snapshot is `~/robot-owl` on the board.
+- Native Python dependencies, matching vendor kernel headers, compiled audio
+  module and offline-validated boot overlay are installed. The revised setup
+  completed with `--non-interactive --no-reboot --no-enable-service`.
+- Brain service is enabled/running with **live serial**, automatically after
+  power restoration; the temporary `--no-serial` override was removed.
+  Web UI: `http://owlmate:8080` (or the IP above).
+- XIAO firmware 1.3.0 is deployed in both OTA slots, verified before boot;
+  bootloader/partition table/OTA metadata/NVS were preserved byte-for-byte.
+  Full 8 MB backup is retained on the board and the Mac. Current native suite: 251 tests.
+  The closed-owl safety lock is active after cold boot; IMU calibration restores,
+  face inference runs and live serial blink/expression/sleep/wake/heartbeat/OTA
+  entry/exit pass. All 16 servo targets, probes and active nav are rejected.
+- Both small/tiny Whisper models are downloaded. Tiny is selected for deployment
+  (speech enabled on the deployed board); inference comparison is in SPEC-014.
+  Optional llama.cpp runtime is installed; emotion stays disabled because no
+  validated compatible model is configured.
+- Audio overlay and module activate after boot: `owl` registers. Owner confirms
+  owl WAV is audible. Mono capture and 16 kHz sounddevice input work; left mic
+  slot carries audio, right is zero. Deeper duplex analysis found RX goes silent
+  after TX closes. Opt-in `audio.keep_playback_clock: true` is now deployed and
+  the new post-playback continuity guard passes (and failed without the fix).
+  Rationale/measurements are in SPEC-015. Run diagnostics as robotowl/root:
+  dietpi is not in audio, so its `aplay -l` misleadingly reports no sound cards.
+- **Speech acceptance:** a controlled repeat with capture active before START recognized
+  praise and question correctly; the greeting's name was imperfect (SPEC-014).
+  The owner confirmed the prior mismatching run was ambient noise, not test speech.
+  The original VAD 0.02 rejected measured speech. Deployment is tuned below;
+  transient/ambient rejection still needs validation under normal use.
+  Initial live test was blocked by absent face detection. After repositioning,
+  temporary VAD 0.0006 passed the full chain: praise recognized, happy ACK and
+  telemetry observed, owner confirmed one happy-eye reaction (SPEC-014).
+  Own-playback suppression is now implemented/deployed: playback/tail barriers,
+  capture-age/generation checks, partial-window reset and stale-ASR rejection.
+  Native isolated echo probe failed with the guard bypassed (one ASR call) and
+  passed guarded (zero ASR calls despite above-threshold mic blocks); SPEC-014.
+  At the owner's explicit request, persistent speech is now enabled with VAD
+  0.0006, require_face:true, feedback tail 0.6 s and silent TX keepalive. The
+  repository defaults remain opt-in/unchanged. **Next:** sustained listening,
+  room/TV/transient rejection and tail calibration under normal use.
+  Emotion remains disabled. Confirm actual HTTP OTA upload/reboot separately;
+  only serial mode entry/exit has been verified. Servo motion/navigation remain
+  blocked until safe travel/start limits and a reviewed arming procedure.
+  See Steps 3, 5 and 7.
+
+**Servo plug remap — owner supplied:** assignment recorded in WIRING and
+updated in config.h and the brain, guarded by a regression test. Firmware source
+builds with the new map; **no mapping flash or movement performed**. The running
+1.3.0 safety image still ignores all motor requests. **Do not unlock or use the
+dormant probe:** safe individual travel limits/start positions and an arming
+procedure are still prerequisites. The owner also identified the servo models
+(recorded in WIRING). Before calibration confirm actual supply/polarity and
+model-specific input timing; idle/holding/stall currents are not established.
+Do not derive pulse timing from the speed label or use one global range for all
+five mechanisms. See SPEC-016.
+
+**Software-only OTA control — deployed, partial hardware acceptance:** vibration
+entry and exit have been removed; the Orange Pi Web UI has explicit Enter/Exit
+buttons. Live serial mode entry/exit and heartbeat pass. Still verify
+walking/repeated tapping never enters OTA, explicit entry starts the AP/upload
+page, tapping cannot exit, explicit exit resumes behavior, and repeated commands
+are harmless. Finally verify an upload/reboot. Historical tap-based checks below
+describe the retired trigger; see SPEC-007 for the replacement contract.
+
 Everything below is ordered by **dependency**, not by size. The order is the
 useful part of this list: three of these tasks invalidate the work of another if
 done in the wrong sequence.
@@ -31,7 +365,7 @@ come apart:
 | **4b** | **ready, needs the owl** | gaze smoothing (unblocked 2026-08-31), square crop, field of view |
 | **4c** | done | the ~12-minute slowdown: two causes found, fixed and verified 2026-08-31 |
 | **6** | items 1–3 **done and flashed** | item 4 stays blocked (no Flask here); items 5–6 open |
-| **7** | **open, needs the Orange Pi board** | the A733 audio stack is written + unit-tested on a laptop; the first flash is the acceptance test (SPEC-015) |
+| **7** | **hardware audio works; speech acceptance open** | boot registration, audible WAV, real mic and shared playback/capture pass; real German VAD/ASR remains (SPEC-015) |
 
 The dependency chain 0→5 was stalled at 3 until the IMU arrived; as of
 2026-09-01 it is stalled only on bench time, not on a part. Step 6 was
@@ -723,14 +1057,14 @@ wrong; run the lot only after mechanical work.
 | eyes | `pio run -e dualtest -t upload` | both panels, distinct colours, they swap |
 | I2C bus | `pio run -e i2ctest -t upload` | 0x10, 0x28, 0x40 all answer |
 | IMU | `pio run -e imuaxis -t upload` | level owl → roll/pitch near 0; counters 3/3 |
-| vibration | `tools/klopftest.py` | quiet = 0 edges; 4 taps enter OTA mode |
+| vibration | `tools/klopftest.py` | quiet = 0 edges; taps never enter/exit OTA mode |
 | camera | `pio run -e camtest -t upload` | OV3660 at 0x3C, brightness responds |
 | supply rail | `pio run -e powerprobe -t upload` | ~2500 mV steady; watch for a sag under 2000 |
 | firmware | flash `xiao_esp32s3`, watch telemetry | no LCD errors, ~535 ms cadence, `idle` at rest |
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
 | detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
-| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 201 tests pass |
+| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 251 tests pass |
 | firmware/Orange Pi drift | `cd orangepi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
@@ -748,22 +1082,19 @@ and swaps faster-whisper for whisper.cpp. The A733's I2S controller needs a
 small **custom kernel driver** (`orangepi-brain/audio/owl_i2s.c`) — a one-bit
 data-delay fix that is not expressible in a DT overlay — plus a DT overlay, an
 `asound.conf`, and a 10-step `setup.sh`. All of it is written and unit-tested
-on a laptop, but **none of it has run on the board yet**: the vendor kernel
-module cannot be compiled without the `orange-pi-6.6-sun60iw2` build tree.
+on a laptop and now running on the board (2026-10-18). Matching vendor headers
+suffice for the out-of-tree build; no full vendor source tree is needed.
 
-The first flash is the acceptance test (SPEC-015 Acceptance):
+Hardware audio acceptance passed: setup, boot-time overlay/module activation,
+`owl` ALSA card, owner-confirmed audible WAV, real mono mic capture and 16 kHz
+sounddevice input. A deeper duplex check exposed post-playback silence; the
+opt-in silent-TX workaround is deployed and passes the continuity guard.
+Measurements, falsified initial acceptance and permission trap live in SPEC-015.
+Real German recordings/ASR have run, but VAD and automatic reactions still need
+acceptance (SPEC-014).
 
-1. `sudo ./setup.sh` on the DietPi board.
-2. After reboot, `aplay -l` lists a card named `owl`.
-3. A test tone is audible from the amp — and not one bit off.
-4. `arecord -D owl:capture -f S16_LE -r 48000 -d 3 out.raw` captures the mic:
-   real audio, not the data-delay failure signature (samples alternating
-   0 / full-scale).
-
-Still open until it runs (SPEC-015 Open): the DietPi DT-overlay enable
-mechanism (`setup.sh` probes `armbianEnv.txt` and warns otherwise), whether the
-base `.dts` already sets the I2S0 pinctrl, and `dmix`/`dsnoop` vs the a7z-style
-`plug`-on-`hw:` topology.
+Next: speak real German phrases through the actual mic, validate VAD/ASR latency
+and reactions, tune against measured speech/noise levels, then enable speech.
 
 ---
 

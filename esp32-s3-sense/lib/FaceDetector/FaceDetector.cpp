@@ -51,7 +51,12 @@ static FaceResult_t lastGood = {};
 static uint32_t lastGoodAt = 0;
 static uint32_t totalDetections = 0;
 static uint32_t totalAttempts = 0;
-static uint16_t *cropBuf = NULL;   // Ausschnittpuffer, einmal angelegt
+static uint16_t *cropBuf = NULL;
+// Suchfenster: der Ausschnitt ist halb so breit wie das Bild und sah deshalb nur die Mitte;
+// ein Gesicht weiter aussen wurde nie gefunden. Reihum Mitte, links, Mitte, rechts - bei
+// einem Treffer bleibt das Fenster stehen, erst ein Fehlschlag schaltet weiter.
+static const int8_t SCAN_ORDER[] = {0, -1, 0, 1};   // -1 links, 0 Mitte, 1 rechts
+static uint8_t scanIdx = 0;   // Ausschnittpuffer, einmal angelegt
 
 // esp32-camera liefert RGB565 mit dem hohen Byte zuerst. Auf Hardware
 // gemessen: BE 62 Treffer gegen LE 2.
@@ -159,7 +164,8 @@ void FaceDetector_Detect(FaceResult_t *result) {
     // bleibt liegen; er ist klein (ein Viertel des Bildes) und im PSRAM.
     const int cw = (int)fb->width / CAM_DETECT_CROP_DIV;
     const int chh = (int)fb->height / CAM_DETECT_CROP_DIV;
-    const int x0 = ((int)fb->width - cw) / 2;
+    const int scan = (CAM_DETECT_SCAN && CAM_DETECT_CROP_DIV > 1) ? SCAN_ORDER[scanIdx] : 0;
+    const int x0 = scan < 0 ? 0 : (scan > 0 ? (int)fb->width - cw : ((int)fb->width - cw) / 2);
     const int y0 = ((int)fb->height - chh) / 2;
     if (CAM_DETECT_CROP_DIV > 1 && !cropBuf) {
         cropBuf = (uint16_t *)heap_caps_malloc((size_t)cw * chh * 2,
@@ -221,11 +227,18 @@ void FaceDetector_Detect(FaceResult_t *result) {
         // hier das ganze Bild zugrunde gelegt, bliebe der Wert kuenstlich klein.
         const int halfW = (cropped ? cw : (int)fb->width) / 2;
         const int halfH = (cropped ? chh : (int)fb->height) / 2;
-        result->gaze_x = (float)(cx - halfW) / (float)halfW;
+        // Relativ zur BILDmitte (nicht zur Fenstermitte), sonst meldete ein Gesicht im
+        // Seitenfenster "mittig". Aussen wird auf +-1 begrenzt (Vertrag: -1..1).
+        float gx = (float)(cx + (cropped ? x0 : 0) - (int)fb->width / 2) / (float)halfW;
+        gx = gx > 1.0f ? 1.0f : (gx < -1.0f ? -1.0f : gx);
+        result->gaze_x = gx;
         result->gaze_y = (float)(cy - halfH) / (float)halfH;
 
         lastGood = *result;
         lastGoodAt = millis();
+    } else if (CAM_DETECT_SCAN && (!lastGoodAt || millis() - lastGoodAt > 200)) {
+        scanIdx = (scanIdx + 1) % (sizeof SCAN_ORDER / sizeof SCAN_ORDER[0]);
+        if (lastGoodAt && millis() - lastGoodAt <= FACE_HOLD_MS) *result = lastGood;
     } else if (lastGoodAt && millis() - lastGoodAt <= FACE_HOLD_MS) {
         // Kein Treffer in DIESEM Bild, aber vor kurzem einer: den letzten
         // stehen lassen. Sonst flackert das Ergebnis mit der Erkennungsrate

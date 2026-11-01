@@ -44,7 +44,6 @@ struct VibrationData {
     bool detected;
     uint32_t lastDetected;
     uint16_t count;
-    bool updateSequence; // one-shot: set for one read after a 4-tap sequence
 };
 
 class Sensors {
@@ -78,9 +77,6 @@ public:
     // Stoerung oder Poti zu empfindlich.
     uint32_t vibrationPulseTotal() const;
 
-    // Consume the one-shot 4-tap update flag.
-    void clearUpdateSequence() { _updateSeqPending = false; }
-
     bool isImuReady() const { return _imuReady; }
     bool isGpsReady() const { return _gpsReady; }
 
@@ -96,6 +92,4 @@ private:
     uint32_t _vibLastPulse;    // millis() der letzten gezaehlten Flanke
     uint32_t _vibLastEvent;    // millis() des letzten bestaetigten Klopfers
     uint16_t _vibCount;        // Anzahl bestaetigter Klopfer
-    uint8_t _rapidTapCount;    // Klopfer in der laufenden Schnellfolge
-    bool _updateSeqPending;    // Einmal-Flag, von der State-Machine abgeholt
 };

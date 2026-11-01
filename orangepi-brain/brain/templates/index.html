@@ -99,6 +99,7 @@
 
   <div class="card">
     <h2>Head</h2>
+    <p id="servo-safety" class="hint">Servo safety not confirmed; motion controls locked.</p>
     <div class="row" style="justify-content:center; gap:12px;">
       <button data-act="head" data-v="left">&#9664; Left</button>
       <button data-act="head" data-v="center">Center</button>
@@ -140,6 +141,19 @@
         <button data-act="wing" data-side="right" data-v="center">&#9673;</button>
       </div>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>XIAO Firmware Update</h2>
+    <p class="hint">Enter update mode to start the XIAO's isolated Wi-Fi access point.
+      Then connect to RobotOwl-Update and open http://192.168.4.1/update to upload
+      firmware.bin. Credentials are in the supervisor log. This does not upload
+      firmware automatically. Tapping or walking will not enter or exit this mode.</p>
+    <div class="row">
+      <button data-act="update-mode" data-active="true" class="danger">Enter update mode</button>
+      <button data-act="update-mode" data-active="false">Exit update mode</button>
+    </div>
+    <p class="hint" id="update-status">Waiting for telemetry.</p>
   </div>
 
   <div class="card" id="nav-card">
@@ -339,7 +353,16 @@ function flash(text) { $('#msg').textContent = text; }
 document.querySelectorAll('button[data-act]').forEach(btn => {
   btn.addEventListener('click', async () => {
     const act = btn.dataset.act;
-    if (act === 'blink') {
+    if (act === 'update-mode') {
+      const active = btn.dataset.active === 'true';
+      if (active && !confirm('Enter firmware update mode? Normal owl behavior will pause.')) return;
+      try {
+        const r = await post('/api/update-mode', { active });
+        flash(r.ok ? 'Update-mode request sent; check live state for confirmation.' : 'Could not send update-mode request.');
+      } catch (e) {
+        flash('Could not reach the Orange Pi.');
+      }
+    } else if (act === 'blink') {
       await post('/api/blink', { speed: parseInt($('#blink-speed').value, 10) });
       flash('Blink sent.');
     } else if (act === 'expression') {
@@ -377,6 +400,14 @@ function renderHeard(t) {
 async function poll() {
   try {
     const t = await (await fetch('/api/telemetry')).json();
+    $('#update-status').textContent = t.state === 'update'
+      ? 'Update mode active. Upload firmware via the XIAO Wi-Fi page, or press Exit update mode.'
+      : (t.state ? 'Update mode inactive (state: ' + t.state + ').' : 'No telemetry available.');
+    const servoLocked = !t || !t.servo_safety || t.servo_safety.locked !== false;
+    $('#servo-safety').textContent = servoLocked
+      ? 'SERVO SAFETY LOCK: no servo motion, centering or probing. Eyes and sensors remain active.'
+      : 'Servo motion enabled by firmware.';
+    document.querySelectorAll('[data-act="head"], [data-act="ear"], [data-act="wing"], [data-act="nav-start"]').forEach(b => { b.disabled = servoLocked; });
     if (!t || !t.state) return;
     $('#state').textContent = t.state;
     $('#fw').textContent = t.firmware || '?';

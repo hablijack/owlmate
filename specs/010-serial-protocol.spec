@@ -44,6 +44,7 @@ times over during hardware debugging.
      "navigation":{"active","angle"},        // only while NAVIGATING
      "update":{"ssid","password","ip","url"}, // only while in UPDATE
      "servos":[5],
+     "servo_safety":{"locked","ready"},
      "face":{"detected","x","y","w","h","confidence","gaze_x","gaze_y",
              "total","attempts","capture_ms","infer_ms","stack_free"},
      "eye":…}
@@ -53,9 +54,34 @@ only when the boot-time probe found them, which makes telemetry a presence
 indicator for free — no separate health field needed.
 
 **Commands** (Orange Pi → ESP32): `sleep`, `wake`, `expression`, `servo`, `gaze`,
-`nav`, `blink`, `heartbeat`. While in `UPDATE` every command except `heartbeat`
-is ignored, because the owl is on an isolated SoftAP and should not be steerable
-from a link that is not there.
+`nav`, `blink`, `heartbeat`, `update_mode`. The latter requires boolean `active`:
+true enters OTA, false exits to IDLE (a no-op outside UPDATE). Repeated commands
+are idempotent. `update_mode_ack` reports the resulting `active`; a missing or
+non-boolean value emits `error` with `msg: invalid_update_mode` and changes nothing.
+While in `UPDATE` only `heartbeat` and `update_mode` are accepted. USB remains
+connected while the isolated SoftAP serves the upload page.
+
+**Safety image:** `servo_safety.locked` reports the driver-wide lock and
+`ready` reports ACK-only PCA9685 presence. Missing safety data defaults locked
+in the brain. The safety image rejects ordinary servo and probe commands with
+`ok:false,error:servo_locked` and rejects active navigation without entering
+NAVIGATING. No serial/NVS command unlocks it. See SPEC-016. `servos` still holds
+logical controller angles, NOT measured shaft positions.
+
+**Maintenance command `servo_step`** takes integer `channel` (0–15) and
+`direction` (exactly -1 or +1), accepted only in IDLE. It pauses autonomous
+behavior, reads the actual PCA9685 output registers and changes the active pulse
+by exactly one raw tick, never initializing a disabled output or returning to
+center. **It is blocked by the safety image**, and the dormant implementation
+must be calibrated/reviewed before any unlocked use (SPEC-016). It refuses I2C errors, nonzero ON phase, full-on/off, pulses outside the
+configured electrical bounds, and channels with a pending smoothed move.
+`servo_step_ack` includes `channel` and boolean `ok`; a failed output check still
+leaves behavior paused. `wake` explicitly releases this hold; state-changing
+commands also clear it. Normal `servo` commands remain absolute and are NOT a
+safe substitute. No automatic retries: a lost acknowledgement must not multiply
+movement. Mechanical limits and shaft position are not measured. Boot centering
+is unchanged, and USB-open resets cannot be ruled out; this probe does not make
+startup safe for an unknown mechanism.
 
 **Cumulative counters accompany intermittent flags.** `vibration.pulses` and
 `face.total` exist because a 2 Hz sample of an instantaneous boolean is blind to

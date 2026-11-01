@@ -336,8 +336,14 @@ face sitting at the model's size limit, not of a threshold or a race.
   model's input is square, a 4:3 image is distorted or letterboxed on rescale and
   some of it is wasted. A 160×160 centre crop would be square *and* capture more
   vertical extent, which suits faces. Untested; expected to be a modest gain.
-* **Field of view is the price of the crop.** `CAM_DETECT_CROP_DIV 2` means the
-  owl only sees the middle half of its camera view. `3` would extend range
+* **Field of view is the price of the crop, and `CAM_DETECT_SCAN` pays it back
+  (2026-11-01).** `CAM_DETECT_CROP_DIV 2` means the owl only sees the middle half of
+  its camera view; the owner noticed it stopped following a face far to one side.
+  The crop window now cycles centre, left, centre, right while no face is found and
+  stays put on a hit (`gaze_x` is measured against the image centre, clamped to
+  +-1). Owner-confirmed on hardware; not measured (hit rate at the edges, extra
+  latency to acquire a side face). `CAM_DETECT_SCAN 0` restores the centre-only view.
+  The old note: `CAM_DETECT_CROP_DIV 2` means the owl only sees the middle half of its camera view. `3` would extend range
   further at more cost. Nobody has measured what the owl's useful cone actually
   needs to be.
 * ~~Stale frames (`CAMERA_GRAB_WHEN_EMPTY` vs `CAMERA_GRAB_LATEST`).~~ Closed

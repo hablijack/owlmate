@@ -19,7 +19,7 @@ namespace {
 
 State currentState = State::BOOT;
 uint32_t lastFaceSeen = 0;
-uint32_t updateModeSince = 0;
+bool servoProbeHold = false;
 uint32_t navSince = 0;
 float navTargetAngle = 0.0f;
 
@@ -112,6 +112,7 @@ float navAngle() {
 void transitionTo(State newState) {
     if (newState == currentState) return;
     currentState = newState;
+    servoProbeHold = false;
     overrideExprUntil = 0;
     overrideGazeActive = false;
     // Entering INTERACTING is the event "I have seen you". The early return
@@ -157,8 +158,8 @@ void setNavTarget(float angle, bool active) {
 
 // Bring up the SoftAP + /update HTTP server for a firmware update.
 void enterUpdateMode() {
+    if (currentState == State::UPDATE) return;
     transitionTo(State::UPDATE);
-    updateModeSince = millis();
     servos.setCenter();
     eyes.setGaze(0, 0);
     eyes.setExpression(EyeExpression::UPDATE);
@@ -188,6 +189,7 @@ void enterUpdateMode() {
 
 // Tear down the SoftAP and resume normal behavior.
 void exitUpdateMode() {
+    if (currentState != State::UPDATE) return;
     webServer.stop();
     WiFi.mode(WIFI_OFF);
     transitionTo(State::IDLE);
@@ -206,28 +208,21 @@ void serveUpdateClient() {
     }
 }
 
-void update() {
-    // 4-tap vibration sequence enters update mode from any state.
-    VibrationData vib = sensors.getVibration();
-    if (vib.updateSequence) {
-        sensors.clearUpdateSequence();
-        if (currentState != State::UPDATE) {
-            enterUpdateMode();
-            return;
-        }
-    }
+void holdForServoProbe(bool hold) {
+    servoProbeHold = hold;
+}
 
+void update() {
+    VibrationData vib = sensors.getVibration();
+
+    // Vibration must never enter or leave OTA mode (walking causes bursts too).
     if (currentState == State::UPDATE) {
-        // A new tap after the grace period exits update mode. The 4th tap
-        // that entered the mode (or a still-pressed contact) does not.
-        if (vib.detected && vib.lastDetected > updateModeSince + UPDATE_EXIT_GRACE_MS) {
-            exitUpdateMode();
-            return;
-        }
         applyExpression(EyeExpression::UPDATE);
         servos.setCenter();
         return;
     }
+
+    if (servoProbeHold) return;
 
     switch (currentState) {
         case State::BOOT: {

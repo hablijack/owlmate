@@ -7,8 +7,8 @@ How it works:
     Speech worker thread and then feeds it a scripted stream of synthetic
     48 kHz STEREO float32 chunks (silence + a "voice" burst on the mic
     channel), then signals stop.
-  * `whispercpp` is stubbed with a fake WhisperModel whose transcribe()
-    returns an object with a canned .text (e.g. "Das ist toll!").
+  * `pywhispercpp.model` is stubbed with a fake Model whose transcribe()
+    returns a list of segments (e.g. "Das ist toll!").
   * numpy is real (it's already a project dependency), so the VAD + resample
     math is real.
 
@@ -30,7 +30,7 @@ import unittest
 
 import numpy as np
 
-from stubs import install_stub_modules, FakeSerial, FakeSupervisor, FakeAudio, make_config
+from stubs import install_stub_modules, FakeSerial, FakeSupervisor, FakeAudio, make_config, call_web_view
 
 install_stub_modules()
 
@@ -138,13 +138,9 @@ def _install_sounddevice_stub(stream_chunks, speech):
 
 
 def _install_whispercpp_stub(transcript):
-    # brain/speech.py does:  import whispercpp
-    #   self._whisper = whispercpp.WhisperModel(model_path=..., language=...)
-    # and then:  result = self._whisper.transcribe(utterance, language=...)
-    #   text = getattr(result, "text", None)   (else it joins result.segments)
-    # So the stub's WhisperModel.transcribe() must return an object with a
-    # .text attribute set to the canned transcript.
-    wc = types.ModuleType("whispercpp")
+    # Mirror the installed pywhispercpp API, not an imagined WhisperModel API.
+    package = types.ModuleType("pywhispercpp")
+    wc = types.ModuleType("pywhispercpp.model")
 
     class _Model:
         def __init__(self, model_path=None, language=None, **kw):
@@ -154,10 +150,12 @@ def _install_whispercpp_stub(transcript):
 
         def transcribe(self, audio, language=None, **kw):
             self.transcribed.append(audio)
-            return types.SimpleNamespace(text=transcript, segments=[])
+            return [types.SimpleNamespace(text=transcript)]
 
-    wc.WhisperModel = _Model
-    sys.modules["whispercpp"] = wc
+    wc.Model = _Model
+    package.model = wc
+    sys.modules["pywhispercpp"] = package
+    sys.modules["pywhispercpp.model"] = wc
     return wc
 
 
@@ -261,7 +259,7 @@ class TestLastHeardInWebUI(unittest.TestCase):
     def _telemetry(self, serial, sup, speech):
         from brain.web_ui import WebUI
         ui = WebUI(serial, sup, speech=speech)
-        return ui.app.view_functions["api_telemetry"]()
+        return call_web_view(ui, "api_telemetry")
 
     def test_telemetry_exposes_last_heard_when_heard(self):
         serial = FakeSerial()

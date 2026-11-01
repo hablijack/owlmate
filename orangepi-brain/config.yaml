@@ -52,6 +52,36 @@ web:
   host: 0.0.0.0
   port: 8080
 
+# Status display: a tiny 0.91" 128x32 SSD1306 OLED on one of the OrangePi's own
+# I2C buses (NOT the XIAO's bus). It shows the owl's current mode (IDLE,
+# DETECTING, INTERACTING, STARTING, NO LINK, ...) and a small line with the
+# firmware loop rate and whether a face is seen. Dims while the owl sleeps and
+# says BRAIN OFF when the brain stops. No extra Python package needed; the
+# service user must be in the 'i2c' group (setup.sh / the service file do that).
+#
+#   enabled     - drive the panel (disabled by default like every feature block)
+#   i2c_bus     - Linux bus number, i.e. /dev/i2c-<n>. `sudo i2cdetect -l` lists
+#                 them; the panel normally answers at 0x3C (or 0x3D) on the bus
+#                 whose header pins it is wired to. NOTE: the "SUNXI HDMI"
+#                 adapter (i2c-20 here) is the HDMI DDC channel; a device that
+#                 only shows up there (0x30) is the monitor link, not the OLED.
+#   address     - I2C address, 0x3C by default (PyYAML reads 0x3C as 60)
+#   portrait    - panel mounted with its long side vertical: upright letters, one
+#                 under the other from top to bottom (the owl's backpack)
+#   rotate      - true if the picture is upside down / mirrored for your mounting
+#   interval_s  - how often to check for a changed picture
+#   retry_s     - how long to wait before reopening after the panel disappeared
+#   dim_when_sleeping - turn the panel to minimum contrast while the owl sleeps
+display:
+  enabled: false
+  i2c_bus: 2        # TWI2 (PE2 SDA / PE1 SCL) via /boot/overlay-user/owl-i2c2.dtbo, see specs/012
+  address: 0x3C
+  portrait: false
+  rotate: false
+  interval_s: 0.5
+  retry_s: 30
+  dim_when_sleeping: true
+
 # Navigation ("guide me home"): the owl becomes a compass that points at a
 # named destination. You teach it places (name + lat/lon) in the web UI's
 # "Places" card, then say "Bring mich nach <name>" (or press Start in the web
@@ -95,13 +125,15 @@ navigation:
 #   volume - 0.0 - 1.0 master gain applied to generated samples.
 #
 # The amp and the mic share ONE I2S card (I2S0 on PB4-PB8), fixed at 48 kHz by
-# the owl_i2s kernel module. The module sets clk_keep so the BCLK/LRCLK clocks
-# keep running when no stream is open -- otherwise the mic (which needs a
-# continuous SCK to stay out of standby) would drop to 10.7 ms of wake latency
-# every time playback opened/closed a stream.
+# the owl_i2s kernel module. On the installed vendor kernel, stopping playback
+# can silence ongoing capture. keep_playback_clock holds silent TX open as a
+# workaround (SPEC-015); it is opt-in and consumes resources while brain runs.
+# It requires a shared dmix output PCM, not an exclusive hw: device.
 audio:
   enabled: true
-  device: ""          # e.g. "owl-i2s" (leave "" for the default card)
+  device: ""          # e.g. "owl_playback" (leave "" for the default card)
+  keep_playback_clock: false  # A733 workaround: silent shared TX for reliable mic
+  feedback_tail_s: 0.6  # suppress mic blocks during real playback + this reverb tail
   volume: 0.8        # 0.0 - 1.0 master gain applied to generated samples
 
 # Speech recognition: the owl hears the user and reacts (expression + owl-call).

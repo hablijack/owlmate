@@ -1,6 +1,7 @@
 #include "Sensors.h"
 #include "imu_config.h"
 #include <Adafruit_GPS.h>
+#include "i2c_lock.h"
 #include <Preferences.h>
 
 // --- Vibration: Flankenzaehler im Interrupt --------------------------------
@@ -148,13 +149,12 @@ bool Sensors::begin() {
     _vibLastPulse = 0;
     _vibLastEvent = 0;
     _vibCount = 0;
-    _rapidTapCount = 0;
-    _updateSeqPending = false;
 
     return true;
 }
 
 void Sensors::updateImu() {
+    I2cGuard i2c;   // Bewegungs-Image: der Servo-Task teilt sich den Bus (include/i2c_lock.h)
     if (!_imuReady) return;
 
     // Bus lesen, filtern, Min/Max fuer die Kalibrierung mitschreiben. Begrenzt
@@ -266,7 +266,11 @@ GpsData Sensors::getGps() {
     static const int GPS_DRY_READS = 3;
     int dry = 0;
     for (int i = 0; i < GPS_READ_BUDGET; i++) {
-        const char c = GPS.read();
+        char c;
+        {
+            I2cGuard i2c;   // pro Zeichen, nie ueber die ganze Schleife (Servo-Task wartet)
+            c = GPS.read();
+        }
         if (GPS.newNMEAreceived()) {
             GPS.parse(GPS.lastNMEA());   // parse() clears the flag
         }
@@ -312,17 +316,7 @@ void Sensors::updateVibration() {
         if (_vibLastPulse == 0 || now - _vibLastPulse > VIBRATION_BURST_GAP_MS) {
             _vibCount++;
 
-            // Schnellfolge fuer den 4-Tipp-Einstieg in den Update-Modus.
-            if (_vibLastEvent != 0 && now - _vibLastEvent <= UPDATE_TAP_GAP_MS) {
-                _rapidTapCount++;
-            } else {
-                _rapidTapCount = 1;
-            }
             _vibLastEvent = now;
-            if (_rapidTapCount >= UPDATE_TAP_REQUIRED) {
-                _rapidTapCount = 0;
-                _updateSeqPending = true;
-            }
         }
         _vibLastPulse = now;
     }
@@ -342,7 +336,6 @@ VibrationData Sensors::getVibration() {
     data.detected = _vibState;
     data.lastDetected = _vibLastEvent;
     data.count = _vibCount;
-    data.updateSequence = _updateSeqPending;
     return data;
 }
 

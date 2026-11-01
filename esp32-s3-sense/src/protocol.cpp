@@ -94,13 +94,30 @@ void handleCommand(const char* json) {
     const char* type = doc["type"];
     if (!type) return;
 
-    // Update mode is local-only: while the SoftAP is up the supervisor
-    // can't drive the owl (heartbeat still answers for liveness).
-    if (behavior::current() == State::UPDATE && strcmp(type, "heartbeat") != 0) {
+    // USB remains connected while the SoftAP is up. Allow explicit OTA
+    // control and liveness only; normal supervisor commands cannot steer it.
+    if (behavior::current() == State::UPDATE && strcmp(type, "heartbeat") != 0
+        && strcmp(type, "update_mode") != 0) {
         return;
     }
 
-    if (strcmp(type, "expression") == 0) {
+    if (strcmp(type, "update_mode") == 0) {
+        // Require an explicit boolean: malformed requests must not start OTA.
+        if (!doc["active"].is<bool>()) {
+            JsonDocument err;
+            err["type"] = "error";
+            err["msg"] = "invalid_update_mode";
+            sendJson(err);
+            return;
+        }
+        if (doc["active"].as<bool>()) behavior::enterUpdateMode();
+        else behavior::exitUpdateMode();
+        JsonDocument resp;
+        resp["type"] = "update_mode_ack";
+        resp["active"] = behavior::current() == State::UPDATE;
+        sendJson(resp);
+
+    } else if (strcmp(type, "expression") == 0) {
         // Temporary expression override from the supervisor. It takes
         // precedence over the state-driven expression until it expires, but
         // it never changes the state machine itself.
@@ -112,13 +129,39 @@ void handleCommand(const char* json) {
         resp["value"] = expr;
         sendJson(resp);
 
+    } else if (strcmp(type, "servo_step") == 0) {
+        // Maintenance probe: exactly one PWM tick from the actual active output.
+        // No enabling an unpowered channel, no centering, and no auto-return.
+        bool ok = false;
+        if (!servos.locked() && !SERVO_MOTION_ENABLED && behavior::current() == State::IDLE
+            && doc["channel"].is<int>() && doc["direction"].is<int>()) {
+            const int ch = doc["channel"].as<int>();
+            const int direction = doc["direction"].as<int>();
+            if (ch >= 0 && ch < PCA9685_NUM_CHANNELS
+                && (direction == -1 || direction == 1)) {
+                behavior::holdForServoProbe(true);
+                ok = servos.stepOutput(uint8_t(ch), int8_t(direction));
+            }
+        }
+        JsonDocument resp;
+        resp["type"] = "servo_step_ack";
+        resp["ok"] = ok;
+        if (servos.locked()) resp["error"] = "servo_locked";
+        resp["channel"] = doc["channel"];
+        sendJson(resp);
+
     } else if (strcmp(type, "servo") == 0) {
         uint8_t ch = doc["channel"];
         float angle = doc["angle"];
-        servos.setAngle(ch, angle);
+        // Im Bewegungs-Image gehoeren die Ziele der Choreografie (lib/OwlChoreo): ein
+        // direkter Servo-Befehl wuerde im naechsten loop() ueberschrieben.
+        const bool ok = !SERVO_MOTION_ENABLED && servos.setAngle(ch, angle);
 
         JsonDocument resp;
         resp["type"] = "servo_ack";
+        resp["ok"] = ok;
+        if (servos.locked()) resp["error"] = "servo_locked";
+        else if (!ok) resp["error"] = "servo_autonomous";
         resp["channel"] = ch;
         resp["angle"] = angle;
         sendJson(resp);
@@ -137,11 +180,14 @@ void handleCommand(const char* json) {
         // so the head tracks the destination.
         float angle = doc["angle"];
         bool active = doc["active"] | false;
-        behavior::setNavTarget(angle, active);
+        const bool ok = !active || !servos.locked();
+        if (ok) behavior::setNavTarget(angle, active);
 
         JsonDocument resp;
         resp["type"] = "nav_ack";
-        resp["active"] = active;
+        resp["ok"] = ok;
+        if (!ok) resp["error"] = "servo_locked";
+        resp["active"] = ok && active;
         resp["angle"] = angle;
         sendJson(resp);
 
@@ -151,6 +197,8 @@ void handleCommand(const char* json) {
         sendAck("sleep_ack");
 
     } else if (strcmp(type, "wake") == 0) {
+        // Also explicitly release the maintenance hold (may move servos).
+        behavior::holdForServoProbe(false);
         // Policy command: wake the owl (only meaningful while sleeping).
         if (behavior::current() == State::SLEEPING) {
             behavior::transitionTo(State::IDLE);
@@ -187,6 +235,8 @@ void sendTelemetry() {
     // der ganze Zweck ist. Bleibt es 0, war der Port nie der Engpass.
     doc["tx_dropped"] = txDropped;
     doc["fw"] = FW_VERSION;
+    doc["servo_safety"]["locked"] = servos.locked();
+    doc["servo_safety"]["ready"] = servos.ready();
 
     // Haldenstand. Gegenstueck zu face.stack_free: der Stapel der
     // Erkennungsaufgabe wird seit dem Umzug auf Kern 0 dauerhaft gemeldet, die

@@ -9,7 +9,16 @@ public:
     ServoController();
     bool begin();
 
-    void setAngle(uint8_t channel, float angle);
+    // Legacy-Schnittstelle (Supervisor, Navigation): im Bewegungs-Image wird `angle`
+    // in die Positionseinheit des Kanals uebersetzt (Kopf: Grad, links positiv; Ohren
+    // und Fluegel: -45..45 -> 0..100).
+    bool setAngle(uint8_t channel, float angle);
+    // Zielposition in der Einheit des Profils (nur Bewegungs-Image, sonst false).
+    bool setPos(uint8_t channel, float pos);
+    bool locked() const { return SERVO_SAFETY_LOCKED != 0; }
+    bool ready() const { return _pcaReady; }
+    // One raw PWM tick from the current output; never guess an initial position.
+    bool stepOutput(uint8_t channel, int8_t direction);
     void setCenter();
     void update();
 

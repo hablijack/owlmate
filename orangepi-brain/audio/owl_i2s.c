@@ -186,7 +186,8 @@ static int owl_i2s_probe(struct platform_device *pdev)
 
 	cpus->of_node = cpu_np;
 	/* No I2C codec on this card: the amp and mic are not ASoC codecs. */
-	codecs->dai_name = "snd-soc-dummy";
+	codecs->name = "snd-soc-dummy";
+	codecs->dai_name = "snd-soc-dummy-dai";
 	platforms->of_node = cpu_np;
 
 	dai_link->name = "owl i2s";
@@ -199,14 +200,14 @@ static int owl_i2s_probe(struct platform_device *pdev)
 	dai_link->num_platforms = 1;
 	/*
 	 * CPU is the bit/frame-clock master (NB_NF); the amp and mic are slaves
-	 * (CFC_CFC). The continuous-clock flag keeps BCLK/LRCLK running when no
+	 * (CBC_CFC). The continuous-clock flag keeps BCLK/LRCLK running when no
 	 * stream is open, so the ICS43434 (which drops to standby without a
 	 * running SCK) does not pay a ~10.7 ms wake on every playback open.
 	 * Opt out with 'robotowl,no-continuous-clock' in the overlay if the
 	 * A733 controller misbehaves with it.
 	 */
 	dai_link->dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-			     SND_SOC_DAIFMT_CFC_CFC;
+			     SND_SOC_DAIFMT_CBC_CFC;
 #ifdef SND_SOC_DAIFMT_CONT
 	if (!of_property_read_bool(dev->of_node, "robotowl,no-continuous-clock"))
 		dai_link->dai_fmt |= SND_SOC_DAIFMT_CONT;

@@ -19,8 +19,8 @@
 //   any --(nav active=true)--> NAVIGATING
 //   NAVIGATING --(nav active=false)--> IDLE
 //   NAVIGATING --(no nav update for NAV_TIMEOUT_MS)--> IDLE  (self-timeout)
-//   any --(4 rapid taps)--> UPDATE
-//   UPDATE --(1 tap)--> IDLE
+//   any --(update_mode active=true)--> UPDATE
+//   UPDATE --(update_mode active=false)--> IDLE
 // ============================================================================
 
 #include "owl.h"
@@ -36,6 +36,9 @@ void transitionTo(State newState);
 
 // One step of the machine. Called once per main-loop iteration.
 void update();
+
+// Pause autonomous movement during manual port identification. Wake resumes it.
+void holdForServoProbe(bool hold);
 
 // ---- Supervisor overrides (temporary; they expire on their own and NEVER
 // ---- change the state) ------------------------------------------------------
@@ -60,7 +63,7 @@ float navAngle();
 
 // ---- OTA update mode --------------------------------------------------------
 
-// Bring up SoftAP + the /update HTTP server; entered by 4 vibration taps.
+// Bring up SoftAP + the /update HTTP server; explicit serial command only.
 void enterUpdateMode();
 
 // Tear the SoftAP down and resume normal behaviour.

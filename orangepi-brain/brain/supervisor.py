@@ -282,6 +282,10 @@ class Supervisor:
         """Trigger a blink animation."""
         return self.serial.blink(speed)
 
+    def audio_capture_guard(self):
+        """Speech sees playback barriers, never the audio device handle."""
+        return self.audio.capture_guard() if self.audio is not None else (0, 0.0)
+
     def play_sound(self, sound: str) -> bool:
         """Play a sound effect on the OrangePi (MAX98357A I2S amp).
 

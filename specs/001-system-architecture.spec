@@ -24,6 +24,12 @@ side decides what the owl does**.
 
 ## Decisions
 
+**Servo motion is independently gated at the driver boundary.** The closed
+owl's unverified port mapping and constrained mechanics require the locked
+safety image described in SPEC-016. Behavior still runs, but centering and all
+other motor requests are no-ops while locked. This includes boot, sleep, OTA,
+error handling and direct/probe commands; the other peripherals keep working.
+
 **The ESP32 owns the behaviour state machine.** Eight states: `BOOT → IDLE →
 DETECTING → INTERACTING`, plus `SLEEPING`, `NAVIGATING`, `UPDATE`, `ERROR`.
 Transitions are driven by *local* inputs only: the vibration sensor, on-device
@@ -121,7 +127,7 @@ not a deleted copy. Do not "fix" it by making one caller print what the other
 needs.
 
 `hardware_check.cpp` is now built only under `-DHARDWARE_CHECK=1`, matching the
-one-diagnostic-one-file pattern the ten diagnostic envs already follow. It was
+one-diagnostic-one-file pattern the diagnostic envs already follow. It was
 the last diagnostic linked into every production image; removing it cut 3,844
 bytes of flash and 168 bytes of RAM.
 

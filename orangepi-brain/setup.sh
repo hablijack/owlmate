@@ -31,7 +31,8 @@
 #
 # Non-interactive use (unattended / scripted installs):
 #     sudo ./setup.sh --non-interactive
-#   skips the wizard and keeps the bundled config.yaml defaults.
+#   skips the wizard and preserves an existing installed config (or uses defaults).
+#   Add --no-reboot --no-enable-service to stage without USB/servo startup.
 #
 set -euo pipefail
 
@@ -45,7 +46,7 @@ UNIT_DEST="/etc/systemd/system/robot-owl-brain.service"
 MODULE_LOAD_CONF="/etc/modules-load.d/robot-owl-i2s.conf"
 SERVICE_USER="robotowl"
 OVERLAY_NAME="owl-i2s-overlay"
-WHISPER_MODEL_BASE="https://huggingface.co/ggerganov/whisper-models/resolve/main"
+WHISPER_MODEL_BASE="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 
 log()  { printf '\n\033[1;32m[robot-owl]\033[0m %s\n' "$*"; }
 info() { printf '\033[0;37m[robot-owl]\033[0m %s\n' "$*"; }
@@ -58,10 +59,14 @@ die()  { printf '\033[1;31m[robot-owl] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 # Options: --non-interactive skips the config wizard (keeps bundled defaults).
 # ----------------------------------------------------------------------------
 NON_INTERACTIVE=0
+NO_REBOOT=0
+NO_ENABLE_SERVICE=0
 for arg in "$@"; do
     case "${arg}" in
         --non-interactive|-n) NON_INTERACTIVE=1 ;;
-        *) die "unknown argument '${arg}' (only --non-interactive is supported)" ;;
+        --no-reboot) NO_REBOOT=1 ;;
+        --no-enable-service) NO_ENABLE_SERVICE=1 ;;
+        *) die "unknown argument '${arg}' (--non-interactive, --no-reboot, --no-enable-service)" ;;
     esac
 done
 # The wizard prompts on /dev/tty so it still works under `sudo` (stdin is not
@@ -95,7 +100,7 @@ run_config_wizard() {
 
     # ---- Serial: discover the ESP32 USB CDC port ---------------------------
     local port="/dev/ttyACM0" first
-    first=$(ls /dev/ttyACM* 2>/dev/null | head -1)
+    first=$(ls /dev/ttyACM* 2>/dev/null | head -1) || true
     if [ -n "${first}" ]; then
         port="${first}"
         info "Detected USB CDC port: ${first}"
@@ -123,13 +128,13 @@ run_config_wizard() {
     # The mic is the ICS43434 on the shared I2S card (the 'owl' ALSA card). It
     # only exists after the DT overlay is applied (post-reboot), so it cannot be
     # probed here — leave mic_device empty (= the default card).
-    local speech_enabled="false" speech_model="small" speech_lang="de"
+    local speech_enabled="false" speech_model="tiny" speech_lang="de"
     if [ "${INTERACTIVE}" -eq 1 ]; then
         ask "Enable speech recognition (I2S mic -> whisper.cpp)? [false]" speech_enabled
-        ask "Whisper.cpp model (tiny/base/small/medium; small = best accuracy) [small]" speech_model
+        ask "Whisper.cpp model (tiny/base/small/medium; tiny = measured low latency) [tiny]" speech_model
         ask "Spoken language (ISO code) [de]" speech_lang
     fi
-    [ -z "${speech_model}" ] && speech_model="small"
+    [ -z "${speech_model}" ] && speech_model="tiny"
     [ -z "${speech_lang}" ] && speech_lang="de"
 
     # ---- Autonomous sleep ---------------------------------------------------
@@ -234,10 +239,18 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y --no-install-recommends \
     python3-venv python3-pip alsa-utils rsync portaudio19-dev \
-    dtc bc make gcc curl
-# Kernel headers are required to build owl_i2s against the running kernel.
-apt-get install -y --no-install-recommends "linux-headers-$(uname -r)" \
-    || warn "could not install linux-headers-$(uname -r) — the module build (step 2) will fail."
+    device-tree-compiler bc make gcc g++ cmake ninja-build pkg-config python3-dev curl \
+    libasound2-plugins
+# DietPi's A733 headers are a versioned vendor package, not linux-headers-<uname>.
+# Match the installed image version: never silently upgrade the kernel here.
+if [ ! -d "/lib/modules/$(uname -r)/build" ]; then
+    if dpkg-query -W -f='${Version}' linux-image-vendor-sun60iw2 >/dev/null 2>&1; then
+        KERNEL_PACKAGE_VERSION=$(dpkg-query -W -f='${Version}' linux-image-vendor-sun60iw2)
+        apt-get install -y --no-install-recommends "linux-headers-vendor-sun60iw2=${KERNEL_PACKAGE_VERSION}"
+    else
+        apt-get install -y --no-install-recommends "linux-headers-$(uname -r)"
+    fi
+fi
 [ -d "/lib/modules/$(uname -r)/build" ] || die "no kernel build tree — cannot build owl_i2s. Install the matching linux-headers package."
 
 # ----------------------------------------------------------------------------
@@ -261,27 +274,36 @@ log "Step 3/10 — compiling + installing + enabling the ${OVERLAY_NAME} DT over
 # /boot/firmware).
 BOOT_DIR=""
 for cand in /boot/firmware /boot; do
-    if ls "${cand}"/*.dtb >/dev/null 2>&1; then BOOT_DIR="${cand}"; break; fi
+    if [ -f "${cand}/dietpiEnv.txt" ] || [ -f "${cand}/armbianEnv.txt" ]; then
+        BOOT_DIR="${cand}"; break
+    fi
 done
-[ -n "${BOOT_DIR}" ] || die "could not locate a boot directory with a .dtb (checked /boot/firmware, /boot)."
+[ -n "${BOOT_DIR}" ] || die "could not locate dietpiEnv.txt or armbianEnv.txt under /boot/firmware or /boot."
 info "Using boot directory: ${BOOT_DIR}"
 command -v dtc >/dev/null 2>&1 || die "dtc not available (installed in step 1) — cannot compile the overlay."
 dtc -I dts -O dtb -o "${AUDIO_DIR}/${OVERLAY_NAME}.dtbo" "${AUDIO_DIR}/owl-i2s-overlay.dts"
-install -m 0644 "${AUDIO_DIR}/${OVERLAY_NAME}.dtbo" "${BOOT_DIR}/${OVERLAY_NAME}.dtbo"
+install -d "${BOOT_DIR}/overlay-user"
+install -m 0644 "${AUDIO_DIR}/${OVERLAY_NAME}.dtbo" "${BOOT_DIR}/overlay-user/${OVERLAY_NAME}.dtbo"
 # Enable the overlay at boot. Armbian/DietPi images differ in how overlays are
 # selected, so use the common mechanism and WARN (not die) if it is absent —
 # the fallback is to merge the overlay into the base .dtb (see specs/015 Open).
-if [ -f "${BOOT_DIR}/armbianEnv.txt" ]; then
-    grep -q "^dtoverlay=${OVERLAY_NAME}$" "${BOOT_DIR}/armbianEnv.txt" \
-        || echo "dtoverlay=${OVERLAY_NAME}" >> "${BOOT_DIR}/armbianEnv.txt"
-    info "Enabled via ${BOOT_DIR}/armbianEnv.txt (dtoverlay=${OVERLAY_NAME})."
-else
-    warn "No ${BOOT_DIR}/armbianEnv.txt — this DietPi image may enable overlays"
-    warn "differently (U-Boot 'fdtoverlay' in extlinux.conf, or a per-board"
-    warn "mechanism). The .dtbo is installed at ${BOOT_DIR}/${OVERLAY_NAME}.dtbo."
-    warn "If the 'owl' ALSA card is absent after reboot, enable the overlay per"
-    warn "your image's docs (see specs/015, Open) — e.g. merge it into the base .dtb."
-fi
+ENV_FILE="${BOOT_DIR}/dietpiEnv.txt"
+[ -f "${ENV_FILE}" ] || ENV_FILE="${BOOT_DIR}/armbianEnv.txt"
+[ -f "${ENV_FILE}.robot-owl-backup" ] || cp -a "${ENV_FILE}" "${ENV_FILE}.robot-owl-backup"
+python3 - "${ENV_FILE}" "${OVERLAY_NAME}" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+lines = path.read_text().splitlines()
+values = []
+for line in lines:
+    if line.startswith('user_overlays='):
+        values.extend(line.split('=', 1)[1].split())
+values = list(dict.fromkeys(values + [sys.argv[2]]))
+lines = [line for line in lines if not line.startswith('user_overlays=')]
+lines.append('user_overlays=' + ' '.join(values))
+path.write_text('\n'.join(lines) + '\n')
+PY
+info "Enabled via ${ENV_FILE} (user_overlays=${OVERLAY_NAME}); reboot still required."
 
 # ----------------------------------------------------------------------------
 # Step 4 — install the ALSA mixer config
@@ -297,14 +319,15 @@ log "Step 5/10 — installing the brain to ${DEST_DIR}"
 mkdir -p "${DEST_DIR}"
 rsync -a --delete \
     --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
-    --exclude 'deploy' --exclude 'audio' --exclude 'models' \
+    --exclude 'deploy' --exclude 'audio' --exclude 'models' --exclude 'config.yaml' \
     "${SRC_DIR}/" "${DEST_DIR}/"
 if [ ! -x "${DEST_DIR}/.venv/bin/python" ]; then
     info "Creating virtualenv ..."
     python3 -m venv "${DEST_DIR}/.venv"
 fi
 "${DEST_DIR}/.venv/bin/pip" install --upgrade pip >/dev/null
-"${DEST_DIR}/.venv/bin/pip" install -r "${DEST_DIR}/requirements.txt"
+CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}" \
+    "${DEST_DIR}/.venv/bin/pip" install -r "${DEST_DIR}/requirements.txt"
 
 # ----------------------------------------------------------------------------
 # Step 6 — config wizard (writes choices into the installed config.yaml)
@@ -312,10 +335,13 @@ fi
 if [ "${INTERACTIVE}" -eq 1 ]; then
     run_config_wizard
 else
-    log "Step 6/10 — non-interactive: keeping bundled config.yaml defaults"
+    log "Step 6/10 — non-interactive: preserving installed config (defaults only on first install)"
 fi
-# The wizard edited the SOURCE config.yaml; refresh the installed copy.
-install -m 0644 "${SRC_DIR}/config.yaml" "${DEST_DIR}/config.yaml"
+# Preserve deployment choices on unattended re-runs; the wizard explicitly
+# requests new choices. Never overwrite an existing deployment with defaults.
+if [ "${INTERACTIVE}" -eq 1 ] || [ ! -f "${DEST_DIR}/config.yaml" ]; then
+    install -m 0644 "${SRC_DIR}/config.yaml" "${DEST_DIR}/config.yaml"
+fi
 
 # ----------------------------------------------------------------------------
 # Step 7 — pre-download the whisper.cpp model
@@ -323,7 +349,7 @@ install -m 0644 "${SRC_DIR}/config.yaml" "${DEST_DIR}/config.yaml"
 log "Step 7/10 — whisper.cpp model"
 SPEECH_ENABLED=$("${DEST_DIR}/.venv/bin/python" -c "import yaml;print(yaml.safe_load(open('${DEST_DIR}/config.yaml'))['speech']['enabled'])" 2>/dev/null || echo false)
 if [ "${SPEECH_ENABLED}" = "True" ] || [ "${SPEECH_ENABLED}" = "true" ]; then
-    MODEL_SIZE=$("${DEST_DIR}/.venv/bin/python" -c "import yaml;print(yaml.safe_load(open('${DEST_DIR}/config.yaml'))['speech']['model'])" 2>/dev/null || echo small)
+    MODEL_SIZE=$("${DEST_DIR}/.venv/bin/python" -c "import yaml;print(yaml.safe_load(open('${DEST_DIR}/config.yaml'))['speech']['model'])" 2>/dev/null || echo tiny)
     case "${MODEL_SIZE}" in
         tiny|base|small|medium) ;;
         *) warn "speech.model '${MODEL_SIZE}' is not a known size — skipping download."; MODEL_SIZE="" ;;
@@ -335,8 +361,9 @@ if [ "${SPEECH_ENABLED}" = "True" ] || [ "${SPEECH_ENABLED}" = "true" ]; then
             info "Model already present: ${MODELS_DIR}/ggml-${MODEL_SIZE}.bin"
         else
             info "Downloading ggml-${MODEL_SIZE}.bin (this can be a large download) ..."
-            curl -fL --retry 3 -o "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin" \
+            curl -fL --retry 3 -o "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin.part" \
                 "${WHISPER_MODEL_BASE}/ggml-${MODEL_SIZE}.bin"
+            mv "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin.part" "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin"
         fi
         # Point config.yaml at the absolute installed path.
         awk -v p="${MODELS_DIR}/ggml-${MODEL_SIZE}.bin" '
@@ -358,13 +385,16 @@ fi
 # ----------------------------------------------------------------------------
 log "Step 8/10 — creating '${SERVICE_USER}' user + udev rule"
 if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
-    useradd --system --home "${DEST_DIR}" --shell /usr/sbin/nologin \
+    useradd --system --user-group --home "${DEST_DIR}" --shell /usr/sbin/nologin \
         --comment "Robot Owl brain" "${SERVICE_USER}"
     info "Created system user '${SERVICE_USER}'."
 else
     info "User '${SERVICE_USER}' already exists."
 fi
-usermod -aG dial "${SERVICE_USER}" 2>/dev/null || true
+# i2c: the status OLED (brain/display.py) opens /dev/i2c-N, which belongs to group i2c.
+# The service unit names the group, so it must exist.
+getent group i2c >/dev/null || groupadd --system i2c
+usermod -aG dialout,audio,i2c "${SERVICE_USER}"
 install -m 0644 "${UDEV_SRC}" "${UDEV_DEST}"
 chown root:root "${UDEV_DEST}"
 # The brain runs as ${SERVICE_USER}; give it read access to the installed tree.
@@ -376,12 +406,21 @@ chown -R "${SERVICE_USER}:" "${DEST_DIR}"
 log "Step 9/10 — installing + enabling robot-owl-brain.service"
 install -m 0644 "${UNIT_SRC}" "${UNIT_DEST}"
 systemctl daemon-reload
-systemctl enable robot-owl-brain.service
-info "Service enabled — it starts on the next boot, once the sound card is up."
+if [ "${NO_ENABLE_SERVICE}" -eq 0 ]; then
+    systemctl enable robot-owl-brain.service
+    info "Service enabled — starts on next boot (opening USB may reset the XIAO)."
+else
+    info "Service not enabled by this run (--no-enable-service)."
+fi
 
 # ----------------------------------------------------------------------------
 # Step 10 — reboot to apply the DT overlay
 # ----------------------------------------------------------------------------
+if [ "${NO_REBOOT}" -eq 1 ]; then
+    log "Installed without reboot. Audio activation is pending."
+    warn "Do not reboot until XIAO/servo startup is mechanically safe."
+    exit 0
+fi
 log "Step 10/10 — rebooting to apply the DT overlay (brings up the 'owl' card)"
 info "The owl starts automatically after reboot (robot-owl-brain.service is enabled)."
 info "Rebooting in 5 seconds ..."

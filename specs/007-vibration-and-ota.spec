@@ -6,16 +6,20 @@ Depends on: 002 (dual-bank partitions)
 
 ## Intent
 
-A tap on the owl should wake it and look around. Four taps should open a
-firmware update mode, because the owl has to be updatable once it is glued into
-a body with no accessible USB port.
+Vibration lets the owl look around, but must never control firmware updates.
+Walking produced accidental OTA entries with the former four-tap gesture.
+Only explicit Orange Pi software commands may enter or leave update mode;
+the Web UI exposes these commands without needing access to the XIAO USB port.
 
 ## Requirements
 
 * **R-007.1** A tap must be detected reliably; a motionless owl must never
   register one.
-* **R-007.2** Four taps in quick succession enter `UPDATE`; one tap leaves it.
-* **R-007.3** Update mode must work with no Orange Pi attached.
+* **R-007.2** `{"type":"update_mode","active":true}` enters `UPDATE`;
+  `active:false` leaves it. Vibration never enters or leaves this state.
+* **R-007.3** The Orange Pi Python API and Web UI must offer explicit entry and
+  exit. USB serial remains connected while the SoftAP is active. Repeating a
+  command is a no-op; `active` must be a JSON boolean.
 * **R-007.4** Sensitivity must be adjustable without a firmware change.
 
 ## Decisions
@@ -68,16 +72,18 @@ The sensor emits **bursts of pulses**, not a level:
   designed (SPEC-001). This path had been carried as "unseen" through both
   refactors; it now is not.
 
-**OTA timing** is a per-gap rule, not a total budget. Each tap must follow the
-previous within `UPDATE_TAP_GAP_MS` (1500 ms), so four taps span at most 4.5 s.
-There is also an implicit *lower* bound that appears in no constant: a new tap
-only counts after `VIBRATION_BURST_GAP_MS` (250 ms) of quiet measured from the
-previous burst's **last pulse**, and a tap rings for ~510 ms — so gaps below
-~0.75 s merge two taps into one. Usable band ~0.75–1.5 s: **tap about once per
-second.** Judged tight enough to be worth widening, but it was hit first try on
-hardware, so 1500 ms stays.
+These OTA measurements describe the retired gesture, not the new trigger.
+The SoftAP/upload path is unchanged; entry and exit now come from USB commands.
+The Web UI POST endpoint is `/api/update-mode` with a boolean `active`; its
+`ok` reports serial send success, not a firmware acknowledgement. Live telemetry
+confirms the actual state. Entry requires browser confirmation.
 
 ## Falsified
+
+* **"A rapid tap sequence distinguishes maintenance intent from movement."**
+  Walking accidentally entered OTA mode. The gesture and its sequence counters
+  were removed rather than retuned. Exit is explicit too, so movement cannot
+  interrupt an update session.
 
 * **"The sensor or its wiring is broken."** Telemetry reported
   `detected: true, count: 1` on a motionless owl. The `count: 1` was the tell —
@@ -109,7 +115,12 @@ hardware, so 1500 ms stays.
 1. 60 s untouched: `vibration.pulses` does not increase, `detected` stays false,
    state stays `idle`.
 2. N deliberate taps at ~1 s spacing: `vibration.count` increases by exactly N.
-3. `tools/klopftest.py` — four taps enter update mode; one tap leaves it.
+3. Walk and tap repeatedly: no OTA entry. Press Enter update mode in the Web UI:
+   telemetry becomes `update`, SoftAP and `/update` are available. Further taps
+   do not exit; Exit update mode returns to normal operation. Repeat entry/exit
+   commands to confirm idempotence. Upload and confirm reboot into the new image.
+4. `tests/test_update_mode.py` covers the Python command, Web UI forwarding and
+   source guards against reintroducing vibration-driven OTA.
 
 ## Open
 
@@ -126,5 +137,3 @@ hardware, so 1500 ms stays.
   task stops calling `esp_camera_fb_get()`, so with `CAMERA_GRAB_WHEN_EMPTY` it
   overflows. It recovered by itself and detection resumed normally. Worth
   knowing so it is not diagnosed as a camera fault.
-
-* Nothing. This subsystem is closed.

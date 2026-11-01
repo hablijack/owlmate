@@ -11,7 +11,7 @@
 #   1. Copies this orangepi-brain/ tree to /opt/robot-owl/orangepi-brain
 #      (idempotent; keeps the installed .venv, models/ and audio/ in place).
 #   2. Refreshes the virtualenv + installs requirements.txt.
-#   3. Ensures the 'robotowl' user (in the dial group) exists.
+#   3. Ensures the 'robotowl' user (in dialout/audio/i2c groups) exists.
 #   4. Installs the udev rule for the ESP32 USB CDC port.
 #   5. Installs + enables the systemd unit and restarts it.
 #
@@ -40,23 +40,28 @@ mkdir -p "${DEST_DIR}"
 # stack (those live under DEST_DIR and are owned by setup.sh).
 rsync -a --delete \
     --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
-    --exclude 'deploy' --exclude 'audio' --exclude 'models' \
+    --exclude 'deploy' --exclude 'audio' --exclude 'models' --exclude 'config.yaml' \
     "${SRC_DIR}/" "${DEST_DIR}/"
+
+[ -f "${DEST_DIR}/config.yaml" ] || install -m 0644 "${SRC_DIR}/config.yaml" "${DEST_DIR}/config.yaml"
 
 log "2/5 Refreshing virtualenv + requirements"
 if [ ! -x "${DEST_DIR}/.venv/bin/python" ]; then
     python3 -m venv "${DEST_DIR}/.venv"
 fi
 "${DEST_DIR}/.venv/bin/pip" install --upgrade pip >/dev/null
-"${DEST_DIR}/.venv/bin/pip" install -r "${DEST_DIR}/requirements.txt"
+CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}" \
+    "${DEST_DIR}/.venv/bin/pip" install -r "${DEST_DIR}/requirements.txt"
 
-log "3/5 Ensuring '${SERVICE_USER}' user exists (in dial group)"
+log "3/5 Ensuring '${SERVICE_USER}' user exists (in dialout/audio groups)"
 if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
-    useradd --system --home "${DEST_DIR}" --shell /usr/sbin/nologin \
+    useradd --system --user-group --home "${DEST_DIR}" --shell /usr/sbin/nologin \
         --comment "Robot Owl brain" "${SERVICE_USER}"
     chown -R "${SERVICE_USER}:" "${DEST_DIR}"
 fi
-usermod -aG dial "${SERVICE_USER}" 2>/dev/null || true
+getent group i2c >/dev/null || groupadd --system i2c
+usermod -aG dialout,audio,i2c "${SERVICE_USER}"
+chown -R "${SERVICE_USER}:" "${DEST_DIR}"
 
 log "4/5 Installing udev rule for the ESP32 serial port"
 install -m 0644 "${UDEV_SRC}" "${UDEV_DEST}"
