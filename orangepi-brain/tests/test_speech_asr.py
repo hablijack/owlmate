@@ -214,11 +214,49 @@ class TestASRLoop(unittest.TestCase):
         self.assertEqual([c for k, c in serial.commands if k == "react"], ["happy"])
         self.assertLess(kinds.index("expression"), kinds.index("react"))   # gesture's eyes must win
 
+    def test_own_eyes_reaction_sends_expression_after_gesture(self):
+        speech, serial, sup, audio, holder = self._setup("Das ist toll!")
+        speech.reactions["happy"] = {"expression": "sad_down", "gesture": "negative", "own_eyes": True}
+        self._run(speech, holder)
+        kinds = [k for k, c in serial.commands if k in ("expression", "react")]
+        self.assertEqual(kinds, ["react", "expression"])
+
     def test_reaction_without_gesture_sends_none(self):
         speech, serial, sup, audio, holder = self._setup("Das ist toll!")
         speech.reactions["happy"] = {"expression": "happy", "sound": "happy"}
         self._run(speech, holder)
         self.assertEqual([c for k, c in serial.commands if k == "react"], [])
+
+    def test_quiet_utterance_is_normalised_for_whisper(self):
+        speech, serial, sup, audio, holder = self._setup("Das ist toll!", normalize_peak=0.7)
+        self._run(speech, holder)
+        model = speech._whisper
+        self.assertTrue(model.transcribed)
+        self.assertAlmostEqual(float(np.max(np.abs(model.transcribed[0]))), 0.7, places=2)
+
+    def test_context_keeps_quiet_audio_around_voice(self):
+        # 3 silent chunks before, 2 voiced, 5 silent after (0.3 s each, 16 kHz after resampling).
+        # With context_ms=300 the utterance is preroll (0.3) + voice (0.6) + tail (0.3) = 1.2 s.
+        speech, serial, sup, audio, holder = self._setup("Das ist toll!", context_ms=300)
+        self._run(speech, holder)
+        self.assertAlmostEqual(len(speech._whisper.transcribed[0]) / 16000.0, 1.2, delta=0.02)
+
+    def test_no_context_keeps_voiced_chunks_only(self):
+        speech, serial, sup, audio, holder = self._setup("Das ist toll!")
+        self._run(speech, holder)
+        self.assertAlmostEqual(len(speech._whisper.transcribed[0]) / 16000.0, 0.6, delta=0.02)
+
+    def test_min_utterance_counts_voiced_audio_not_context(self):
+        # 0.6 s voiced + 0.6 s context must still be below min_utterance_s=1.0
+        speech, serial, sup, audio, holder = self._setup(
+            "Das ist toll!", min_utterance_s=1.0, context_ms=300)
+        self._run(speech, holder)
+        self.assertEqual(speech.last_heard, "")
+
+    def test_normalisation_is_off_by_default(self):
+        speech, serial, sup, audio, holder = self._setup("Das ist toll!")
+        self._run(speech, holder)
+        self.assertNotAlmostEqual(float(np.max(np.abs(speech._whisper.transcribed[0]))), 0.7, places=2)
 
     def test_question_transcript(self):
         speech, serial, sup, audio, holder = self._setup("Wer bist du?")

@@ -281,7 +281,7 @@ Tool note: opening the owl's port (reset) sometimes leaves it silent; a read-onl
   Web UI: `http://owlmate:8080` (or the IP above).
 - XIAO firmware 1.3.0 is deployed in both OTA slots, verified before boot;
   bootloader/partition table/OTA metadata/NVS were preserved byte-for-byte.
-  Full 8 MB backup is retained on the board and the Mac. Current native suite: 258 tests.
+  Full 8 MB backup is retained on the board and the Mac. Current native suite: 264 tests.
   The closed-owl safety lock is active after cold boot; IMU calibration restores,
   face inference runs and live serial blink/expression/sleep/wake/heartbeat/OTA
   entry/exit pass. All 16 servo targets, probes and active nav are rejected.
@@ -1066,7 +1066,7 @@ wrong; run the lot only after mechanical work.
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
 | detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
-| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 258 tests pass |
+| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 264 tests pass |
 | firmware/Orange Pi drift | `cd orangepi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS

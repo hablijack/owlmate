@@ -45,6 +45,7 @@ Threading model
 
 import logging
 import math
+import os
 import queue
 import random
 import re
@@ -87,6 +88,19 @@ class Speech:
         cfg = (config or {}).get("speech", {})
         self.enabled = bool(cfg.get("enabled", False))
         self.language = cfg.get("language", "de")
+        # whisper.cpp CPU threads. 2 was the original guess; the Zero 3W has 8 cores.
+        self.threads = int(cfg.get("threads", 2))
+        # whisper always encodes a 30 s window (1500 context frames, 50 per second) however short the
+        # clip. audio_ctx cuts the window: our clips are <= window_s + one chunk (~3 s = 150 frames), so
+        # 192 is ample. Measured on the Zero 3W (tiny, 2.5 s clip): 4.37 s -> 0.80 s at 2 threads. 0 = whisper's default.
+        self.audio_ctx = int(cfg.get("audio_ctx", 0))
+        # Peak-normalise each utterance before whisper. The ICS43434 arrives very quiet (speech peaks
+        # of 0.002-0.005) and whisper-tiny does not cope: it hallucinates words. 0 = off, otherwise the
+        # target peak (0.7), with the gain capped so a click cannot be blown up into a "word".
+        self.normalize_peak = float(cfg.get("normalize_peak", 0.0))
+        # Debug: write every utterance that reaches whisper (as 16-bit WAV, after normalisation) to
+        # this directory, so recognition can be judged offline against other models. "" = off.
+        self.dump_dir = str(cfg.get("dump_dir", "") or "")
         # whisper.cpp model: a LOCAL path to a .bin/.gguf (downloaded by
         # setup.sh), not a hub name -- the OrangePi runs offline.
         self.model = cfg.get("model", "") or ""
@@ -111,6 +125,10 @@ class Speech:
         # produce 0.3-0.6 s blips at speech level, real sentences are >= 0.9 s. 0 = off.
         self.min_utterance_s = float(cfg.get("min_utterance_s", 0.0))
         self.energy_floor_ms = float(cfg.get("energy_floor_ms", 700))
+        # Quiet audio kept around the voiced chunks: pre-roll before the first voiced chunk and
+        # silent chunks inside/after the utterance (up to this many ms). 0 = old behaviour
+        # (voiced chunks only, which chops soft word onsets and endings).
+        self.context_ms = float(cfg.get("context_ms", 0))
         self.cooldown_s = float(cfg.get("cooldown_s", 4.5))
         self.require_face = bool(cfg.get("require_face", True))
 
@@ -196,7 +214,7 @@ class Speech:
         if not self.model:
             raise RuntimeError("speech is enabled but speech.model (whisper.cpp model path) is empty")
         try:
-            self._whisper = Model(self.model, language=self.language, n_threads=2,
+            self._whisper = Model(self.model, language=self.language, n_threads=self.threads,
                                   print_realtime=False, print_progress=False)
         except Exception as e:
             raise RuntimeError(f"Could not load whisper.cpp model {self.model!r}: {e}") from e
@@ -361,6 +379,9 @@ class Speech:
         self._silence_frames = 0
         self._utterance_generation = None
         self._utterance_peak = 0.0
+        self._preroll = []
+        self._pending_quiet = []
+        self._voiced_frames = 0
 
     def _process_chunk(self, chunk, captured_generation=None, captured_at=None) -> None:
         """VAD state machine over one (ASR-rate, mono) chunk; transcribe a
@@ -401,7 +422,12 @@ class Speech:
             if not self._utterance:
                 self._voice_started = time.time()
                 self._utterance_generation = generation
+                self._utterance.extend(getattr(self, "_preroll", []))
+                self._preroll = []
+            self._utterance.extend(getattr(self, "_pending_quiet", []))
+            self._pending_quiet = []
             self._utterance.append(chunk)
+            self._voiced_frames = getattr(self, "_voiced_frames", 0) + chunk_frames
 
             total = sum(len(c) for c in self._utterance)
             max_frames = int(self.window_s * self.sample_rate)
@@ -409,6 +435,18 @@ class Speech:
                 self._transcribe_and_feed()
             # else: keep accumulating until silence or the window fills
         else:
+            keep = int(self.context_ms * self.sample_rate / 1000.0)
+            if keep > 0:
+                if self._utterance:
+                    # Quiet audio after voice: joins the utterance when voice resumes (a gap
+                    # between words) or, at the close, only its first context_ms (the tail).
+                    self._pending_quiet = getattr(self, "_pending_quiet", []) + [chunk]
+                else:
+                    pr = getattr(self, "_preroll", [])
+                    pr.append(chunk)
+                    while len(pr) > 1 and sum(len(c) for c in pr) > keep:
+                        pr.pop(0)
+                    self._preroll = pr
             if self._utterance:
                 self._silence_frames += chunk_frames
                 if self._silence_frames >= self.energy_floor_ms * self.sample_rate / 1000.0:
@@ -433,6 +471,22 @@ class Speech:
             return 0.0
         return float(math.sqrt((chunk ** 2).mean()))
 
+    def _dump_wav(self, audio) -> None:
+        """Debug aid (speech.dump_dir): save the utterance as a mono 16-bit WAV. Never raises."""
+        try:
+            import wave
+            import numpy as np
+            os.makedirs(self.dump_dir, exist_ok=True)
+            path = os.path.join(self.dump_dir, time.strftime("utt-%H%M%S.wav"))
+            pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2")
+            with wave.open(path, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(self.sample_rate)
+                w.writeframes(pcm.tobytes())
+        except Exception as e:
+            logger.debug("Speech: could not dump utterance: %s", e)
+
     def _transcribe_and_feed(self) -> None:
         """Transcribe the accumulated window (if worth it) and run the pipeline.
 
@@ -447,7 +501,14 @@ class Speech:
             return
         generation, safe_after = self.supervisor.audio_capture_guard()
         captured_generation = self._utterance_generation
-        utterance = np.concatenate(self._utterance)
+        tail, keep = [], int(self.context_ms * self.sample_rate / 1000.0)
+        for c in getattr(self, "_pending_quiet", []):
+            if keep <= 0:
+                break
+            tail.append(c[:keep])
+            keep -= len(tail[-1])
+        utterance = np.concatenate(self._utterance + tail)
+        voiced_frames = getattr(self, "_voiced_frames", 0) or utterance.size
         peak = getattr(self, "_utterance_peak", 0.0)
         self._reset_utterance()
         if (time.monotonic() < safe_after
@@ -457,23 +518,34 @@ class Speech:
         # Ignore fragments shorter than a tenth of a second (noise clicks).
         if utterance.size < int(0.1 * self.sample_rate):
             return
-        if utterance.size < int(self.min_utterance_s * self.sample_rate):
+        if voiced_frames < int(self.min_utterance_s * self.sample_rate):
             logger.debug("Speech: %.1fs of voiced audio is below min_utterance_s, not transcribed",
-                         utterance.size / self.sample_rate)
+                         voiced_frames / self.sample_rate)
             return
         if self._whisper is None:
             return
 
+        if self.normalize_peak > 0:
+            top = float(np.max(np.abs(utterance)))
+            if top > 1e-6:
+                utterance = (utterance * min(self.normalize_peak / top, 100.0)).astype(np.float32)
+        if self.dump_dir:
+            self._dump_wav(utterance)
         try:
-            result = self._whisper.transcribe(utterance, language=self.language)
+            t0 = time.monotonic()
+            kwargs = {"language": self.language}
+            if self.audio_ctx:
+                kwargs["audio_ctx"] = self.audio_ctx
+            result = self._whisper.transcribe(utterance, **kwargs)
             transcript = " ".join(seg.text.strip() for seg in result).strip()
+            asr_s = time.monotonic() - t0
         except Exception as e:
             logger.warning("Speech: transcription failed: %s", e)
             return
 
         # Peak chunk RMS per utterance: the number to set vad_threshold from (music vs speech).
-        logger.info("Speech: utterance %.1fs peak_rms=%.4f -> %r (vad_threshold=%.4f)",
-                    utterance.size / self.sample_rate, peak, transcript, self.vad_threshold)
+        logger.info("Speech: utterance %.1fs peak_rms=%.4f asr=%.2fs (%d threads, audio_ctx %d) -> %r",
+                    utterance.size / self.sample_rate, peak, asr_s, self.threads, self.audio_ctx, transcript)
         if not transcript or _only_non_speech(transcript):
             return
         # Optional sentence-level emotion tag (llama.cpp). Empty when the layer
@@ -643,15 +715,23 @@ class Speech:
         sound = reaction.get("sound")
         gesture = reaction.get("gesture")
 
-        if expression:
-            ok = self.serial.set_expression(expression)
-            if not ok:
+        # Default: the gesture goes out last and its own eyes win. With `own_eyes: true` the
+        # reaction's expression goes out last instead, so it replaces the gesture's eyes.
+        expression_last = bool(reaction.get("own_eyes")) and bool(gesture)
+
+        def send_expression():
+            if expression and not self.serial.set_expression(expression):
                 logger.warning("Speech: failed to send expression %r", expression)
+
+        if not expression_last:
+            send_expression()
         if gesture:
-            # Body language (ears, wings, head) plus matching eyes from the firmware. Sent AFTER
-            # the expression so the gesture's eyes win; the firmware drops it while asleep.
+            # Body language (ears, wings, head) plus matching eyes from the firmware; the
+            # firmware drops it while asleep.
             if not self.serial.react(gesture):
                 logger.warning("Speech: failed to send gesture %r", gesture)
+        if expression_last:
+            send_expression()
         if sound:
             # The supervisor owns the amp; it no-ops cleanly when the I2S amp
             # is absent, so there is nothing to check here.

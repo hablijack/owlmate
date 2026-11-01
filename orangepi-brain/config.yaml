@@ -159,6 +159,12 @@ audio:
 #   vad_threshold - per-chunk RMS energy gate; a chunk below this is silence
 #   min_utterance_s - voiced audio shorter than this is never sent to whisper (music and
 #                     room noise give 0.3-0.6 s blips at speech level; sentences are >= 0.9 s)
+#   threads       - whisper.cpp CPU threads (the Zero 3W has 8 cores)
+#   normalize_peak - scale each utterance so its peak is this value (0.7) before whisper; the mic
+#                   is very quiet and tiny hallucinates on quiet input. 0 = off
+#   dump_dir      - debug: save every utterance sent to whisper as a WAV here ("" = off)
+#   audio_ctx     - shorten whisper's fixed 30 s window; 192 (~3.8 s) is ample for our clips and
+#                   made a 2.5 s clip 5x faster on the Zero 3W. 0 = whisper's default (slow)
 #   energy_floor_ms - sustained silence (this long) closes the gate / discards
 #                     a half-built utterance
 #   cooldown_s  - min seconds between two reactions (the spec's COOLDOWN_TIME)
@@ -188,8 +194,14 @@ speech:
   capture_dtype: float32
   vad_threshold: 0.02
   min_utterance_s: 0.8
+  threads: 4
+  audio_ctx: 192
+  normalize_peak: 0.7
   energy_floor_ms: 700
-  cooldown_s: 4.5
+  # Quiet audio kept around the voiced chunks (pre-roll + gaps + tail), so soft word onsets/endings
+  # reach whisper instead of being cut out. 0 = voiced chunks only (old behaviour).
+  context_ms: 300
+  cooldown_s: 3.0
   require_face: true
   wake_keywords: ["eule", "wacht auf"]
   # Navigation: phrases that START guiding toward a place. The words AFTER the
@@ -205,15 +217,16 @@ speech:
   nav_stop_keywords: ["stopp die navigation", "stopp navigieren", "lass die
                       navigation", "reicht", "danke"]
   clusters:
-    happy:    ["fein", "brav", "toll", "super", "gute eule", "mag dich", "schön"]
-    negative: ["nein", "lass das", "aufhören", "böse", "ach", "huch"]
+    happy:    ["fein", "brav", "toll", "super", "gute eule", "gute eure", "gute eume", "gute eile",
+              "mag dich", "schön"]
+    negative: ["nein", "lass das", "lasst das", "aufhören", "böse", "ach", "huch"]
     question: ["wer", "wie", "was", "warum"]
   reactions:
     # The gesture goes out AFTER the expression and brings its own eyes (firmware: happy -> glee,
     # negative -> annoyed, curious -> skeptic), so `expression` only shows where the firmware
     # ignores the gesture (asleep, locked image).
     happy:    { expression: happy,     sound: happy, gesture: happy }
-    negative: { expression: surprised, sound: alert, gesture: negative }
+    negative: { expression: sad_down,  sound: alert, gesture: negative, own_eyes: true }
     question: { expression: surprised, sound: alert, gesture: curious }
 
 # Emotion classification (optional, OrangePi-only): hand the transcript to a
