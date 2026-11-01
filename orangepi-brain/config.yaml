@@ -157,12 +157,16 @@ audio:
 #   capture_dtype - PortAudio format the card delivers; float32 is requested by
 #                   default (ALSA's plug layer converts the card's native int)
 #   vad_threshold - per-chunk RMS energy gate; a chunk below this is silence
+#   min_utterance_s - voiced audio shorter than this is never sent to whisper (music and
+#                     room noise give 0.3-0.6 s blips at speech level; sentences are >= 0.9 s)
 #   energy_floor_ms - sustained silence (this long) closes the gate / discards
 #                     a half-built utterance
 #   cooldown_s  - min seconds between two reactions (the spec's COOLDOWN_TIME)
 #   require_face - only react while a face is in frame (prevents reacting to TV)
 #   clusters    - keyword lists (German) mapped to reaction clusters
-#   reactions   - cluster -> {expression override, sound played on the amp}
+#   reactions   - cluster -> {expression override, sound played on the amp, gesture}.
+#                 gesture is a body move played by the firmware: happy, negative,
+#                 curious or startle (ears, wings, head; ignored while asleep)
 #   wake_keywords - Phase 4: while the owl is ASLEEP it ignores ordinary speech
 #                   (so it isn't startled by the TV). Only a clearly ADDRESSED
 #                   word/phrase here wakes it (the OrangePi sends the existing
@@ -183,6 +187,7 @@ speech:
   mic_channel: 0
   capture_dtype: float32
   vad_threshold: 0.02
+  min_utterance_s: 0.8
   energy_floor_ms: 700
   cooldown_s: 4.5
   require_face: true
@@ -204,9 +209,12 @@ speech:
     negative: ["nein", "lass das", "aufhören", "böse", "ach", "huch"]
     question: ["wer", "wie", "was", "warum"]
   reactions:
-    happy:    { expression: happy,     sound: happy }
-    negative: { expression: surprised, sound: alert }
-    question: { expression: surprised, sound: alert }
+    # The gesture goes out AFTER the expression and brings its own eyes (firmware: happy -> glee,
+    # negative -> annoyed, curious -> skeptic), so `expression` only shows where the firmware
+    # ignores the gesture (asleep, locked image).
+    happy:    { expression: happy,     sound: happy, gesture: happy }
+    negative: { expression: surprised, sound: alert, gesture: negative }
+    question: { expression: surprised, sound: alert, gesture: curious }
 
 # Emotion classification (optional, OrangePi-only): hand the transcript to a
 # small language model (ringorsolya/Emotion_RoBERTa_german6_v7, run through

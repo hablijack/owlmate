@@ -14,7 +14,32 @@ OwlChoreo::OwlChoreo(const ChoreoConfig& cfg, Rng rng)
     : _cfg(cfg), _rng(rng), _init(false), _saccadeLockUntil(0), _mode(OM_REST), _last(0), _modeSince(0),
       _headTarget(0), _nextTwitch(0), _twitchUntil(0), _twitchEar(0), _nextGlance(0),
       _glanceUntil(0), _glanceTarget(0), _stuckSince(0), _trackOffUntil(0),
-      _nextRuffle(0), _ruffleStart(0), _gxFilt(0) {}
+      _nextRuffle(0), _ruffleStart(0), _gxFilt(0), _gesture(OG_NONE), _gestureStart(0), _gestureReadyAt(0), _gestureSide(1.0f), _headOffset(0.0f) {}
+
+static const uint32_t GESTURE_COOLDOWN_MS = 4000;
+static const uint32_t STARTLE_MS = 1300;
+static const uint32_t HAPPY_MS = 1700, NEGATIVE_MS = 1800, CURIOUS_MS = 2200;
+// Der Kopf darf laut Kalibrierung nur 70 Grad/s: ein Schuettelweg von 36 Grad braucht >= 0,5 s.
+static const float NEGATIVE_SHAKE_DEG = 18.0f, CURIOUS_TILT_DEG = 24.0f;
+
+static uint32_t gestureLength(OwlGesture g) {
+    switch (g) {
+    case OG_STARTLE: return STARTLE_MS;
+    case OG_HAPPY: return HAPPY_MS;
+    case OG_NEGATIVE: return NEGATIVE_MS;
+    case OG_CURIOUS: return CURIOUS_MS;
+    default: return 0;
+    }
+}
+
+bool OwlChoreo::trigger(OwlGesture g, uint32_t now) {
+    if (g == OG_NONE || _gesture != OG_NONE || now < _gestureReadyAt) return false;
+    _gesture = g;
+    _gestureStart = now;
+    _gestureSide = (_rng() & 1u) ? 1.0f : -1.0f;
+    _gestureReadyAt = now + GESTURE_COOLDOWN_MS;
+    return true;
+}
 
 float OwlChoreo::rnd01() { return float(_rng() % 10000u) / 10000.0f; }
 
@@ -43,6 +68,7 @@ void OwlChoreo::update(uint32_t now, OwlMode mode, bool face, float gx, ChoreoOu
     }
     const uint32_t since = now - _modeSince;
 
+    _headOffset = 0.0f;
     out.earL = out.earR = 50.0f;   // Mitte: tiefe Ohren wirken traurig (Besitzer, 2026-10-31)
     out.wingL = out.wingR = 0.0f;
     out.headValid = true;
@@ -121,7 +147,44 @@ void OwlChoreo::update(uint32_t now, OwlMode mode, bool face, float gx, ChoreoOu
         _headTarget = 0;
         break;
     }
+    if (_gesture != OG_NONE) {
+        const uint32_t g = now - _gestureStart;
+        if (g >= gestureLength(_gesture)) {
+            _gesture = OG_NONE;
+        } else if (mode != OM_REST) {
+            switch (_gesture) {
+            case OG_STARTLE:
+                out.earL = out.earR = g < 1000 ? 100.0f : 70.0f;
+                out.wingL = out.wingR = flutter(g, 100.0f);          // zwei Fluegelschlaege
+                break;
+            case OG_HAPPY: {
+                const bool leftHigh = (g / 300u) % 2u == 0;
+                out.earL = leftHigh ? 100.0f : 30.0f;
+                out.earR = leftHigh ? 30.0f : 100.0f;
+                out.wingL = out.wingR = flutter(g, 100.0f);
+                break;
+            }
+            case OG_NEGATIVE:
+                if (g < 1500) out.earL = out.earR = 0.0f;
+                if (out.headValid) {
+                    // Etappen mit je 0,5 s: +, -, +, zurueck (ca. 72 Grad/s, knapp unter dem Limit)
+                    _headOffset = g < 450 ? NEGATIVE_SHAKE_DEG : g < 950 ? -NEGATIVE_SHAKE_DEG
+                                : g < 1450 ? NEGATIVE_SHAKE_DEG : 0.0f;
+                }
+                break;
+            case OG_CURIOUS:
+                if (g >= 200 && g < 1900) {
+                    if (out.headValid) _headOffset = _gestureSide * CURIOUS_TILT_DEG;
+                    // positiv = links: das Ohr auf der Seite der Kopfneigung geht hoch, das andere sinkt
+                    out.earL = _gestureSide > 0 ? 100.0f : 35.0f;
+                    out.earR = _gestureSide > 0 ? 35.0f : 100.0f;
+                }
+                break;
+            default: break;
+            }
+        }
+    }
     out.earL = clampf(out.earL, 0.0f, 100.0f);
     out.earR = clampf(out.earR, 0.0f, 100.0f);
-    out.head = _headTarget;
+    out.head = out.headValid ? clampf(_headTarget + _headOffset, -_cfg.trackLimitDeg, _cfg.trackLimitDeg) : _headTarget;
 }

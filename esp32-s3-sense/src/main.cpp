@@ -206,6 +206,8 @@ void loop() {
     // Klopfzaehler. Wuerde stattdessen jeder Leser selbst abholen, nehmen sich
     // updateState() (60 Hz) und sendTelemetry() (2 Hz) die Flanken gegenseitig
     // weg.
+    // Eigene Servobewegung erschuettert den SW-420 selbst: nicht als Klopfen zaehlen.
+    sensors.setSelfMotion(servos.moving());
     sensors.updateVibration();
 
     // IMU auswerten: ebenfalls einmal pro Runde, und aus verwandtem Grund. Der

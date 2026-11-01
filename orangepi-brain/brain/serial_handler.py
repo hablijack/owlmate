@@ -477,6 +477,14 @@ class SerialHandler:
         """Trigger blink animation"""
         return self.send_command({"type": "blink", "speed": speed})
 
+    def react(self, name: str) -> bool:
+        """Play a body gesture on the owl: startle, happy, negative or curious.
+
+        Cosmetic only: it never changes the state, and the firmware ignores it while
+        asleep or in the locked image (react_ack.played says whether it ran).
+        """
+        return self.send_command({"type": "react", "name": name})
+
     def heartbeat(self) -> bool:
         """Send heartbeat request"""
         return self.send_command({"type": "heartbeat"})

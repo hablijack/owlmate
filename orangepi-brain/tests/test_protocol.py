@@ -461,7 +461,7 @@ class TestLogRecordsAreFormattable(unittest.TestCase):
 
     def test_ack_log_renders(self):
         for ack in ("expression_ack", "servo_ack", "nav_ack",
-                    "sleep_ack", "wake_ack", "blink_ack", "heartbeat_ack"):
+                    "sleep_ack", "wake_ack", "blink_ack", "react_ack", "heartbeat_ack"):
             self._assert_records_render({"type": ack, "value": "x"})
 
     def test_other_message_logs_render(self):
@@ -544,3 +544,14 @@ class TestReadLoop(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReactCommand(unittest.TestCase):
+    """The wire shape of `react` must match handleCommand() in src/protocol.cpp."""
+
+    def test_react_sends_name(self):
+        h = SerialHandler("/dev/null")
+        sent = []
+        h.send_command = lambda cmd: sent.append(cmd) or True
+        self.assertTrue(h.react("curious"))
+        self.assertEqual(sent, [{"type": "react", "name": "curious"}])

@@ -187,6 +187,10 @@ class FakeSerial:
         self.commands.append(("wake", {"type": "wake"}))
         return True
 
+    def react(self, name):
+        self.commands.append(("react", name))
+        return True
+
     def send_command(self, command):
         self.commands.append((command.get("type"), command))
         return True

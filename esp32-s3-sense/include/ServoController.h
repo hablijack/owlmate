@@ -23,6 +23,8 @@ public:
     void update();
 
     float getAngle(uint8_t channel) const;
+    // true, solange irgendein Servo noch auf dem Weg zu seinem Ziel ist (Bewegungs-Image).
+    bool moving() const;
 
 private:
     void writeMicroseconds(uint8_t channel, uint16_t us);

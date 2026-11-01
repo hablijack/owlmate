@@ -19,6 +19,16 @@
 //            Ohren hoch und zwei Fluegelschlaege bis zum Maximum der Kalibrierung ("ich habe dich gesehen").
 //   NAV      Navigation: der Kopf gehoert der Navigation (headValid=false).
 //
+// Gesten (trigger()): kurze Koerperreaktionen, die ueber den Modus gelegt werden und nach ihrer
+// Dauer von selbst enden; der Modus laeuft darunter weiter. Im REST (Schlaf, Fehler, OTA, Boot)
+// wird nichts gespielt, der Kopf wird nie angefasst. Eine Geste wird hoechstens alle
+// gestureCooldownMs neu gestartet, damit ein Klopf-Burst nicht dauernd zuckt.
+//   STARTLE  Klopfen: Ohren schnellen auf 100, ein Fluegelschlag (0,7 s).
+//   HAPPY    Lob: Ohren wippen im Wechsel, ein Fluegelschlag (1,5 s).
+//   NEGATIVE Ablehnung: Ohren sinken, der Kopf schuettelt sich zweimal (1,3 s).
+//   CURIOUS  Frage: Kopf kippt zu einer zufaelligen Seite, das Ohr dieser Seite geht hoch (1,8 s).
+// Nur NEGATIVE und CURIOUS bewegen den Kopf, als Versatz auf das Ziel von Tracking/Blick (nie in NAV).
+//
 // Kopfverfolgung als Sakkade: Das Kamerabild dreht sich mit dem Kopf, also ist gaze_x ein
 // Regelfehler. Ueberschreitet er das Totband, setzt der Kopf EIN neues Ziel (sign * FOV *
 // Gain * gaze_x) und faehrt es glatt an; danach wird SETTLE_MS plus Fahrzeit nicht neu gezielt
@@ -32,6 +42,7 @@
 #include <stdint.h>
 
 enum OwlMode { OM_REST, OM_IDLE, OM_ALERT, OM_ENGAGED, OM_NAV };
+enum OwlGesture { OG_NONE, OG_STARTLE, OG_HAPPY, OG_NEGATIVE, OG_CURIOUS };
 
 struct ChoreoConfig {
     float headSign;          // +1/-1: Drehrichtung der Kopfverfolgung
@@ -55,6 +66,10 @@ public:
     typedef uint32_t (*Rng)();
     OwlChoreo(const ChoreoConfig& cfg, Rng rng);
     void update(uint32_t nowMs, OwlMode mode, bool face, float gazeX, ChoreoOut& out);
+    // Startet eine Geste (ignoriert, wenn gerade eine laeuft oder der Cooldown nicht um ist).
+    // Gibt zurueck, ob sie angenommen wurde.
+    bool trigger(OwlGesture g, uint32_t nowMs);
+    OwlGesture gesture() const { return _gesture; }
     bool trackingSuspended(uint32_t nowMs) const { return nowMs < _trackOffUntil; }
 
 private:
@@ -73,4 +88,7 @@ private:
     uint32_t _stuckSince, _trackOffUntil;
     uint32_t _nextRuffle, _ruffleStart;
     float _gxFilt;
+    OwlGesture _gesture;
+    uint32_t _gestureStart, _gestureReadyAt;
+    float _gestureSide, _headOffset;
 };

@@ -147,6 +147,7 @@ bool Sensors::begin() {
     attachInterrupt(digitalPinToInterrupt(VIBRATION_PIN), vibrationIsr, CHANGE);
     _vibState = false;
     _vibLastPulse = 0;
+    _selfMotionUntil = 0;
     _vibLastEvent = 0;
     _vibCount = 0;
 
@@ -294,6 +295,10 @@ GpsData Sensors::getGps() {
 
 // Flanken abholen und Zustand fortschreiben. MUSS genau einmal pro
 // Hauptschleifendurchlauf laufen (~60 Hz) - siehe Kommentar in Sensors.h.
+void Sensors::setSelfMotion(bool moving) {
+    if (moving) _selfMotionUntil = millis() + VIBRATION_SELF_MOTION_TAIL_MS;
+}
+
 void Sensors::updateVibration() {
     // Zaehler kurz gesperrt auslesen und nullen, damit zwischen Lesen und
     // Zuruecksetzen keine Flanke verloren geht.
@@ -303,6 +308,14 @@ void Sensors::updateVibration() {
     interrupts();
 
     const uint32_t now = millis();
+
+    // Eigene Servobewegung (und ihr Nachschwingen) ist kein Klopfen: die Flanken wurden oben
+    // schon abgeholt und werden verworfen. Ohne das weckt sich die Eule mit ihrer Idle-Animation
+    // selbst aus dem Idle.
+    if (now < _selfMotionUntil) {
+        _vibState = (_vibLastPulse != 0) && (now - _vibLastPulse <= VIBRATION_HOLD_MS);
+        return;
+    }
 
     // Genug Flanken in diesem ~16-ms-Fenster -> gerade jetzt Erschuetterung.
     // Die Schwelle liegt weit unter einem echten Buendel (~1 kHz Prellen, also

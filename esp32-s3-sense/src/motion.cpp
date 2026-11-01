@@ -1,6 +1,7 @@
 #include "motion.h"
 
 #include <Arduino.h>
+#include <string.h>
 #include "config.h"
 #include "owl.h"
 #include "behavior.h"
@@ -17,11 +18,35 @@ const ChoreoConfig CHOREO_CFG = {
     HEAD_TRACK_FOV_DEG, HEAD_SACCADE_GAIN, HEAD_SACCADE_SETTLE_MS,
 };
 OwlChoreo choreo(CHOREO_CFG, randomWord);
+bool knockSeen = false;   // vorheriger Zustand von vibration.detected, fuer die Anstiegsflanke
 #endif
 
 }  // namespace
 
 namespace motion {
+
+bool react(const char* name) {
+#if SERVO_MOTION_ENABLED
+    if (!name || servos.locked() || !servos.ready()) return false;
+    switch (behavior::current()) {
+        case State::BOOT: case State::SLEEPING: case State::UPDATE: case State::ERROR: return false;
+        default: break;
+    }
+    // Jede Geste bringt ihre Augen mit: Koerper und Gesicht gehoeren zusammen, sonst wirkt es leer.
+    OwlGesture g = OG_NONE;
+    EyeExpression eyes = EyeExpression::NEUTRAL;
+    if (strcmp(name, "startle") == 0) { g = OG_STARTLE; eyes = EyeExpression::SURPRISED; }
+    else if (strcmp(name, "happy") == 0) { g = OG_HAPPY; eyes = EyeExpression::GLEE; }
+    else if (strcmp(name, "negative") == 0) { g = OG_NEGATIVE; eyes = EyeExpression::ANNOYED; }
+    else if (strcmp(name, "curious") == 0) { g = OG_CURIOUS; eyes = EyeExpression::SKEPTIC; }
+    if (!choreo.trigger(g, millis())) return false;
+    behavior::overrideExpression(eyes);
+    return true;
+#else
+    (void)name;
+    return false;
+#endif
+}
 
 void update() {
 #if SERVO_MOTION_ENABLED
@@ -39,6 +64,13 @@ void update() {
         case State::ERROR:
         default: mode = OM_REST; break;
     }
+
+    // Klopfen (Beginn eines Pulsbursts) = erschrecken: Ohren hoch, ein Fluegelschlag, grosse Augen.
+    // Nach behavior::update() aufgerufen, damit der Zustandswechsel IDLE->DETECTING den
+    // Ausdruck nicht wieder loescht. Im Schlaf (REST) spielt die Choreografie nichts.
+    const bool knock = sensors.getVibration().detected;
+    if (knock && !knockSeen && mode != OM_REST) react("startle");
+    knockSeen = knock;
 
     ChoreoOut out;
     choreo.update(millis(), mode, faceResult.detected, faceResult.gaze_x, out);

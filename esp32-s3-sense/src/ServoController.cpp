@@ -211,6 +211,19 @@ float ServoController::getAngle(uint8_t channel) const {
     return _currentAngles[channel];
 }
 
+bool ServoController::moving() const {
+#if SERVO_MOTION_ENABLED
+    if (!_pcaReady) return false;
+    MotionLock lock;
+    for (uint8_t i = 0; i < NUM_SERVO_PROFILES; i++) {
+        const uint8_t ch = SERVO_PROFILES[i].channel;
+        // nur angesteuerte Kanaele: position() liefert fuer ruhende 0, das meldete ewig "in Bewegung"
+        if (motion.driven(ch) && fabsf(motion.position(ch) - motion.target(ch)) > 0.5f) return true;
+    }
+#endif
+    return false;
+}
+
 void ServoController::update() {
 #if SERVO_MOTION_ENABLED
     return;   // der Servo-Task (50 Hz) fuehrt update() aus, nicht die Hauptschleife

@@ -54,7 +54,10 @@ only when the boot-time probe found them, which makes telemetry a presence
 indicator for free — no separate health field needed.
 
 **Commands** (Orange Pi → ESP32): `sleep`, `wake`, `expression`, `servo`, `gaze`,
-`nav`, `blink`, `heartbeat`, `update_mode`. The latter requires boolean `active`:
+`nav`, `blink`, `react`, `heartbeat`, `update_mode`. `react` (`name`: `startle`, `happy`,
+`negative`, `curious`) plays a body gesture from `OwlChoreo`; `react_ack.played` says whether it ran
+(false asleep, in the locked image, during another gesture or its 4 s cooldown). It never changes
+the state. `update_mode`: the latter requires boolean `active`:
 true enters OTA, false exits to IDLE (a no-op outside UPDATE). Repeated commands
 are idempotent. `update_mode_ack` reports the resulting `active`; a missing or
 non-boolean value emits `error` with `msg: invalid_update_mode` and changes nothing.

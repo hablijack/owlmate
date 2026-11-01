@@ -662,6 +662,10 @@
 #define VIBRATION_PULSE_MIN 2        // Flanken pro Auswertung (~16 ms) ab denen es zaehlt
 #define VIBRATION_HOLD_MS 500        // so lange bleibt detected nach der letzten Flanke true
 #define VIBRATION_BURST_GAP_MS 250   // Ruhe, die zwei Klopfer voneinander trennt
+// Die Servos erschuettern den SW-420 selbst (Idle-Blick, Ohrzucken, Fluegel): ohne Gegenmassnahme
+// weckt sich die Eule mit ihrer Idle-Animation aus dem Idle (Endlosschleife, Besitzer 2026-11-01).
+// Waehrend eine Servobewegung laeuft und so lange danach werden Flanken nicht als Klopfen gewertet.
+#define VIBRATION_SELF_MOTION_TAIL_MS 600
 #define SERVO_SMOOTH_SPEED 2  // degrees per loop iteration
 
 // ============================================================================

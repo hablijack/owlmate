@@ -7,4 +7,9 @@ namespace motion {
 // Einmal pro loop()-Iteration NACH behavior::update() und VOR servos.update().
 void update();
 
+// Spielt eine Koerpergeste ("startle", "happy", "negative", "curious") ab. Gibt true zurueck, wenn
+// sie angenommen wurde; false bei unbekanntem Namen, laufender Geste, Cooldown, gesperrtem Image
+// oder Ruhezustand (Schlaf, Boot, Fehler, OTA). Aufruf aus dem Protokoll (core 1, aus loop()).
+bool react(const char* name);
+
 }  // namespace motion

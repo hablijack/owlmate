@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
 #include "behavior.h"
+#include "motion.h"
 #include "config.h"
 
 // ============================================================================
@@ -204,6 +205,16 @@ void handleCommand(const char* json) {
             behavior::transitionTo(State::IDLE);
         }
         sendAck("wake_ack");
+
+    } else if (strcmp(type, "react") == 0) {
+        // Koerpergeste aus dem Brain (Lob, Ablehnung, Frage ...). Rein kosmetisch: aendert nie den
+        // Zustand, wird im Schlaf und im gesperrten Image ignoriert; "played" sagt, ob sie lief.
+        const char* name = doc["name"] | "";
+        JsonDocument resp;
+        resp["type"] = "react_ack";
+        resp["name"] = name;
+        resp["played"] = motion::react(name);
+        sendJson(resp);
 
     } else if (strcmp(type, "blink") == 0) {
         uint8_t speed = doc["speed"] | 3;

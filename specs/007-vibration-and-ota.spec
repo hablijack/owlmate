@@ -80,6 +80,16 @@ confirms the actual state. Entry requires browser confirmation.
 
 ## Falsified
 
+* **"The owl wakes itself from IDLE" (2026-11-01).** The SW-420 sits in the same body as the
+  servos, so the idle animation (glance, ear twitch, wing ruffle) shakes the sensor, the burst
+  moves IDLE to DETECTING, and the owl has woken itself with its own idle life: an endless loop,
+  found by the owner, not by a test. Fix: while any driven servo is still on its way to its
+  target, and `VIBRATION_SELF_MOTION_TAIL_MS` (600) after, `Sensors::updateVibration()` discards
+  the edges (`ServoController::moving()` -> `Sensors::setSelfMotion()` in `loop()`).
+  `vibration.pulses` still counts raw, so a sensor that fires with the servos at rest remains
+  visible. Cost: a knock during the owl's own movement is not noticed. Verify on the owl: leave it
+  in IDLE for several minutes with the idle animation running.
+
 * **"A rapid tap sequence distinguishes maintenance intent from movement."**
   Walking accidentally entered OTA mode. The gesture and its sequence counters
   were removed rather than retuned. Exit is explicit too, so movement cannot

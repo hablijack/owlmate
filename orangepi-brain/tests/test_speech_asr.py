@@ -192,6 +192,34 @@ class TestASRLoop(unittest.TestCase):
         self.assertEqual(audio.played, ["happy"])
         self.assertEqual(speech.last_heard, "Das ist toll!")
 
+    def test_short_blip_is_not_transcribed(self):
+        # 2 voiced chunks = 0.6 s: below min_utterance_s, so whisper never runs (music blips)
+        speech, serial, sup, audio, holder = self._setup("Das ist toll!", min_utterance_s=1.0)
+        self._run(speech, holder)
+        self.assertEqual(serial.commands, [])
+        self.assertEqual(speech.last_heard, "")
+
+    def test_long_enough_utterance_is_transcribed(self):
+        speech, serial, sup, audio, holder = self._setup(
+            "Das ist toll!", min_utterance_s=1.0, stream=build_stream(voice=5))
+        self._run(speech, holder)
+        self.assertEqual(speech.last_heard, "Das ist toll!")
+
+    def test_reaction_plays_its_gesture(self):
+        # config.yaml-style reactions carry a body gesture next to expression and sound
+        speech, serial, sup, audio, holder = self._setup("Das ist toll!")
+        speech.reactions["happy"] = {"expression": "happy", "sound": "happy", "gesture": "happy"}
+        self._run(speech, holder)
+        kinds = [k for k, c in serial.commands]
+        self.assertEqual([c for k, c in serial.commands if k == "react"], ["happy"])
+        self.assertLess(kinds.index("expression"), kinds.index("react"))   # gesture's eyes must win
+
+    def test_reaction_without_gesture_sends_none(self):
+        speech, serial, sup, audio, holder = self._setup("Das ist toll!")
+        speech.reactions["happy"] = {"expression": "happy", "sound": "happy"}
+        self._run(speech, holder)
+        self.assertEqual([c for k, c in serial.commands if k == "react"], [])
+
     def test_question_transcript(self):
         speech, serial, sup, audio, holder = self._setup("Wer bist du?")
         self._run(speech, holder)
@@ -294,6 +322,18 @@ class TestLastHeardInWebUI(unittest.TestCase):
         speech.feed("Das ist toll!")
         self.assertGreaterEqual(speech.last_heard_at, before)
         self.assertLessEqual(speech.last_heard_at, time.time())
+
+
+class TestNonSpeechTags(unittest.TestCase):
+    """Whisper's "[Musik]" is the model saying "not speech": never a transcript to react to."""
+
+    def test_tags_alone_are_not_speech(self):
+        for t in ("[Musik]", "* Musik *", "(Applaus)", "♪ Musik ♪", "[Musik] [Musik]", "[Musik]."):
+            self.assertTrue(speech_mod._only_non_speech(t), t)
+
+    def test_real_words_survive_a_tag(self):
+        for t in ("Hallo Eule", "wie geht es dir [Musik]", "[Musik] hallo"):
+            self.assertFalse(speech_mod._only_non_speech(t), t)
 
 
 if __name__ == "__main__":

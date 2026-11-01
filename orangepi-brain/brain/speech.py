@@ -62,6 +62,15 @@ logger = logging.getLogger(__name__)
 # UPDATE is excluded so speech cannot interrupt firmware maintenance.
 REACTIVE_STATES = {"idle", "detecting", "interacting"}
 
+# Whisper writes non-speech sounds as a bracketed tag ("[Musik]", "* Musik *", "(Applaus)").
+# That is the model saying "this was not speech": never a transcript to react to.
+_NON_SPEECH_TAG = re.compile(r"[\[\(\*♪][^\]\)\*♪]{0,30}[\]\)\*♪]")
+
+
+def _only_non_speech(transcript: str) -> bool:
+    """True if nothing is left once the tags are removed (e.g. \"[Musik] [Musik]\")."""
+    return not _NON_SPEECH_TAG.sub("", transcript).strip(" .,-")
+
 
 class Speech:
     """Hears the user (I2S mic) and reacts through the owl's overrides.
@@ -98,6 +107,9 @@ class Speech:
         # set "int32" if a given card cannot deliver float.
         self.capture_dtype = cfg.get("capture_dtype", "float32") or "float32"
         self.vad_threshold = float(cfg.get("vad_threshold", 0.02))
+        # Voiced audio shorter than this is never sent to whisper: music and room noise
+        # produce 0.3-0.6 s blips at speech level, real sentences are >= 0.9 s. 0 = off.
+        self.min_utterance_s = float(cfg.get("min_utterance_s", 0.0))
         self.energy_floor_ms = float(cfg.get("energy_floor_ms", 700))
         self.cooldown_s = float(cfg.get("cooldown_s", 4.5))
         self.require_face = bool(cfg.get("require_face", True))
@@ -348,6 +360,7 @@ class Speech:
         self._voice_started = 0.0
         self._silence_frames = 0
         self._utterance_generation = None
+        self._utterance_peak = 0.0
 
     def _process_chunk(self, chunk, captured_generation=None, captured_at=None) -> None:
         """VAD state machine over one (ASR-rate, mono) chunk; transcribe a
@@ -382,6 +395,7 @@ class Speech:
         chunk_frames = len(chunk)
 
         if voiced:
+            self._utterance_peak = max(getattr(self, "_utterance_peak", 0.0), energy)
             # A voiced chunk resets the trailing-silence counter.
             self._silence_frames = 0
             if not self._utterance:
@@ -434,6 +448,7 @@ class Speech:
         generation, safe_after = self.supervisor.audio_capture_guard()
         captured_generation = self._utterance_generation
         utterance = np.concatenate(self._utterance)
+        peak = getattr(self, "_utterance_peak", 0.0)
         self._reset_utterance()
         if (time.monotonic() < safe_after
                 or captured_generation not in (None, generation)):
@@ -441,6 +456,10 @@ class Speech:
 
         # Ignore fragments shorter than a tenth of a second (noise clicks).
         if utterance.size < int(0.1 * self.sample_rate):
+            return
+        if utterance.size < int(self.min_utterance_s * self.sample_rate):
+            logger.debug("Speech: %.1fs of voiced audio is below min_utterance_s, not transcribed",
+                         utterance.size / self.sample_rate)
             return
         if self._whisper is None:
             return
@@ -452,7 +471,10 @@ class Speech:
             logger.warning("Speech: transcription failed: %s", e)
             return
 
-        if not transcript:
+        # Peak chunk RMS per utterance: the number to set vad_threshold from (music vs speech).
+        logger.info("Speech: utterance %.1fs peak_rms=%.4f -> %r (vad_threshold=%.4f)",
+                    utterance.size / self.sample_rate, peak, transcript, self.vad_threshold)
+        if not transcript or _only_non_speech(transcript):
             return
         # Optional sentence-level emotion tag (llama.cpp). Empty when the layer
         # is off or has no opinion; feed() then just falls through to keywords.
@@ -619,11 +641,17 @@ class Speech:
 
         expression = reaction.get("expression")
         sound = reaction.get("sound")
+        gesture = reaction.get("gesture")
 
         if expression:
             ok = self.serial.set_expression(expression)
             if not ok:
                 logger.warning("Speech: failed to send expression %r", expression)
+        if gesture:
+            # Body language (ears, wings, head) plus matching eyes from the firmware. Sent AFTER
+            # the expression so the gesture's eyes win; the firmware drops it while asleep.
+            if not self.serial.react(gesture):
+                logger.warning("Speech: failed to send gesture %r", gesture)
         if sound:
             # The supervisor owns the amp; it no-ops cleanly when the I2S amp
             # is absent, so there is nothing to check here.
@@ -631,8 +659,8 @@ class Speech:
 
         self._last_reaction = time.time()
         logger.info(
-            "Heard %r -> %s (expression=%s, sound=%s)",
-            transcript, cluster, expression or "-", sound or "-",
+            "Heard %r -> %s (expression=%s, sound=%s, gesture=%s)",
+            transcript, cluster, expression or "-", sound or "-", gesture or "-",
         )
 
     # ------------------------------------------------------------------

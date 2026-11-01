@@ -186,6 +186,7 @@ Full design, math and open questions: `specs/013-navigation.spec`.
 | `servo` | `{"type":"servo","channel":0,"angle":15.0}` | Set servo angle (-45 to 45) |
 | `gaze` | `{"type":"gaze","x":-0.5,"y":0.2}` | Temporary gaze override (3s) |
 | `blink` | `{"type":"blink","speed":3}` | Trigger blink animation |
+| `react` | `{"type":"react","name":"happy"}` | Body gesture: `startle`, `happy`, `negative`, `curious` (ears, wings, head; ignored asleep) |
 | `heartbeat` | `{"type":"heartbeat"}` | Request state ack |
 | `update_mode` | `{"type":"update_mode","active":true}` | Enter OTA; `false` exits. Explicit boolean required; repeated requests are harmless |
 | `servo_step` | `{"type":"servo_step","channel":7,"direction":1}` | Maintenance: one raw PWM tick from an active output; direction ±1; IDLE only; holds autonomous behavior until `wake` or state-changing command |
@@ -316,7 +317,7 @@ orangepi-brain/                    # Orange Pi Zero 3W (A733) brain (Python)
 │   └── 99-robot-owl-serial.rules
 ├── tools/
 │   └── gen_expressions.py         # GENERATES brain/expressions.py from the firmware's NAMES[]
-├── tests/                         # 251 tests; run on a plain Mac, no Orange Pi or audio stack needed
+├── tests/                         # 258 tests; run on a plain Mac, no Orange Pi or audio stack needed
 │   ├── run_tests.py               # unittest discovery
 │   ├── stubs.py                   # fakes third-party modules ONLY when not importable
 │   ├── test_protocol.py           # the ESP32<->Orange Pi wire contract (48 tests)
@@ -577,7 +578,7 @@ python main.py [config.yaml]   # Default config path
 | **SW420 Vibration** | ✅ Complete | **Edge-counting ISR**, evaluated once per main loop (~60 Hz). Explicitly *not* a level read and *not* debounced: the sensor emits ~1 kHz pulse bursts, and reading it as a stable level is what pinned the owl in DETECTING forever. `vibration.pulses` reports raw edges since boot so a dead sensor is distinguishable from a quiet one. See `specs/007-vibration-and-ota.spec` |
 | **PCA9685 Servo Ctrl** | 🔒 Safety-locked | Firmware 1.3.0 blocks all output writes; plug mapping recorded; safe travel/start positions still require verification (SPEC-016) |
 | **State Machine** | ✅ Complete | 8 states on ESP32 (owns behavior): BOOT/IDLE/DETECTING/INTERACTING/SLEEPING/NAVIGATING/UPDATE/ERROR |
-| **NDJSON Protocol** | ✅ Complete | Telemetry (500ms) + commands (expression/servo/gaze/nav/sleep/wake/blink/heartbeat/update_mode) |
+| **NDJSON Protocol** | ✅ Complete | Telemetry (500ms) + commands (expression/servo/gaze/nav/sleep/wake/blink/react/heartbeat/update_mode) |
 | **Navigation "guide me home"** | ✅ Implemented | Orange Pi computes the compass bearing to a named destination and streams the head aim; ESP32 holds it in the NAVIGATING state (live compass). Start via voice ("Bring mich nach Home") or web UI; exit via spoken keyword, web UI, arrival, or timeout. See `specs/013-navigation.spec`. On-hardware `aim_sign` verification pending (BACKLOG Step 5) |
 | **Face Detection (ESP32)** | ✅ Complete | esp-dl **v3** `HumanFaceDetect` (managed IDF component, *not* the old `HumanFaceDetectMSR01`), OV3660 QVGA RGB565BE, `set_vflip(1)` mandatory, 48-91 ms inference **on core 0** since 2026-08-31 so it no longer stalls the eye render, gaze offsets + state transitions on-device. Hit rate is 100 % at a normal seating distance; it is dominated by face size in frame, and glasses cost about a third of it — see `specs/009-face-detection.spec` |
 | **OTA Update Mode** | ✅ Complete | Orange Pi software command → SoftAP `RobotOwl-Update` + `/update` HTTP page (HTTPUpdateServer); explicit software exit; dual-bank ota_0/ota_1; standalone boot (5s USB wait) |
@@ -585,7 +586,7 @@ python main.py [config.yaml]   # Default config path
 | **Web UI (Orange Pi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and magnetometer calibration state, and a map place-picker for navigation. Page lives in `brain/templates/index.html`; the `/api/telemetry` payload is derived from the parsed telemetry dataclass, so it cannot fall behind the firmware (the SoftAP password is the one field deliberately withheld) |
 | **I2S Audio (Orange Pi)** | ✅ Hardware verified | `owl` card registers on boot; audible WAV and real mic verified. Opt-in `audio.keep_playback_clock` prevents capture becoming silent after playback stops; continuity check passes. See `specs/015-orangepi-audio.spec` for measurements and permissions. |
 | **Speech (Orange Pi)** | ✅ Implemented; live speech acceptance pending | German. Mic → RMS VAD gate → whisper.cpp (via the `pywhispercpp` binding, an offline `.bin`/`.gguf` model — no torch/CTranslate2) → keyword clusters / navigation triggers. Gated on awake + face + energy; real playback/tail blocks microphone processing and invalidates stale audio/ASR results. Ambient/TV rejection still needs acceptance. Disabled by default. See `specs/014-speech.spec` |
-| **Orange Pi test suite** | ✅ 251 tests | Runs on a plain dev machine with no Orange Pi, mic, PortAudio, whisper.cpp, llama.cpp, Flask or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔Orange Pi wire contract (48, `test_protocol.py`) and firmware-vs-Orange Pi drift guards (11, `test_expressions.py`) |
+| **Orange Pi test suite** | ✅ 258 tests | Runs on a plain dev machine with no Orange Pi, mic, PortAudio, whisper.cpp, llama.cpp, Flask or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔Orange Pi wire contract (48, `test_protocol.py`) and firmware-vs-Orange Pi drift guards (11, `test_expressions.py`) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
 
 ---

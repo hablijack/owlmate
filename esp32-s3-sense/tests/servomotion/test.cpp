@@ -228,6 +228,80 @@ int main() {
         assert(glances >= 10 && glances <= 70 && maxHead <= 22.0f + 0.01f);
         assert(ruffles >= 3 && ruffles <= 30);   // 10 min, one per 30-70 s (two beats count once per start)
     }
+    {   // gestures: startle overlays the mode, ends by itself, cooldown, never in REST, never touches the head
+        OwlChoreo c(CFG, rng); ChoreoOut o;
+        uint32_t tt = 100000;
+        c.update(tt, OM_IDLE, false, 0, o);
+        assert(std::fabs(o.earL - 50.0f) < 0.01f && o.wingL == 0.0f);
+        assert(c.trigger(OG_STARTLE, tt));
+        assert(!c.trigger(OG_STARTLE, tt + 10));                 // already running
+        c.update(tt + 100, OM_IDLE, false, 0, o);
+        assert(o.earL == 100.0f && o.earR == 100.0f && o.wingL == 100.0f && o.wingR == 100.0f);
+        const float head = o.head; assert(o.headValid);
+        c.update(tt + 500, OM_IDLE, false, 0, o);
+        assert(o.earL == 100.0f && o.wingL == 0.0f);             // between the two flaps, ears still up
+        c.update(tt + 900, OM_IDLE, false, 0, o);
+        assert(o.wingL == 100.0f);                               // second flap
+        c.update(tt + 1400, OM_IDLE, false, 0, o);
+        assert(c.gesture() == OG_NONE && std::fabs(o.earL - 50.0f) < 0.01f && o.head == head);
+        assert(!c.trigger(OG_STARTLE, tt + 2000));               // cooldown (4 s from the start)
+        assert(c.trigger(OG_STARTLE, tt + 4001));
+        c.update(tt + 4100, OM_ENGAGED, true, 0, o);             // also over a running mode
+        assert(o.earL == 100.0f);
+        OwlChoreo r(CFG, rng);
+        r.update(tt, OM_REST, false, 0, o);
+        assert(r.trigger(OG_STARTLE, tt));
+        r.update(tt + 100, OM_REST, false, 0, o);
+        assert(o.earL == 5.0f && o.wingL == 0.0f);               // asleep: no gesture
+        OwlChoreo n(CFG, rng);
+        n.update(tt, OM_NAV, false, 0, o);
+        assert(n.trigger(OG_STARTLE, tt));
+        n.update(tt + 100, OM_NAV, false, 0, o);
+        assert(!o.headValid);                                    // the navigation keeps the head
+    }
+    {   // speech gestures: happy wiggles the ears, negative shakes the head, curious tilts it; all end by themselves
+        OwlChoreo c(CFG, rng); ChoreoOut o; uint32_t tt = 200000;
+        c.update(tt, OM_IDLE, false, 0, o);
+        assert(c.trigger(OG_HAPPY, tt));
+        c.update(tt + 100, OM_IDLE, false, 0, o);
+        assert(o.earL == 100.0f && o.earR == 30.0f && o.wingL == 100.0f && o.head == 0.0f);
+        c.update(tt + 450, OM_IDLE, false, 0, o);
+        assert(o.earL == 30.0f && o.earR == 100.0f && o.wingL == 0.0f);  // ears swapped, first flap done
+        c.update(tt + 1800, OM_IDLE, false, 0, o);
+        assert(c.gesture() == OG_NONE && std::fabs(o.earL - 50.0f) < 0.01f);
+
+        tt += 10000;
+        c.update(tt, OM_ENGAGED, false, 0, o);
+        assert(c.trigger(OG_NEGATIVE, tt));
+        float lo = 0, hi = 0; int reversals = 0, lastSign = 0;
+        for (uint32_t k = 20; k < 1500; k += 20) {
+            c.update(tt + k, OM_ENGAGED, false, 0, o);
+            assert(o.earL == 0.0f && o.earR == 0.0f && o.headValid);
+            lo = std::fmin(lo, o.head); hi = std::fmax(hi, o.head);
+            const int sg = o.head > 1 ? 1 : (o.head < -1 ? -1 : 0);
+            if (sg && lastSign && sg != lastSign) reversals++;
+            if (sg) lastSign = sg;
+        }
+        assert(lo == -18.0f && hi == 18.0f && reversals == 2);          // + - + : a real shake, bounded
+        c.update(tt + 1900, OM_ENGAGED, false, 0, o);
+        assert(c.gesture() == OG_NONE && o.head == 0.0f);
+
+        tt += 10000;
+        c.update(tt, OM_ALERT, false, 0, o);
+        assert(c.trigger(OG_CURIOUS, tt));
+        c.update(tt + 600, OM_ALERT, false, 0, o);
+        assert(std::fabs(std::fabs(o.head) - 24.0f) < 0.01f);
+        const bool left = o.head > 0;                                  // tilted left: the left ear goes up
+        assert(left ? (o.earL == 100.0f && o.earR == 35.0f) : (o.earR == 100.0f && o.earL == 35.0f));
+        c.update(tt + 2300, OM_ALERT, false, 0, o);
+        assert(c.gesture() == OG_NONE && o.head == 0.0f);
+
+        tt += 10000;                                                   // head belongs to the navigation: no offset
+        c.update(tt, OM_NAV, false, 0, o);
+        assert(c.trigger(OG_NEGATIVE, tt));
+        c.update(tt + 200, OM_NAV, false, 0, o);
+        assert(!o.headValid && o.head == 0.0f);
+    }
     {   // tracking: sign, deadband, limit, stuck guard, greeting, NAV, REST
         OwlChoreo c(CFG, rng); ChoreoOut o;
         uint32_t tt = 0;

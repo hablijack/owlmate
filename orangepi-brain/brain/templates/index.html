@@ -3,44 +3,136 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Robot Owl - Control</title>
+<title>Robot Owl - Mission Control</title>
 <style>
-  :root { --bg:#111418; --card:#1c2128; --fg:#e6edf3; --accent:#57ab5a; --muted:#8b949e; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--fg); }
-  header { padding:16px 20px; background:var(--card); display:flex; justify-content:space-between; align-items:center; }
-  header h1 { font-size:18px; margin:0; }
-  .status { font-size:13px; color:var(--muted); }
-  .status b { color:var(--fg); }
-  main { padding:20px; max-width:720px; margin:0 auto; display:grid; gap:16px; }
-  .card { background:var(--card); border-radius:12px; padding:16px; }
-  .card h2 { font-size:14px; margin:0 0 12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); gap:10px; }
-  button { cursor:pointer; border:none; border-radius:10px; padding:12px; font-size:15px; background:#2a313b; color:var(--fg); }
-  button:hover { background:#333c0164; }
-  button:active { transform:translateY(1px); }
-  button.primary { background:var(--accent); color:#0b0d0f; font-weight:600; }
-  button.danger { background:#7a2e2e; color:#fff; }
-  button.danger:hover { background:#933939; }
-  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .row select, .row input { padding:10px; border-radius:10px; background:#2a313b; color:var(--fg); border:none; }
-  .duo { display:grid; grid-template-columns:repeat(2, 1fr); gap:16px; }
-  .duo-col { display:grid; grid-template-columns:repeat(3, 64px); gap:8px; justify-content:center; }
-  .duo-col button { width:64px; height:48px; font-size:20px; }
-  .duo-label { text-align:center; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
-  #msg { min-height:18px; font-size:13px; color:var(--muted); }
-  .hint { font-size:12px; color:var(--muted); }
-  .telemetry { font-size:13px; color:var(--muted); line-height:1.7; }
-  .telemetry b { color:var(--fg); }
-  .heard { margin-top:6px; padding-top:6px; border-top:1px solid rgba(128,128,128,.25); }
-  .heard .q { color:var(--fg); font-style:italic; }
-  .heard .ago { color:var(--muted); font-size:12px; }
-  @media (prefers-color-scheme: light) {
-    :root { --bg:#f6f8fa; --card:#ffffff; --fg:#1f2328; --muted:#57606a; }
-    button { background:#e6edf3; color:var(--fg); }
-    button:hover { background:#d0d7de; }
-    button.primary { background:var(--accent); color:#fff; }
+  :root {
+    --bg:#060912; --bg2:#0b1020; --panel:rgba(16,24,44,.72); --line:rgba(120,160,255,.16);
+    --line2:rgba(120,160,255,.32); --fg:#e8eefc; --muted:#7f8db0; --dim:#4c5878;
+    --cyan:#22d3ee; --violet:#a78bfa; --green:#34d399; --amber:#fbbf24; --red:#f43f5e; --orange:#fb923c;
+    --state:#22d3ee;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   }
+  * { box-sizing:border-box; }
+  html { color-scheme:dark; }
+  body { margin:0; font-family:var(--sans); color:var(--fg); min-height:100vh;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(34,211,238,.10), transparent 60%),
+      radial-gradient(900px 500px at -10% 10%, rgba(167,139,250,.10), transparent 60%),
+      linear-gradient(var(--bg), var(--bg2)) fixed; }
+  body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity:.35;
+    background-image:linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size:48px 48px; mask-image:radial-gradient(ellipse at 50% 0%, #000 0%, transparent 70%);
+    -webkit-mask-image:radial-gradient(ellipse at 50% 0%, #000 0%, transparent 70%); }
+  .wrap { position:relative; max-width:1180px; margin:0 auto; padding:18px 16px 60px; }
+
+  /* top bar */
+  .topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 2px 16px; }
+  .brand { display:flex; align-items:center; gap:10px; font-family:var(--mono); letter-spacing:.28em; font-size:12px; color:var(--muted); text-transform:uppercase; }
+  .brand b { color:var(--fg); letter-spacing:.28em; }
+  .brand i { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 10px var(--green); }
+  .link { font-family:var(--mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); display:flex; gap:8px; align-items:center; }
+  .link.off { color:var(--red); }
+  .link.off i { background:var(--red); box-shadow:0 0 10px var(--red); }
+  .link i { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 10px var(--green); display:inline-block; }
+
+  /* hero */
+  .hero { position:relative; display:grid; grid-template-columns:240px 1fr; gap:26px; align-items:center;
+    padding:26px 28px; border-radius:22px; border:1px solid var(--line2);
+    background:linear-gradient(135deg, rgba(20,30,56,.85), rgba(10,16,34,.85));
+    box-shadow:0 0 0 1px rgba(255,255,255,.02) inset, 0 20px 60px rgba(0,0,0,.45), 0 0 80px -20px var(--state);
+    overflow:hidden; transition:box-shadow .6s; }
+  .hero::after { content:""; position:absolute; left:0; right:0; top:0; height:2px;
+    background:linear-gradient(90deg, transparent, var(--state), transparent); opacity:.9; }
+  .eye { width:220px; height:220px; justify-self:center; }
+  .eye .ring { transform-origin:110px 110px; }
+  .eye .r1 { animation:spin 18s linear infinite; }
+  .eye .r2 { animation:spin 28s linear infinite reverse; }
+  .eye .pupil { transition:transform .5s cubic-bezier(.2,.8,.2,1), fill .5s; }
+  .eye .glow { animation:breathe 3.2s ease-in-out infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @keyframes breathe { 0%,100% { opacity:.35; } 50% { opacity:.8; } }
+  .kicker { font-family:var(--mono); font-size:11px; letter-spacing:.3em; color:var(--muted); text-transform:uppercase; }
+  .state { font-size:clamp(34px, 7vw, 74px); font-weight:800; letter-spacing:.06em; line-height:1.02; margin:6px 0 4px;
+    color:var(--state); text-shadow:0 0 28px color-mix(in srgb, var(--state) 55%, transparent); transition:color .5s; }
+  .state-desc { color:var(--muted); font-size:15px; min-height:22px; }
+  .chips { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
+  .chip { min-width:104px; padding:9px 13px; border-radius:12px; border:1px solid var(--line); background:rgba(8,12,26,.55); }
+  .chip small { display:block; font-family:var(--mono); font-size:10px; letter-spacing:.2em; color:var(--muted); text-transform:uppercase; }
+  .chip b { display:block; margin-top:3px; font-family:var(--mono); font-size:17px; font-weight:600; color:var(--fg); white-space:nowrap; }
+  .chip b.ok { color:var(--green); } .chip b.warn { color:var(--amber); } .chip b.bad { color:var(--red); }
+  .heard { margin-top:16px; padding:10px 14px; border-left:2px solid var(--state); background:rgba(8,12,26,.5); border-radius:0 10px 10px 0;
+    font-size:14px; color:var(--muted); display:none; }
+  .heard q { color:var(--fg); font-style:italic; quotes:"\201E" "\201C"; }
+  .heard span { font-family:var(--mono); font-size:11px; margin-left:8px; color:var(--dim); }
+
+  /* sections */
+  h2.sec { display:flex; align-items:center; gap:12px; margin:30px 2px 12px; font-family:var(--mono); font-size:12px; font-weight:500;
+    letter-spacing:.3em; text-transform:uppercase; color:var(--muted); }
+  h2.sec span { color:var(--cyan); }
+  h2.sec::after { content:""; flex:1; height:1px; background:linear-gradient(90deg, var(--line2), transparent); }
+  .panel { position:relative; border-radius:16px; border:1px solid var(--line); background:var(--panel);
+    -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); padding:16px 18px; }
+  .panel h3 { margin:0 0 10px; font-family:var(--mono); font-size:11px; font-weight:500; letter-spacing:.22em; text-transform:uppercase; color:var(--muted); }
+  .grid { display:grid; gap:14px; }
+  .g4 { grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); }
+  .g2 { grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); }
+
+  /* readouts */
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-family:var(--mono); font-size:13px; }
+  .kv dt { color:var(--muted); } .kv dd { margin:0; text-align:right; color:var(--fg); }
+  .kv .ok { color:var(--green); } .kv .warn { color:var(--amber); } .kv .bad { color:var(--red); }
+  .big { font-family:var(--mono); font-size:30px; font-weight:600; letter-spacing:.02em; }
+  .big small { font-size:13px; color:var(--muted); margin-left:4px; }
+  .hint { font-size:12px; color:var(--muted); line-height:1.5; }
+  .gauges { display:grid; gap:9px; }
+  .gauge { display:grid; grid-template-columns:62px 1fr 52px; align-items:center; gap:10px; font-family:var(--mono); font-size:12px; color:var(--muted); }
+  .gauge .bar { position:relative; height:8px; border-radius:6px; background:rgba(120,160,255,.10); overflow:hidden; }
+  .gauge .bar i { position:absolute; top:0; bottom:0; border-radius:6px; background:linear-gradient(90deg, var(--cyan), var(--violet)); transition:left .25s, width .25s; }
+  .gauge b { text-align:right; color:var(--fg); font-weight:500; }
+
+  /* buttons */
+  button { font:inherit; cursor:pointer; color:var(--fg); border:1px solid var(--line2); border-radius:11px; padding:11px 14px;
+    background:rgba(34,211,238,.06); transition:background .15s, border-color .15s, transform .08s, box-shadow .15s; }
+  button:hover:not(:disabled) { background:rgba(34,211,238,.16); border-color:var(--cyan); box-shadow:0 0 18px -4px var(--cyan); }
+  button:active:not(:disabled) { transform:translateY(1px) scale(.99); }
+  button:disabled { opacity:.35; cursor:not-allowed; }
+  button.primary { background:linear-gradient(135deg, rgba(34,211,238,.35), rgba(167,139,250,.35)); border-color:var(--cyan); font-weight:600; }
+  button.danger { border-color:rgba(244,63,94,.5); background:rgba(244,63,94,.10); }
+  button.danger:hover:not(:disabled) { background:rgba(244,63,94,.24); border-color:var(--red); box-shadow:0 0 18px -4px var(--red); }
+  .btns { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .gesture { flex:1 1 150px; padding:18px 12px; text-align:center; font-size:15px; font-weight:600; letter-spacing:.04em; }
+  .gesture small { display:block; margin-top:5px; font-family:var(--mono); font-size:10px; font-weight:400; letter-spacing:.14em; color:var(--muted); text-transform:uppercase; }
+  .emo { display:grid; grid-template-columns:repeat(auto-fill, minmax(118px, 1fr)); gap:9px; }
+  .emo button { padding:10px 8px; font-size:13px; text-transform:capitalize; position:relative; }
+  .emo button.gest::after { content:"\2726"; position:absolute; top:5px; right:7px; font-size:10px; color:var(--violet); }
+  .emo button.active { border-color:var(--state); background:color-mix(in srgb, var(--state) 22%, transparent); box-shadow:0 0 16px -4px var(--state); }
+  .legend { margin-top:10px; font-size:12px; color:var(--muted); }
+  .legend span { color:var(--violet); }
+  select, input { font:inherit; color:var(--fg); background:rgba(8,12,26,.7); border:1px solid var(--line2); border-radius:10px; padding:10px 12px; }
+  input:focus, select:focus { outline:none; border-color:var(--cyan); }
+  label { display:flex; flex-direction:column; gap:5px; font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--muted); }
+  .pad { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; }
+  .pad .lbl { grid-column:1/-1; font-family:var(--mono); font-size:10px; letter-spacing:.2em; color:var(--muted); text-transform:uppercase; }
+  .place { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); }
+  .place:last-child { border-bottom:none; }
+  .place .grow { flex:1; }
+  .place .hint { margin-left:8px; font-family:var(--mono); }
+  #toast { position:fixed; left:50%; bottom:22px; transform:translate(-50%, 20px); opacity:0; pointer-events:none;
+    padding:11px 18px; border-radius:12px; border:1px solid var(--line2); background:rgba(10,16,34,.95); font-family:var(--mono); font-size:13px;
+    transition:opacity .25s, transform .25s; z-index:80; box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  #toast.show { opacity:1; transform:translate(-50%, 0); }
+  .safety { display:inline-block; padding:3px 10px; border-radius:20px; font-family:var(--mono); font-size:11px; letter-spacing:.14em; border:1px solid var(--line2); }
+  .safety.on { color:var(--green); border-color:rgba(52,211,153,.5); }
+  .safety.lock { color:var(--amber); border-color:rgba(251,191,36,.5); }
+
+  @media (max-width:760px) {
+    .hero { grid-template-columns:1fr; padding:22px 18px; text-align:center; gap:14px; }
+    .eye { width:170px; height:170px; }
+    .chips { justify-content:center; }
+    .heard { text-align:left; }
+  }
+  @media (prefers-reduced-motion:reduce) { .eye .ring, .eye .glow { animation:none; } }
 </style>
 <!-- Leaflet (OpenStreetMap) for the "Pick on map" place picker. Loaded by the
      BROWSER (not the OrangePi): the OrangePi needs no internet and no API key. SRI
@@ -61,23 +153,120 @@
         integrity="sha256-20nQC2B90hWBXoPa43Lkn+Jj4eV4YVbHsRQs2cVJtYk=" crossorigin=""></script>
 </head>
 <body>
-<header>
-  <h1>🦉 Robot Owl</h1>
-  <div class="status">state <b id="state">-</b> &middot; fw <b id="fw">-</b></div>
-</header>
-<main>
-  <div class="card">
-    <h2>Live status</h2>
-    <div class="telemetry" id="telemetry">waiting for telemetry&hellip;</div>
-    <div class="heard" id="heard" style="display:none;"></div>
-    <div id="msg"></div>
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="brand"><i></i><b>Robot Owl</b> &middot; Mission Control</div>
+    <div class="link" id="link"><i></i><span id="link-txt">connecting</span></div>
   </div>
 
-  <div class="card">
-    <h2>Eyes</h2>
-    <div class="row">
-      <button class="primary" data-act="blink">Blink once</button>
-      <select id="blink-speed">
+  <!-- ===== LIVE STATE ===== -->
+  <section class="hero" id="hero">
+    <svg class="eye" viewBox="0 0 220 220" aria-hidden="true">
+      <defs>
+        <radialGradient id="iris" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="var(--state)" stop-opacity=".95"/>
+          <stop offset="70%" stop-color="var(--state)" stop-opacity=".25"/>
+          <stop offset="100%" stop-color="var(--state)" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <circle class="glow" cx="110" cy="110" r="104" fill="url(#iris)"/>
+      <g class="ring r1"><circle cx="110" cy="110" r="96" fill="none" stroke="var(--state)" stroke-opacity=".7" stroke-width="1.5" stroke-dasharray="3 9"/></g>
+      <g class="ring r2"><circle cx="110" cy="110" r="82" fill="none" stroke="var(--violet)" stroke-opacity=".6" stroke-width="1.5" stroke-dasharray="40 14 4 14"/></g>
+      <circle cx="110" cy="110" r="64" fill="rgba(6,9,18,.85)" stroke="var(--state)" stroke-opacity=".8" stroke-width="2"/>
+      <g class="pupil" id="pupil" style="transform:translate(0,0)">
+        <circle cx="110" cy="110" r="30" fill="var(--state)" fill-opacity=".9"/>
+        <circle cx="110" cy="110" r="14" fill="#04060c"/>
+        <circle cx="101" cy="101" r="5" fill="#fff" fill-opacity=".85"/>
+      </g>
+    </svg>
+    <div>
+      <div class="kicker">Current mode</div>
+      <div class="state" id="state">&ndash;</div>
+      <div class="state-desc" id="state-desc">waiting for telemetry&hellip;</div>
+      <div class="chips">
+        <div class="chip"><small>Eyes</small><b id="c-eye">&ndash;</b></div>
+        <div class="chip"><small>Face</small><b id="c-face">&ndash;</b></div>
+        <div class="chip"><small>Loop</small><b id="c-hz">&ndash;</b></div>
+        <div class="chip"><small>Uptime</small><b id="c-up">&ndash;</b></div>
+        <div class="chip"><small>Firmware</small><b id="c-fw">&ndash;</b></div>
+        <div class="chip"><small>Servos</small><b id="c-servo">&ndash;</b></div>
+      </div>
+      <div class="heard" id="heard"></div>
+    </div>
+  </section>
+
+  <!-- ===== SENSORS ===== -->
+  <h2 class="sec"><span>01</span> Sensors</h2>
+  <div class="grid g4">
+    <div class="panel">
+      <h3>Vision</h3>
+      <div class="big" id="v-conf">&ndash;</div>
+      <dl class="kv" style="margin-top:10px">
+        <dt>detected</dt><dd id="v-det">&ndash;</dd>
+        <dt>gaze x / y</dt><dd id="v-gaze">&ndash;</dd>
+        <dt>faces seen</dt><dd id="v-total">&ndash;</dd>
+        <dt>inference</dt><dd id="v-infer">&ndash;</dd>
+      </dl>
+    </div>
+    <div class="panel">
+      <h3>Orientation (IMU)</h3>
+      <div class="big" id="i-yaw">&ndash;</div>
+      <dl class="kv" style="margin-top:10px">
+        <dt>roll / pitch</dt><dd id="i-rp">&ndash;</dd>
+        <dt>compass</dt><dd id="i-cal">&ndash;</dd>
+        <dt>mag axes</dt><dd id="i-axes">&ndash;</dd>
+      </dl>
+    </div>
+    <div class="panel">
+      <h3>Position (GPS)</h3>
+      <div class="big" id="g-fix">&ndash;</div>
+      <dl class="kv" style="margin-top:10px">
+        <dt>latitude</dt><dd id="g-lat">&ndash;</dd>
+        <dt>longitude</dt><dd id="g-lon">&ndash;</dd>
+        <dt>satellites</dt><dd id="g-sat">&ndash;</dd>
+      </dl>
+    </div>
+    <div class="panel">
+      <h3>Touch (vibration)</h3>
+      <div class="big" id="t-det">&ndash;</div>
+      <dl class="kv" style="margin-top:10px">
+        <dt>taps</dt><dd id="t-count">&ndash;</dd>
+        <dt>edges since boot</dt><dd id="t-pulses">&ndash;</dd>
+      </dl>
+    </div>
+  </div>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="panel">
+      <h3>Servos <span class="safety lock" id="safety" style="margin-left:8px">LOCKED</span></h3>
+      <div class="gauges" id="gauges"></div>
+      <p class="hint" id="servo-safety" style="margin:10px 0 0">Servo safety not confirmed; motion controls locked.</p>
+    </div>
+    <div class="panel">
+      <h3>Navigation</h3>
+      <div class="big" id="n-state">&ndash;</div>
+      <div id="nav-status" class="hint" style="margin-top:8px">&nbsp;</div>
+    </div>
+  </div>
+
+  <!-- ===== EMOTIONS ===== -->
+  <h2 class="sec"><span>02</span> Gestures &amp; emotions</h2>
+  <div class="panel">
+    <h3>Body gestures &middot; eyes, ears, wings and head together</h3>
+    <div class="btns">
+      <button class="gesture" data-act="react" data-name="startle">Startle<small>knock reaction</small></button>
+      <button class="gesture" data-act="react" data-name="happy">Happy<small>praise</small></button>
+      <button class="gesture" data-act="react" data-name="negative">Negative<small>refusal</small></button>
+      <button class="gesture" data-act="react" data-name="curious">Curious<small>question</small></button>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:14px">
+    <h3>Expressions</h3>
+    <div class="emo" id="expressions"></div>
+    <div class="legend"><span>&#10022;</span> plays the full gesture (body + eyes); the others change the eyes only.</div>
+    <div class="btns" style="margin-top:14px">
+      <button class="primary" data-act="blink">Blink</button>
+      <select id="blink-speed" aria-label="blink speed">
         <option value="1">fast</option>
         <option value="2">medium</option>
         <option value="3" selected>normal</option>
@@ -87,115 +276,114 @@
     </div>
   </div>
 
-  <div class="card">
-    <h2>Expression</h2>
-    <div class="grid" id="expressions"></div>
+  <!-- ===== VOICE ===== -->
+  <h2 class="sec"><span>03</span> Voice &amp; sounds</h2>
+  <div class="panel">
+    <h3>Owl calls (amp on the Orange Pi)</h3>
+    <div class="emo" id="sounds"></div>
   </div>
 
-  <div class="card">
-    <h2>Sounds</h2>
-    <div class="grid" id="sounds"></div>
-  </div>
-
-  <div class="card">
-    <h2>Head</h2>
-    <p id="servo-safety" class="hint">Servo safety not confirmed; motion controls locked.</p>
-    <div class="row" style="justify-content:center; gap:12px;">
-      <button data-act="head" data-v="left">&#9664; Left</button>
-      <button data-act="head" data-v="center">Center</button>
-      <button data-act="head" data-v="right">Right &#9654;</button>
+  <!-- ===== MOTION ===== -->
+  <h2 class="sec"><span>04</span> Manual motion</h2>
+  <div class="grid g2">
+    <div class="panel">
+      <h3>Head</h3>
+      <div class="pad">
+        <button data-act="head" data-v="left">&#9664; Left</button>
+        <button data-act="head" data-v="center">Center</button>
+        <button data-act="head" data-v="right">Right &#9654;</button>
+      </div>
+      <p class="hint" style="margin:10px 0 0">In the main image the servos follow the owl's own choreography; direct commands are refused there (<code>servo_autonomous</code>).</p>
     </div>
-  </div>
-
-  <div class="card">
-    <h2>Ears</h2>
-    <div class="duo">
-      <div class="duo-col">
-        <div class="duo-label">Left</div>
-        <button data-act="ear" data-side="left" data-v="up">&#9650;</button>
-        <button data-act="ear" data-side="left" data-v="down">&#9660;</button>
-        <button data-act="ear" data-side="left" data-v="center">&#9673;</button>
-      </div>
-      <div class="duo-col">
-        <div class="duo-label">Right</div>
-        <button data-act="ear" data-side="right" data-v="up">&#9650;</button>
-        <button data-act="ear" data-side="right" data-v="down">&#9660;</button>
-        <button data-act="ear" data-side="right" data-v="center">&#9673;</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Wings</h2>
-    <div class="duo">
-      <div class="duo-col">
-        <div class="duo-label">Left</div>
-        <button data-act="wing" data-side="left" data-v="up">&#9650;</button>
-        <button data-act="wing" data-side="left" data-v="down">&#9660;</button>
-        <button data-act="wing" data-side="left" data-v="center">&#9673;</button>
-      </div>
-      <div class="duo-col">
-        <div class="duo-label">Right</div>
-        <button data-act="wing" data-side="right" data-v="up">&#9650;</button>
-        <button data-act="wing" data-side="right" data-v="down">&#9660;</button>
-        <button data-act="wing" data-side="right" data-v="center">&#9673;</button>
+    <div class="panel">
+      <h3>Ears &amp; wings</h3>
+      <div class="grid" style="grid-template-columns:1fr 1fr; gap:12px">
+        <div class="pad"><div class="lbl">Left ear</div>
+          <button data-act="ear" data-side="left" data-v="up">&#9650;</button>
+          <button data-act="ear" data-side="left" data-v="center">&#9673;</button>
+          <button data-act="ear" data-side="left" data-v="down">&#9660;</button></div>
+        <div class="pad"><div class="lbl">Right ear</div>
+          <button data-act="ear" data-side="right" data-v="up">&#9650;</button>
+          <button data-act="ear" data-side="right" data-v="center">&#9673;</button>
+          <button data-act="ear" data-side="right" data-v="down">&#9660;</button></div>
+        <div class="pad"><div class="lbl">Left wing</div>
+          <button data-act="wing" data-side="left" data-v="up">&#9650;</button>
+          <button data-act="wing" data-side="left" data-v="center">&#9673;</button>
+          <button data-act="wing" data-side="left" data-v="down">&#9660;</button></div>
+        <div class="pad"><div class="lbl">Right wing</div>
+          <button data-act="wing" data-side="right" data-v="up">&#9650;</button>
+          <button data-act="wing" data-side="right" data-v="center">&#9673;</button>
+          <button data-act="wing" data-side="right" data-v="down">&#9660;</button></div>
       </div>
     </div>
   </div>
 
-  <div class="card">
-    <h2>XIAO Firmware Update</h2>
-    <p class="hint">Enter update mode to start the XIAO's isolated Wi-Fi access point.
-      Then connect to RobotOwl-Update and open http://192.168.4.1/update to upload
-      firmware.bin. Credentials are in the supervisor log. This does not upload
-      firmware automatically. Tapping or walking will not enter or exit this mode.</p>
-    <div class="row">
-      <button data-act="update-mode" data-active="true" class="danger">Enter update mode</button>
-      <button data-act="update-mode" data-active="false">Exit update mode</button>
-    </div>
-    <p class="hint" id="update-status">Waiting for telemetry.</p>
-  </div>
-
-  <div class="card" id="nav-card">
-    <h2>Places &amp; Navigate</h2>
-    <p class="hint">Teach the owl a place (name + coordinates), then press Start &mdash;
+  <!-- ===== NAVIGATION ===== -->
+  <h2 class="sec"><span>05</span> Places &amp; navigation</h2>
+  <div class="panel" id="nav-card">
+    <p class="hint" style="margin-top:0">Teach the owl a place (name + coordinates), then press Start &mdash;
     its head turns to point at that place, and keeps re-aiming as you walk. Say
     <i>&quot;bring mich nach &lt;name&gt;&quot;</i> (or press Stop) to end.</p>
-    <div class="row" style="gap:8px; align-items:flex-end;">
+    <div class="btns" style="align-items:flex-end">
       <label>Name <input id="place-name" placeholder="e.g. hotel"></label>
-      <label>Lat <input id="place-lat" type="number" step="any" style="width:110px"></label>
-      <label>Lon <input id="place-lon" type="number" step="any" style="width:110px"></label>
+      <label>Lat <input id="place-lat" type="number" step="any" style="width:120px"></label>
+      <label>Lon <input id="place-lon" type="number" step="any" style="width:120px"></label>
       <button data-act="pick-map">Pick on map</button>
       <button data-act="add-place">Add place</button>
     </div>
-    <div id="places"></div>
-    <div class="row" style="gap:8px; margin-top:10px;">
+    <div id="places" style="margin-top:12px"></div>
+    <div class="btns" style="margin-top:12px">
       <select id="nav-target" style="flex:1; min-width:160px;"></select>
       <button data-act="nav-start" class="primary">Start</button>
       <button data-act="nav-stop" class="danger">Stop</button>
     </div>
-    <div id="nav-status" class="hint" style="margin-top:8px;"></div>
   </div>
 
   <!-- OpenStreetMap map (Leaflet) for picking a place's coordinates. Tiles are
        loaded by the BROWSER viewing this page (not the OrangePi), so the OrangePi needs
        no internet / no API key. If the viewer is offline the map is blank and
        you fall back to typing lat/lon. -->
-  <div id="map-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:50; align-items:center; justify-content:center;">
-    <div style="background:#fff; border-radius:12px; padding:12px; width:min(720px,95vw); height:min(520px,90vh); display:flex; flex-direction:column; gap:8px;">
+  <div id="map-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:90; align-items:center; justify-content:center;">
+    <div style="background:#0b1020; border:1px solid var(--line2); border-radius:16px; padding:14px; width:min(720px,95vw); height:min(520px,90vh); display:flex; flex-direction:column; gap:10px;">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <b>Pick a location</b>
-        <button id="map-close" style="cursor:pointer;">&times;</button>
+        <button id="map-close">&times;</button>
       </div>
-      <div id="map" style="flex:1; border-radius:8px; background:#dfe6ee;"></div>
-      <div class="row" style="gap:8px; justify-content:flex-end;">
+      <div id="map" style="flex:1; border-radius:10px; background:#18233c;"></div>
+      <div class="btns" style="justify-content:flex-end">
         <span id="map-coords" class="hint">Click the map (or drag the marker) to set the coordinate.</span>
         <button id="map-cancel">Cancel</button>
         <button id="map-apply" class="primary">Use this location</button>
       </div>
     </div>
   </div>
-</main>
+
+  <!-- ===== SYSTEM ===== -->
+  <h2 class="sec"><span>06</span> System</h2>
+  <div class="grid g2">
+    <div class="panel">
+      <h3>Power</h3>
+      <div class="btns">
+        <button data-act="sleep">Send to sleep</button>
+        <button data-act="wake" class="primary">Wake up</button>
+      </div>
+      <p class="hint" style="margin:10px 0 0">Sleep is policy from the brain; knocks and faces wake the owl on their own.</p>
+    </div>
+    <div class="panel">
+      <h3>XIAO firmware update</h3>
+      <p class="hint" style="margin-top:0">Enter update mode to start the XIAO's isolated Wi-Fi access point.
+        Then connect to RobotOwl-Update and open http://192.168.4.1/update to upload
+        firmware.bin. Credentials are in the supervisor log. This does not upload
+        firmware automatically. Tapping or walking will not enter or exit this mode.</p>
+      <div class="btns">
+        <button data-act="update-mode" data-active="true" class="danger">Enter update mode</button>
+        <button data-act="update-mode" data-active="false">Exit update mode</button>
+      </div>
+      <p class="hint" id="update-status" style="margin:10px 0 0">Waiting for telemetry.</p>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
 
 <script>
   // Navigation UI: manage saved places, pick one on an OpenStreetMap map, and
@@ -251,8 +439,8 @@
         if (!d.locations.length) { list.innerHTML = '<span class="hint">No places yet &mdash; add one above.</span>'; return; }
         d.locations.forEach(function(loc) {
           var row = document.createElement('div');
-          row.className = 'row'; row.style.gap = '8px'; row.style.alignItems = 'center';
-          row.innerHTML = '<span style="flex:1">' + escapeHtml(loc.name) +
+          row.className = 'place';
+          row.innerHTML = '<span class="grow">' + escapeHtml(loc.name) +
             ' <span class="hint">' + loc.lat.toFixed(5) + ', ' + loc.lon.toFixed(5) + '</span></span>';
           var del = document.createElement('button');
           del.textContent = 'Remove'; del.className = 'danger';
@@ -267,17 +455,18 @@
     }
     function renderNavStatus(t) {
       var el = document.getElementById('nav-status');
+      var big = document.getElementById('n-state');
       var n = t.navigation;
-      if (!n) { el.textContent = ''; return; }
+      if (!n) { el.textContent = 'Navigation is disabled in config.'; big.textContent = 'off'; big.style.color = ''; return; }
       if (n.active) {
-        el.innerHTML = 'Pointing at <b>' + (n.target||'?') + '</b> &middot; bearing ' +
+        big.textContent = 'active'; big.style.color = '#fbbf24';
+        el.innerHTML = 'Pointing at <b>' + escapeHtml(n.target||'?') + '</b> &middot; bearing ' +
           (n.bearing!=null? n.bearing.toFixed(0)+'&deg;':'&ndash;') + ' &middot; ' +
           (n.distance_m!=null? n.distance_m.toFixed(0)+' m':'&ndash;') +
           ' &middot; head ' + (n.aim!=null? n.aim.toFixed(0)+'&deg;':'&ndash;');
-        el.style.color = '#c9a227';
       } else {
+        big.textContent = 'standby'; big.style.color = '';
         el.textContent = 'Not navigating.';
-        el.style.color = '';
       }
     }
     // Wire the buttons (id- and data-act based).
@@ -315,18 +504,33 @@
       bind();
     }
   })();
+
 const $ = (s) => document.querySelector(s);
 const exprs = {{ expressions | tojson }};
 const sounds = {{ sounds | tojson }};
 const soundLabels = {{ sound_labels | tojson }};
+const exprGestures = {{ expression_gestures | tojson }};
 
-// Build expression buttons.
+// What each firmware state means, and the colour the page takes on for it.
+const STATES = {
+  boot:        ['#8ea0c8', 'Starting up'],
+  idle:        ['#22d3ee', 'Awake, nobody in view'],
+  detecting:   ['#fbbf24', 'Something moved: looking for a face'],
+  interacting: ['#34d399', 'Face found: following and engaging'],
+  sleeping:    ['#818cf8', 'Asleep: eyes closed, ears down'],
+  navigating:  ['#a78bfa', 'Head is pointing at a destination'],
+  update:      ['#fb923c', 'Firmware update mode: Wi-Fi access point is up'],
+  error:       ['#f43f5e', 'Error state'],
+};
+
+// Build expression buttons; those with a body gesture are marked.
 const expWrap = $('#expressions');
 for (const e of exprs) {
   const b = document.createElement('button');
-  b.textContent = e[0].toUpperCase() + e.slice(1);
+  b.textContent = e.replace(/_/g, ' ');
   b.dataset.act = 'expression';
   b.dataset.value = e;
+  if (exprGestures[e]) { b.classList.add('gest'); b.title = 'plays the ' + exprGestures[e] + ' gesture'; }
   expWrap.appendChild(b);
 }
 
@@ -340,6 +544,34 @@ for (const s of sounds) {
   sndWrap.appendChild(b);
 }
 
+// Servo gauges: ears and wings are 0..100 profile units, the head is in degrees.
+const GAUGES = [['L ear', 0, 0, 100, '%'], ['R ear', 1, 0, 100, '%'], ['Head', 2, -60, 60, '°'],
+                ['L wing', 3, 0, 100, '%'], ['R wing', 4, 0, 100, '%']];
+const gaugeWrap = $('#gauges');
+for (const g of GAUGES) {
+  const row = document.createElement('div');
+  row.className = 'gauge';
+  row.innerHTML = '<span>' + g[0] + '</span><div class="bar"><i id="gb' + g[1] + '"></i></div><b id="gv' + g[1] + '">&ndash;</b>';
+  gaugeWrap.appendChild(row);
+}
+function setGauges(s) {
+  for (const g of GAUGES) {
+    const v = Number(s[g[1]] || 0);
+    const span = g[3] - g[2];
+    const frac = Math.max(0, Math.min(1, (v - g[2]) / span));
+    const bar = $('#gb' + g[1]);
+    if (g[2] < 0) {            // centred scale (head): bar grows from the middle
+      const mid = (0 - g[2]) / span;
+      bar.style.left = Math.min(mid, frac) * 100 + '%';
+      bar.style.width = Math.abs(frac - mid) * 100 + '%';
+    } else {
+      bar.style.left = '0%';
+      bar.style.width = frac * 100 + '%';
+    }
+    $('#gv' + g[1]).textContent = v.toFixed(0) + g[4];
+  }
+}
+
 function post(path, body) {
   return fetch(path, {
     method: 'POST',
@@ -348,44 +580,65 @@ function post(path, body) {
   }).then(r => r.json());
 }
 
-function flash(text) { $('#msg').textContent = text; }
+let toastTimer = null;
+function flash(text) {
+  const el = $('#toast');
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
 
 document.querySelectorAll('button[data-act]').forEach(btn => {
   btn.addEventListener('click', async () => {
     const act = btn.dataset.act;
-    if (act === 'update-mode') {
-      const active = btn.dataset.active === 'true';
-      if (active && !confirm('Enter firmware update mode? Normal owl behavior will pause.')) return;
-      try {
+    try {
+      if (act === 'update-mode') {
+        const active = btn.dataset.active === 'true';
+        if (active && !confirm('Enter firmware update mode? Normal owl behavior will pause.')) return;
         const r = await post('/api/update-mode', { active });
-        flash(r.ok ? 'Update-mode request sent; check live state for confirmation.' : 'Could not send update-mode request.');
-      } catch (e) {
-        flash('Could not reach the Orange Pi.');
+        flash(r.ok ? 'Update-mode request sent; check the mode display for confirmation.' : 'Could not send update-mode request.');
+      } else if (act === 'react') {
+        await post('/api/react', { name: btn.dataset.name });
+        flash('Gesture: ' + btn.dataset.name);
+      } else if (act === 'blink') {
+        await post('/api/blink', { speed: parseInt($('#blink-speed').value, 10) });
+        flash('Blink');
+      } else if (act === 'expression') {
+        const r = await post('/api/expression', { value: btn.dataset.value });
+        flash('Expression: ' + btn.dataset.value + (r.gesture ? ' + ' + r.gesture + ' gesture' : ''));
+      } else if (act === 'sound') {
+        const r = await post('/api/sound', { value: btn.dataset.value });
+        flash('Sound "' + btn.dataset.value + '"' + (r.ok ? ' played' : ' (audio unavailable)'));
+      } else if (act === 'head') {
+        await post('/api/head', { direction: btn.dataset.v });
+        flash('Head ' + btn.dataset.v);
+      } else if (act === 'ear') {
+        await post('/api/ear', { side: btn.dataset.side, direction: btn.dataset.v });
+        flash(btn.dataset.side + ' ear ' + btn.dataset.v);
+      } else if (act === 'wing') {
+        await post('/api/wing', { side: btn.dataset.side, direction: btn.dataset.v });
+        flash(btn.dataset.side + ' wing ' + btn.dataset.v);
+      } else if (act === 'sleep') {
+        const r = await post('/api/sleep', {});
+        flash(r.ok ? 'Going to sleep' : 'Could not send sleep');
+      } else if (act === 'wake') {
+        const r = await post('/api/wake', {});
+        flash(r.ok ? 'Waking up' : 'Could not send wake');
       }
-    } else if (act === 'blink') {
-      await post('/api/blink', { speed: parseInt($('#blink-speed').value, 10) });
-      flash('Blink sent.');
-    } else if (act === 'expression') {
-      await post('/api/expression', { value: btn.dataset.value });
-      flash('Expression: ' + btn.dataset.value);
-    } else if (act === 'sound') {
-      const r = await post('/api/sound', { value: btn.dataset.value });
-      flash('Sound "' + btn.dataset.value + '"' + (r.ok ? ' played.' : ' (audio unavailable)'));
-    } else if (act === 'head') {
-      await post('/api/head', { direction: btn.dataset.v });
-      flash('Head ' + btn.dataset.v + '.');
-    } else if (act === 'ear') {
-      await post('/api/ear', { side: btn.dataset.side, direction: btn.dataset.v });
-      flash(btn.dataset.side + ' ear ' + btn.dataset.v + '.');
-    } else if (act === 'wing') {
-      await post('/api/wing', { side: btn.dataset.side, direction: btn.dataset.v });
-      flash(btn.dataset.side + ' wing ' + btn.dataset.v + '.');
+    } catch (e) {
+      flash('Could not reach the Orange Pi.');
     }
   });
 });
 
-// Poll live telemetry.
-const servoNames = ['L-ear','R-ear','head','L-wing','R-wing'];
+function fmtUp(ms) {
+  const s = Math.floor((ms || 0) / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? h + 'h ' + String(m).padStart(2, '0') + 'm' : (m ? m + 'm ' + String(s % 60).padStart(2, '0') + 's' : s + 's');
+}
+function setCls(el, cls, text) { el.className = cls || ''; el.textContent = text; }
+
 // Render the "last heard" line. t.last_heard is present only when speech
 // recognition is enabled; otherwise the element stays hidden.
 function renderHeard(t) {
@@ -393,67 +646,124 @@ function renderHeard(t) {
   const lh = t.last_heard;
   if (!lh || !lh.text) { el.style.display = 'none'; return; }
   const secs = lh.at ? Math.max(0, Math.round((Date.now() / 1000) - lh.at)) : null;
-  const ago = secs === null ? '' : ` &middot; <span class="ago">${secs}s ago</span>`;
-  el.innerHTML = `heard <span class="q">&ldquo;${lh.text}&rdquo;</span>${ago}`;
+  el.textContent = '';
+  const q = document.createElement('q');
+  q.textContent = lh.text;
+  el.appendChild(document.createTextNode('heard '));
+  el.appendChild(q);
+  if (secs !== null) {
+    const sp = document.createElement('span');
+    sp.textContent = secs + 's ago';
+    el.appendChild(sp);
+  }
   el.style.display = 'block';
 }
+
+function setLink(ok, text) {
+  $('#link').className = 'link' + (ok ? '' : ' off');
+  $('#link-txt').textContent = text;
+}
+
 async function poll() {
   try {
     const t = await (await fetch('/api/telemetry')).json();
-    $('#update-status').textContent = t.state === 'update'
-      ? 'Update mode active. Upload firmware via the XIAO Wi-Fi page, or press Exit update mode.'
-      : (t.state ? 'Update mode inactive (state: ' + t.state + ').' : 'No telemetry available.');
-    const servoLocked = !t || !t.servo_safety || t.servo_safety.locked !== false;
+    if (!t || !t.state) {
+      setLink(false, 'no telemetry');
+      $('#state').textContent = 'NO LINK';
+      document.documentElement.style.setProperty('--state', '#f43f5e');
+      $('#state-desc').textContent = 'The brain is up, but the owl is not sending telemetry.';
+      return;
+    }
+    setLink(true, 'live');
+    const st = STATES[t.state] || ['#22d3ee', t.state];
+    document.documentElement.style.setProperty('--state', st[0]);
+    $('#state').textContent = t.state.toUpperCase();
+    $('#state-desc').textContent = st[1];
+
+    // chips
+    $('#c-eye').textContent = (t.eye || '-').replace(/_/g, ' ');
+    const faceOn = t.face && t.face.detected;
+    setCls($('#c-face'), faceOn ? 'ok' : '', faceOn ? 'yes' : 'no');
+    const hz = Number(t.loop_hz || 0);
+    setCls($('#c-hz'), hz >= 20 ? 'ok' : (hz >= 10 ? 'warn' : 'bad'), hz.toFixed(0) + ' Hz');
+    $('#c-up').textContent = fmtUp(t.uptime);
+    $('#c-fw').textContent = t.firmware || '?';
+
+    // servo safety
+    const servoLocked = !t.servo_safety || t.servo_safety.locked !== false;
+    setCls($('#c-servo'), servoLocked ? 'warn' : 'ok', servoLocked ? 'locked' : 'active');
+    const sf = $('#safety');
+    sf.className = 'safety ' + (servoLocked ? 'lock' : 'on');
+    sf.textContent = servoLocked ? 'LOCKED' : 'MOTION ON';
     $('#servo-safety').textContent = servoLocked
       ? 'SERVO SAFETY LOCK: no servo motion, centering or probing. Eyes and sensors remain active.'
-      : 'Servo motion enabled by firmware.';
-    document.querySelectorAll('[data-act="head"], [data-act="ear"], [data-act="wing"], [data-act="nav-start"]').forEach(b => { b.disabled = servoLocked; });
-    if (!t || !t.state) return;
-    $('#state').textContent = t.state;
-    $('#fw').textContent = t.firmware || '?';
-    const s = t.servos || [];
-    const servoStr = servoNames.map((n,i) => `${n}:${(s[i]||0).toFixed(0)}\u00b0`).join('  ');
-    const face = t.face
-      ? `face:<b>${t.face.detected?'yes':'no'}</b> (${t.face.total||0} total)` : '';
-    // IMU (LSM303AGR since 2026-09-01). `axes` is how many magnetometer axes
-    // have seen enough span THIS RUN -- a level full turn reaches 2 of 3, which
-    // is enough. It can read 0 while calibrated is true: that is a boot with
-    // offsets restored from flash, not a fault. "heading_ok" is the other half
-    // of calibrated: the geometry currently yields a usable heading at all.
-    let imuStr = '&ndash;';
+      : 'Servo motion enabled by firmware; the owl moves under its own choreography.';
+    document.querySelectorAll('[data-act="head"], [data-act="ear"], [data-act="wing"], [data-act="nav-start"]')
+      .forEach(b => { b.disabled = servoLocked; });
+    document.querySelectorAll('[data-act="react"]').forEach(b => { b.disabled = servoLocked; });
+    $('#update-status').textContent = t.state === 'update'
+      ? 'Update mode active. Upload firmware via the XIAO Wi-Fi page, or press Exit update mode.'
+      : 'Update mode inactive (state: ' + t.state + ').';
+
+    // eye follows the gaze
+    const f = t.face || {};
+    const gx = Number(f.gaze_x || 0), gy = Number(f.gaze_y || 0);
+    $('#pupil').style.transform = faceOn ? 'translate(' + (gx * 14).toFixed(1) + 'px,' + (gy * 10).toFixed(1) + 'px)' : 'translate(0,0)';
+
+    // highlight the expression the owl is showing
+    document.querySelectorAll('#expressions button').forEach(b => {
+      b.classList.toggle('active', b.dataset.value === t.eye);
+    });
+
+    // vision
+    $('#v-conf').innerHTML = faceOn ? (Number(f.confidence || 0) * 100).toFixed(0) + '<small>% conf</small>' : 'no face';
+    $('#v-det').textContent = faceOn ? 'yes' : 'no';
+    $('#v-gaze').textContent = faceOn ? gx.toFixed(2) + ' / ' + gy.toFixed(2) : '–';
+    $('#v-total').textContent = f.total != null ? f.total : '–';
+    $('#v-infer').textContent = f.infer_ms != null ? Number(f.infer_ms).toFixed(0) + ' ms' : '–';
+
+    // IMU (LSM303AGR). `axes` is how many magnetometer axes have seen enough
+    // span THIS RUN -- a level full turn reaches 2 of 3, which is enough. It can
+    // read 0 while calibrated is true: that is a boot with offsets restored from flash.
     if (t.imu) {
       const c = t.imu.cal || {};
       const ok = t.imu.calibrated;
-      imuStr = `yaw <b>${t.imu.yaw.toFixed(0)}&deg;</b> ` +
-        `<span style="color:${ok?'#57ab5a':'#c9a227'}">` +
-        `${ok?'calibrated':'needs a slow full turn'}</span> ` +
-        `<span class="hint">(mag axes ${c.axes||0}/3` +
-        `${c.heading_ok?'':' &middot; heading unusable'}` +
-        `${c.restored?' &middot; from flash':''})</span>`;
+      $('#i-yaw').innerHTML = Number(t.imu.yaw).toFixed(0) + '<small>&deg; yaw</small>';
+      $('#i-rp').textContent = Number(t.imu.roll).toFixed(0) + '° / ' + Number(t.imu.pitch).toFixed(0) + '°';
+      setCls($('#i-cal'), ok ? 'ok' : 'warn', ok ? 'calibrated' : 'needs a slow full turn');
+      $('#i-axes').textContent = (c.axes || 0) + '/3' + (c.heading_ok ? '' : ' · heading unusable') + (c.restored ? ' · from flash' : '');
+    } else {
+      $('#i-yaw').textContent = 'absent';
+      $('#i-rp').textContent = $('#i-cal').textContent = $('#i-axes').textContent = '–';
     }
-    let gpsStr = '&ndash;';
+
+    // GPS
     if (t.gps) {
-      gpsStr = t.gps.valid
-        ? `<b>${t.gps.latitude.toFixed(5)}, ${t.gps.longitude.toFixed(5)}</b> ` +
-          `<span class="hint">(${t.gps.satellites} sats)</span>`
-        : `<span style="color:#c9a227">no fix</span> ` +
-          `<span class="hint">(${t.gps.satellites||0} sats)</span>`;
+      $('#g-fix').innerHTML = t.gps.valid ? 'fix' : 'no fix';
+      $('#g-fix').style.color = t.gps.valid ? '#34d399' : '#fbbf24';
+      $('#g-lat').textContent = t.gps.valid ? Number(t.gps.latitude).toFixed(5) : '–';
+      $('#g-lon').textContent = t.gps.valid ? Number(t.gps.longitude).toFixed(5) : '–';
+      $('#g-sat').textContent = t.gps.satellites || 0;
+    } else {
+      $('#g-fix').textContent = 'absent';
+      $('#g-lat').textContent = $('#g-lon').textContent = $('#g-sat').textContent = '–';
     }
-    const vib = t.vibration
-      ? `tap:<b>${t.vibration.detected?'yes':'no'}</b> ` +
-        `<span class="hint">(${t.vibration.count||0} taps, ` +
-        `${t.vibration.pulses||0} edges)</span>`
-      : '';
-    $('#telemetry').innerHTML =
-      `state <b>${t.state}</b> &middot; eye <b>${t.eye || '-'}</b> &middot; ${face}<br>` +
-      `imu: ${imuStr}<br>` +
-      `gps: ${gpsStr}<br>` +
-      `${vib}<br>` +
-      `servos: ${servoStr}`;
+
+    // vibration
+    const v = t.vibration || {};
+    $('#t-det').textContent = v.detected ? 'TAP' : 'quiet';
+    $('#t-det').style.color = v.detected ? '#fbbf24' : '';
+    $('#t-count').textContent = v.count || 0;
+    $('#t-pulses').textContent = v.pulses || 0;
+
+    setGauges(t.servos || []);
     renderHeard(t);
     if (window.owlNav) window.owlNav.renderNavStatus(t);
-  } catch (e) { /* ignore transient poll errors */ }
+  } catch (e) {
+    setLink(false, 'offline');
+  }
 }
+if (window.owlNav) window.owlNav.refreshPlaces();
 poll();
 setInterval(poll, 1000);
 </script>

@@ -338,3 +338,14 @@ explicit, reviewed arming/probe procedure are prerequisites for
 any later motion-enabled image. They cannot be inferred from software values or
 an acknowledgement. Also open: confirmation of the nano servo model (assumed
 AS-106) beyond retail text. Open work and actual deployment results live in BACKLOG.
+
+## Gestures (2026-11-01)
+
+`OwlChoreo::trigger()` lays short body gestures (`startle`, `happy`, `negative`, `curious`) over the
+running mode. They add no new limits: ears and wings stay within the 0..100 profile range, the head
+is an offset on the tracking target clamped to `HEAD_TRACK_LIMIT_DEG`, never in NAV and never in REST.
+Each gesture also sets its eyes in `motion::react()` (startle surprised, happy glee, negative annoyed,
+curious skeptic): body and face belong together, and the first version moved only the body and the
+owner saw no emotion. The head shake is three 0.5 s legs because the head profile allows 70 deg/s;
+a fast sine was swallowed by that limit. Cooldown 4 s. Triggers: a knock edge in `motion.cpp`, and the `react` command (SPEC-010). Native
+tests: `esp32-s3-sense/tests/servomotion/test.cpp` section 8.

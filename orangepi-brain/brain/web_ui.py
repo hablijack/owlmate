@@ -140,6 +140,16 @@ TEMPLATE = _load_template()
 # Two Telemetry attributes whose PYTHON name is not their WIRE name. The page has
 # read `eye` and `uptime` since it existed; a plain asdict() emits
 # `eye_expression` and `uptime_ms` and would silently blank both displays.
+# Expressions that come with a body gesture. The web UI's expression buttons play the whole
+# emotion (ears, wings, head AND eyes), not just the eyes; anything not listed is eyes only.
+EXPRESSION_GESTURES = {
+    "happy": "happy", "glee": "happy",
+    "surprised": "startle", "scared": "startle", "awe": "startle",
+    "annoyed": "negative", "angry": "negative", "furious": "negative",
+    "skeptic": "curious", "suspicious": "curious", "focused": "curious",
+}
+GESTURES = ("startle", "happy", "negative", "curious")
+
 _PAYLOAD_RENAMES = (("eye_expression", "eye"), ("uptime_ms", "uptime"))
 
 
@@ -206,7 +216,8 @@ class WebUI:
         @app.route("/")
         def index():
             return render_template_string(TEMPLATE, expressions=EXPRESSIONS, sounds=SOUNDS,
-                                           sound_labels=SOUND_LABELS)
+                                           sound_labels=SOUND_LABELS,
+                                           expression_gestures=EXPRESSION_GESTURES)
 
         @app.route("/api/telemetry")
         def api_telemetry():
@@ -236,11 +247,23 @@ class WebUI:
             ok = self.serial.blink(speed)
             return jsonify({"ok": ok})
 
+        @app.route("/api/react", methods=["POST"])
+        def api_react():
+            name = str((request.get_json(silent=True) or {}).get("name", ""))
+            if name not in GESTURES:
+                return jsonify({"ok": False, "error": "unknown gesture"}), 400
+            return jsonify({"ok": self.serial.react(name)})
+
         @app.route("/api/expression", methods=["POST"])
         def api_expression():
             value = (request.get_json(silent=True) or {}).get("value", "neutral")
+            # Play the emotion's body gesture first, then the clicked expression: the firmware sets
+            # its own eyes with a gesture, and the expression sent last is the one the owl shows.
+            gesture = EXPRESSION_GESTURES.get(value)
+            if gesture:
+                self.serial.react(gesture)
             ok = self.serial.set_expression(value)
-            return jsonify({"ok": ok})
+            return jsonify({"ok": ok, "gesture": gesture})
 
         @app.route("/api/head", methods=["POST"])
         def api_head():

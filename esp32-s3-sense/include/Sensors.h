@@ -68,6 +68,10 @@ public:
     // gegenseitig wegnehmen. updateVibration() gehoert genau einmal pro
     // Hauptschleifendurchlauf aufgerufen.
     void updateVibration();
+    // Meldet, ob sich die Servos gerade selbst bewegen. Dann (und VIBRATION_SELF_MOTION_TAIL_MS
+    // danach) zaehlen Flanken nicht als Klopfen; vibrationPulseTotal() zaehlt weiter roh.
+    // Einmal pro Runde VOR updateVibration() aufrufen.
+    void setSelfMotion(bool moving);
     VibrationData getVibration();
     // Rohe Gesamtzahl der Flanken seit dem Boot, direkt aus dem Interrupt.
     // Absichtlich dauerhaft in der Telemetrie: bei einem prellenden Sensor ist
@@ -90,6 +94,7 @@ private:
     // Pegel selbst wird NICHT ausgewertet - der SW-420 prellt mit ~1 kHz.
     bool _vibState;            // true solange das letzte Buendel noch "haelt"
     uint32_t _vibLastPulse;    // millis() der letzten gezaehlten Flanke
+    uint32_t _selfMotionUntil; // bis dahin zaehlen Flanken nicht (eigene Servobewegung)
     uint32_t _vibLastEvent;    // millis() des letzten bestaetigten Klopfers
     uint16_t _vibCount;        // Anzahl bestaetigter Klopfer
 };
