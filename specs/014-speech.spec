@@ -98,6 +98,32 @@ An empty list means speech never wakes the owl.
 **Everything German lives in `config.yaml`** — keywords, clusters, reactions,
 nav triggers, stop words (R-014.6). Adding a reaction is a config edit.
 
+**ASR speed comes from the encoder window, not the model (2026-11-01).**
+whisper always encodes a 30 s window, however short the utterance. `audio_ctx`
+(192 of 1500) shrinks that window to what a 2-3 s utterance needs, and four
+threads use the A733's cores. Together: tiny 4.4 s -> about 0.6 s per utterance
+(`speech.threads: 4`, `speech.audio_ctx: 192`). Opt-in keys, code defaults unchanged.
+
+**An utterance keeps quiet audio around its voiced chunks (`speech.context_ms`,
+300).** The VAD used to append only chunks above `vad_threshold`, so soft word
+onsets, word endings and the gaps between words were cut out of what whisper
+heard. Now a pre-roll before the first voiced chunk, silent gaps between voiced
+chunks, and the first `context_ms` of the closing silence stay in. The
+`min_utterance_s` blip filter counts *voiced* audio only, so context does not
+let a music blip through. 0 = old behaviour.
+
+**Peak normalisation and a debug dump exist but are off.** `normalize_peak`
+scales each utterance to the given peak before whisper (0.7 live); it did not
+visibly change recognition. `dump_dir` writes every utterance as a WAV for
+offline comparison and is empty in production.
+
+**A reaction may keep its own eyes (`own_eyes: true`).** By default the
+gesture goes out last and the firmware's gesture eyes win. With `own_eyes` the
+reaction's `expression` is sent after the gesture and replaces them. Used for
+`negative`: `sad_down` (owner: stronger than `annoyed`), with the head shake and
+ears unchanged. Reaction cooldown is 3.0 s (was 4.5; the old value swallowed a
+spoken sentence ~5 s after another).
+
 ## Verified facts
 
 * **First real-mic ASR, 2026-10-18:** tiny, two CPU threads, 15-second 16 kHz
@@ -192,6 +218,28 @@ nav triggers, stop words (R-014.6). Adding a reaction is a config edit.
 * Auto-sleep and speech interact deliberately: hearing the user is an activity
   trigger that resets the inactivity timer, and navigation being active blocks
   auto-sleep entirely.
+* **Speed measurements, 2026-11-01** (A733, 2.5 s clip, CPU governor
+  `performance`, ~56 C): tiny 2 threads 4.37 s; tiny + `audio_ctx` 192 0.80 s;
+  tiny 4 threads 0.64-0.75 s, 8 threads 0.36-0.43 s; small 4 threads +
+  `audio_ctx` 192 4.90 s, 8 threads 3.08 s. Live with the config above:
+  `asr=` 0.4-0.8 s in the log line (one 3.65 s outlier while other work ran).
+  Before: 4.4-13.9 s per ~2 s utterance.
+* **Microphone level and placement decide recognition, 2026-11-01.** The ICS43434
+  signal is quiet (`peak_rms` 0.002-0.005 across the room; speech at ~15 dB
+  above a noise floor of ~0.02 after normalisation, no clipping, no
+  quantisation problem). Across the room tiny and small both garbled the same
+  word identically ("lass das" -> "Laptos/Lostos/lastos"), so it is the signal,
+  not the model. With the owl **on the shoulder** (its normal place) `peak_rms`
+  roughly doubles to ~0.006 and tiny recognised "Das ist toll.", "Wie geht es dir
+  heute?" and "Nein, lasst das." correctly. "Du bist eine gute Eule" still
+  arrives as "gute Eure/Eume" -- covered by extra keywords, not fixed.
+* **Offline model comparison on the same WAVs, 2026-11-01:** `small` was not
+  better than `tiny` on short utterances (it also hallucinated a sentence from
+  a 1.2 s clip) and costs 5-7 s. Do not switch models to fix recognition.
+* Whisper non-speech tags (`[Musik]`, `* Musik *`, `(Applaus)`, `[Klicken]`)
+  are dropped by `_only_non_speech`; music blips are 0.3-0.6 s with peaks <=
+  0.0029, speech 0.0028-0.0056 (`vad_threshold` 0.002, `min_utterance_s` 0.8).
+
 
 ## Falsified
 
@@ -228,6 +276,19 @@ nav triggers, stop words (R-014.6). Adding a reaction is a config edit.
   for one word cost time on 2026-08-27; the BACKLOG's task list was renamed to
   "Step" for this reason.
 
+* **"A bigger model gives better recognition."** Measured 2026-11-01 on the
+  same utterances: `small` was no better than `tiny` on 1-2 s clips, hallucinated
+  a full sentence from one, and was 5-7x slower. The limit was the mic signal.
+* **"Appending only the voiced chunks is a fine VAD."** It removes soft onsets,
+  endings and inter-word pauses from what whisper hears, which produced
+  fragmentary transcripts ("Laptos"). The utterance needs context
+  (`context_ms`), and the blip filter must count voiced audio, not total.
+* **"Whisper time scales with the model alone."** It is dominated by the fixed
+  30 s encoder window; `audio_ctx` removed ~85 % of it for a 2-3 s utterance.
+* **"Recognition quality can be judged with the owl across the room."** The owl
+  sits on a shoulder, with the mouth much closer; the same sentences that
+  failed at a distance were recognised there.
+
 ## Acceptance
 
 1. `cd orangepi-brain && python3 tests/run_tests.py` — the speech pipeline, ASR,
@@ -238,6 +299,19 @@ nav triggers, stop words (R-014.6). Adding a reaction is a config edit.
    running (R-014.5).
 
 ## Open
+
+* **Re-run the five-sentence test on the shoulder after the last changes
+  (2026-11-01).** The `own_eyes` change and the 3 s cooldown are deployed but
+  were not heard live afterwards. Expected: "Nein, lass das" -> `sad_down` with
+  head shake; "Du bist eine gute Eule" -> happy.
+* **Mic level.** Peak levels of 0.002-0.006 are low. Software gain before the
+  VAD, or the ICS43434's placement/window in the case, may help; sentences below
+  `vad_threshold` (0.002) are never heard. Lowering it toward 0.0015 trades
+  against more music/ambient blips -- measure both.
+* **Keyword robustness.** Whisper-tiny mishears; the clusters now carry
+  observed variants ("lasst das", "gute eure/eume/eile"). A fuzzy or
+  prefix match, or the sentence-level emotion layer (disabled, model not
+  installed on the Pi), would be the structural fix.
 
 * **Production VAD calibration and ambient rejection.** The default threshold
   rejects measured speech; temporary 0.0006 admitted a confirmed live reaction

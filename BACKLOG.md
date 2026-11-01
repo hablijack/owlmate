@@ -1894,6 +1894,30 @@ waiting on it. Out of scope for the eyes session.
 
 ## Speech recognition (Orange Pi-side)
 
+**Status 2026-11-01 (speech on hardware).** ASR is now ~0.6 s per utterance (was 4-14 s):
+`speech.threads: 4`, `speech.audio_ctx: 192`, `speech.context_ms: 300`; whisper stays `tiny`
+(`small` measured no better). On the shoulder the owl recognised "Das ist toll", "Wie geht es dir
+heute?" and "Nein, lasst das." correctly; across the room the mic signal is too quiet. "Nein, lass das"
+now plays the head shake with `sad_down` eyes (`own_eyes: true`). Reasoning and measurements:
+`specs/014-speech.spec`. Open, in order:
+- [ ] **Re-test the five sentences on the shoulder** with the final config (cooldown 3 s, `own_eyes`,
+  extra keyword variants) -- the last changes were deployed but not heard live.
+- [ ] **Mic level**: decide on software gain / `vad_threshold` toward 0.0015 / mic placement; two of five
+  sentences were never picked up across the room.
+- [ ] **Keyword robustness** beyond hand-added variants (fuzzy match or the disabled emotion layer;
+  the RoBERTa model is not installed on the Pi).
+- [ ] More emotions/gestures: the owner supplies words per cluster; each new group needs a `reactions`
+  row (gesture + optional `own_eyes`).
+- [ ] **Orange Pi fan cycles on/off at idle (measured 2026-11-01) -- optional overlay.** Not a fault: the
+  `pwm-fan` cooling device is bound to a **55 C passive trip with 2 C hysteresis** (thermal_zone0 and
+  zone3, CPU; zone4/GPU trips at 60 C), and the closed owl idles at **54.4-55.3 C** (load average 0.03),
+  i.e. exactly on the threshold. The fan jumps to full (state 4/4, PWM 255), cools a fraction of a degree,
+  switches off, and repeats. Critical trip is 110 C, so nothing is at risk. Fix if the noise bothers: a
+  user overlay next to `owl-i2c2` (`/boot/overlay-user/`, `user_overlays=` in
+  `/boot/dietpiEnv.txt`) raising the trip to ~60 C with a larger hysteresis (about 5 C), or capping the
+  fan's maximum state. Needs a reboot of the Pi (ask the owner first); verify afterwards by watching
+  `/sys/class/thermal/thermal_zone0/temp` against `cooling_device9/cur_state` for a few minutes.
+
 Step 1 (skeleton), Step 2 (mic + VAD + ASR), Step 3 ("last heard" in web
 UI) and Step 4 (autonomous sleep + wake-on-speech) code is **done and
 unit-tested on the Mac** (38 tests, stubbed serial/supervisor/mic/Whisper).
@@ -1913,7 +1937,7 @@ unattended installs.
   to test autonomous sleep), plug the USB mic, and confirm:
   - Step 2/3: speak "toll" / "wer bist du" / "lass das" with a face in frame → correct
     eyes + owl call and the web UI's Live status card shows the transcript + "Ns ago"; the
-    4.5 s cooldown is respected; 10 min of TV/room noise with no face → zero reactions;
+    3 s cooldown is respected; 10 min of TV/room noise with no face → zero reactions;
     `journalctl -u robot-owl-brain` shows no serial stall. Tune `speech.vad_threshold`
     against the real mic's noise floor (default 0.02) and `speech.window_s`.
   - Step 4: leave the owl alone (no face / no taps / no speech) → after
@@ -2148,6 +2172,19 @@ the page loads and each button visibly drives the owl (blink/expression/head).
 ---
 
 ## Recently completed (context for future sessions)
+
+- [x] **Session 2026-10-29 .. 2026-11-01 -- what was reached (the day's summary).**
+  Servo motion on the main image (`SERVO_MOTION_ENABLED`, calibrated table, `OwlChoreo` ears/wings/head);
+  four body gestures (startle/happy/negative/curious) with matching eyes and the `react` serial command;
+  saccade head tracking and face-detect scan; vibration fix (self-motion mask + double knock, see
+  `specs/007`); status OLED on the Orange Pi (portrait, `owl-i2c2` overlay, `specs/012`); redesigned web UI
+  ("Mission Control"); speech: ASR 4-14 s -> ~0.6 s, complete utterances, non-speech tags filtered,
+  `sad_down` for "nein". Orange Pi suite: 264 tests; `tools/check_docs.py` clean.
+  **Still open from this period:** the speech items under *Speech recognition* above; mechanics (ear/wing
+  amplitudes, `HEAD_TRACK_FOV_DEG` 16.5 is estimated, not measured; `IMU_HEADING_OFFSET_DEG` mounting term
+  unmeasured); servo type documentation conflict (S18JST 1.8 g vs 3.7 g); a one-off `invalid_json` seen at
+  brain start; the mobile layout of the web UI is unchecked; `VIBRATION_SELF_MOTION_TAIL_MS` may need tuning
+  if self-wakes reappear (note the timestamp when it happens).
 
 - [x] **OTA update mode** — 4-tap vibration → SoftAP `RobotOwl-Update` +
   `/update` HTTP page (HTTPUpdateServer); one tap exits; dual-bank
