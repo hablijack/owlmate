@@ -126,6 +126,31 @@ available for the Orange Pi to send when speech recognises someone or the owl is
 tapped. Spending peak joy on mere presence leaves nothing in reserve for when
 something good actually happens.
 
+**Mood review with the owner, 2026-11-03 (nothing implemented yet).** Every mood was
+shown live on the owl for ~60 s, eyes only (`POST /api/expression` with
+`{"gesture": false}`), and judged one by one. Result, to be built in this order of
+the BACKLOG's *Emotion rework* item:
+
+* **Kept as is:** neutral, happy, annoyed, squint, awe.
+* **Removed:** `sad_up`, `bored`, and `worried` (sad_down and scared already cover it).
+  `blink_high`/`blink_low` are lid animation frames, not moods, and were not reviewed.
+* **Eye shape changes:** `surprised` much larger, nearly screen-filling; `skeptic`:
+  the larger eye larger still, the small one unchanged; `scared`: much smaller eyes,
+  pinched pupils; `unimpressed`: eyes lower in the panel; `angry`: eyes angrier;
+  `glee` becomes jubilation -- both eyes closed as arches (^ ^) so it no longer
+  resembles `happy`; `furious` becomes very narrow slanted slits with a slight
+  tremble so it no longer resembles `angry`.
+* **New drawings** (non-eye bitmaps, like spinner and cross): a comic "zZz" in the eyes
+  for `sleepy`, and a crosshair for the SEARCHING state. SEARCHING is shown only during
+  BOOT and NAVIGATING -- it is *not* the face-following state (that is DETECTING, then
+  INTERACTING) -- and the old suspicious look there was misleading. `suspicious` stays,
+  as a mood only.
+* **Body pose per mood (ears, wings, head tilt)** replaces the four fixed gestures as the
+  source of body language. Owner's poses: `sad_down` ears fully down; `focused` ears fully
+  up; `unimpressed` ears down; `sleepy` ears fully down; `angry` ears fully up and wings
+  fully raised; `scared` ears fully down and wings fully open; `skeptic` asymmetric, one ear
+  up on the side of the larger eye and the other down.
+
 ## Verified facts
 
 * All 24 expressions were set over serial, rendered, and echoed back in

@@ -36,6 +36,17 @@ class TestUpdateMode(unittest.TestCase):
             self.assertFalse(call_web_view(ui, 'api_update_mode', body)['ok'])
         serial.set_update_mode.assert_not_called()
 
+    def test_expression_plays_gesture_unless_eyes_only(self):
+        serial = Mock()
+        ui = WebUI(serial, Mock())
+        self.assertEqual(call_web_view(ui, 'api_expression', {'value': 'happy'})['gesture'], 'happy')
+        serial.react.assert_called_once_with('happy')
+        serial.reset_mock()
+        result = call_web_view(ui, 'api_expression', {'value': 'happy', 'gesture': False})
+        self.assertIsNone(result['gesture'])
+        serial.react.assert_not_called()
+        serial.set_expression.assert_called_once_with('happy')
+
     def test_vibration_cannot_control_ota(self):
         # Source guard, not a substitute for the hardware walking acceptance test.
         root = Path(__file__).resolve().parents[2] / 'esp32-s3-sense'

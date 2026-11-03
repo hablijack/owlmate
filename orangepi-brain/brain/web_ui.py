@@ -256,10 +256,12 @@ class WebUI:
 
         @app.route("/api/expression", methods=["POST"])
         def api_expression():
-            value = (request.get_json(silent=True) or {}).get("value", "neutral")
+            body = request.get_json(silent=True) or {}
+            value = body.get("value", "neutral")
             # Play the emotion's body gesture first, then the clicked expression: the firmware sets
             # its own eyes with a gesture, and the expression sent last is the one the owl shows.
-            gesture = EXPRESSION_GESTURES.get(value)
+            # {"gesture": false} sends the eyes only (judging a mood's shape without any motion).
+            gesture = EXPRESSION_GESTURES.get(value) if body.get("gesture", True) else None
             if gesture:
                 self.serial.react(gesture)
             ok = self.serial.set_expression(value)
