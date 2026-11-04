@@ -1,0 +1,5 @@
+# Let the brain (user robotowl, group gpio) read the mute switch on the A733's
+# GPIO character devices. They are root-only (0600) on DietPi by default.
+# Lines already claimed by the kernel (the WLAN pins on gpiochip1) stay
+# unrequestable regardless: the kernel answers EBUSY.
+SUBSYSTEM=="gpio", KERNEL=="gpiochip*", GROUP="gpio", MODE="0660"

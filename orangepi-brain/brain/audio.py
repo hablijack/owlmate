@@ -98,6 +98,7 @@ class Audio:
         self.enabled = bool(cfg.get("enabled", False))
         self.device = cfg.get("device", "") or ""
         self.volume = float(cfg.get("volume", 0.8))
+        self.muted = False          # set by the mute switch (brain/mute_switch.py)
         self._ready = False
         self._warned = False
         self._lock = threading.Lock()
@@ -189,6 +190,9 @@ class Audio:
         if sfx == "stop":
             # (No persistent player to stop; each play() is a short one-shot.)
             return True
+        if self.muted:
+            # No player at all: true silence, and nothing for the speech barrier to wait for.
+            return False
         # 1) Real recording, if we have one for this emotion.
         data = self._samples.get(sfx)
         if data is None:
@@ -199,6 +203,13 @@ class Audio:
             return False
         with self._lock:
             return self._aplay(data)
+
+    def set_muted(self, muted: bool) -> None:
+        """Mute switch position. The silent TX keepalive keeps running either way."""
+        muted = bool(muted)
+        if muted != self.muted:
+            logger.info("Audio %s by the mute switch", "muted" if muted else "unmuted")
+        self.muted = muted
 
     # ------------------------------------------------------------------
     # Sample I/O helpers

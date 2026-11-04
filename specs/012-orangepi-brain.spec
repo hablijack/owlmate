@@ -174,6 +174,27 @@ Below a rule come the metrics as two small horizontal lines (`28HZ`, `FACE`/`NON
 version put the mode in a 1x column and was too small to read. The canvas is turned onto the panel by a quarter turn;
 if it comes out upside down, set `rotate: true` (hardware 180 degree flip).
 
+**Mute switch and power button (2026-11-04).** Two contacts to GND on the header: slide
+switch PB1 (pin 13), push button PB0 (pin 11). (1) **Read through the GPIO character device
+with raw ioctls** (`brain/gpio.py`, uAPI v2), same reasoning as the OLED: no package, the
+image has neither `gpiod` tools nor bindings. Lines are requested as inputs with
+`BIAS_PULL_UP | ACTIVE_LOW`, so `read()` is True while the contact is closed. (2) **The chip
+is chosen by label, `2000000.pinctrl`, not by number:** the image has two chips with no
+line names, and `gpiochip1` (`7025000.pinctrl`, R_PIO) holds `wlan_hostwake`/`wlan_regon`
+at offsets 32/33, exactly where PB0/PB1 sit on `gpiochip0`. (3) **Mute is "start no
+player"**, in `Audio.play()`: the `owl_i2s` card has no mixer control, and skipping the
+player is true silence that also leaves the speech barrier idle. The silent TX keepalive is
+not touched (SPEC-015). The switch position is read once before the first sound, then
+polled at 5 Hz with two-read debounce. (4) **The power button runs outside the brain**, as
+root, in `robot-owl-power.service`: the button exists for the moment something has gone
+wrong, and a brain crash must not take the only clean way out with it. It needs a 2 s hold
+(a shoulder bump must not switch the owl off), and **arms only after seeing the button
+released** — a stuck contact would otherwise power off every boot with no way to log in.
+DietPi runs without D-Bus/logind, which ruled out a `gpio-keys` overlay + logind's power-key
+handling. (5) `main.py` turns SIGTERM into the normal shutdown path; before, `systemctl stop`
+(and so any shutdown) killed the brain without its `finally`, and `BRAIN OFF` never reached
+the OLED.
+
 ## Verified facts
 
 * On 2026-10-18 a native full-process smoke test used real Flask, pyserial and
@@ -204,6 +225,13 @@ if it comes out upside down, set `rotate: true` (hardware 180 degree flip).
   test suite — the yaml stub returns `{}`. Validating it needs a real parser;
   `~/.platformio/penv/bin/python` has PyYAML 6.0.3 and was used for exactly that
   after editing the file.
+
+* **Power button, end to end on the owl, 2026-11-04:** a 2 s hold on PB0 halted the board
+  quickly; the OLED showed `OFF` (portrait form of `BRAIN OFF`, i.e. the brain's SIGTERM path
+  ran). On the next boot `dmesg` showed the root ext4 mounted with **no journal recovery**, so
+  the halt was clean. The journal is RAM-only on this image, so the shutdown itself cannot be
+  read back afterwards; the clean mount is the evidence. Mute switch confirmed by ear by the
+  owner, polarity `muted_when: open`.
 
 ## Falsified
 

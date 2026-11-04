@@ -44,6 +44,10 @@ UNIT_SRC="${SRC_DIR}/deploy/robot-owl-brain.service"
 UDEV_SRC="${SRC_DIR}/deploy/99-robot-owl-serial.rules"
 UDEV_DEST="/etc/udev/rules.d/99-robot-owl-serial.rules"
 UNIT_DEST="/etc/systemd/system/robot-owl-brain.service"
+POWER_UNIT_SRC="${SRC_DIR}/deploy/robot-owl-power.service"
+POWER_UNIT_DEST="/etc/systemd/system/robot-owl-power.service"
+GPIO_RULE_SRC="${SRC_DIR}/deploy/99-robot-owl-gpio.rules"
+GPIO_RULE_DEST="/etc/udev/rules.d/99-robot-owl-gpio.rules"
 MODULE_LOAD_CONF="/etc/modules-load.d/robot-owl-i2s.conf"
 SERVICE_USER="robotowl"
 OVERLAY_NAME="owl-i2s-overlay"
@@ -232,6 +236,8 @@ if [ -r /etc/os-release ]; then . /etc/os-release; info "OS: ${PRETTY_NAME:-unkn
 [ -f "${AUDIO_DIR}/asound.conf" ]          || die "missing ${AUDIO_DIR}/asound.conf"
 [ -f "${UNIT_SRC}" ]                        || die "missing ${UNIT_SRC}"
 [ -f "${UDEV_SRC}" ]                        || die "missing ${UDEV_SRC}"
+[ -f "${POWER_UNIT_SRC}" ]                  || die "missing ${POWER_UNIT_SRC}"
+[ -f "${GPIO_RULE_SRC}" ]                   || die "missing ${GPIO_RULE_SRC}"
 [ -d "/lib/modules/$(uname -r)/build" ] || warn "kernel build tree not present yet — step 1 installs linux-headers."
 
 # ----------------------------------------------------------------------------
@@ -417,9 +423,12 @@ fi
 # i2c: the status OLED (brain/display.py) opens /dev/i2c-N, which belongs to group i2c.
 # The service unit names the group, so it must exist.
 getent group i2c >/dev/null || groupadd --system i2c
-usermod -aG dialout,audio,i2c "${SERVICE_USER}"
+# gpio: the mute switch (brain/mute_switch.py) reads /dev/gpiochip*, root-only by default.
+getent group gpio >/dev/null || groupadd --system gpio
+usermod -aG dialout,audio,i2c,gpio "${SERVICE_USER}"
 install -m 0644 "${UDEV_SRC}" "${UDEV_DEST}"
 chown root:root "${UDEV_DEST}"
+install -m 0644 "${GPIO_RULE_SRC}" "${GPIO_RULE_DEST}"
 # The brain runs as ${SERVICE_USER}; give it read access to the installed tree.
 chown -R "${SERVICE_USER}:" "${DEST_DIR}"
 
@@ -428,7 +437,11 @@ chown -R "${SERVICE_USER}:" "${DEST_DIR}"
 # ----------------------------------------------------------------------------
 log "Step 9/10 — installing + enabling robot-owl-brain.service"
 install -m 0644 "${UNIT_SRC}" "${UNIT_DEST}"
+install -m 0644 "${POWER_UNIT_SRC}" "${POWER_UNIT_DEST}"
 systemctl daemon-reload
+# The power button touches no USB and no servo, so it is enabled even with
+# --no-enable-service; it does nothing until power_button.enabled is true.
+systemctl enable robot-owl-power.service
 if [ "${NO_ENABLE_SERVICE}" -eq 0 ]; then
     systemctl enable robot-owl-brain.service
     info "Service enabled — starts on next boot (opening USB may reset the XIAO)."

@@ -177,7 +177,7 @@ taking the IMU calibration with it. Flash the pieces separately:
 ### Orange Pi brain (`orangepi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (287 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (297 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
@@ -699,6 +699,13 @@ without it" rather than exiting. The idle callback runs `supervisor.check_stale(
 - `audio.py` — plays WAVs from `assets/sounds/` (or synthesizes tones) through `aplay` on the Orange Pi's
    I2S MAX98357A amp. No-ops with a log line when the amp/I2S is absent. **All audio is on the Orange Pi;
    the ESP32 has no audio pins.**
+
+- `mute_switch.py` + `power_button.py` (on `gpio.py`) — the two controls on the Orange Pi header,
+  both contacts to GND with the internal pull-up. The mute switch belongs to the brain and stops
+  `Audio.play()` from starting any player (never the silent TX keepalive). **The power button is
+  deliberately NOT in the brain**: `robot-owl-power.service` runs it as root, so it still shuts
+  the board down when the brain has crashed — don't fold it into `main.py`. Pick the chip by
+  **label** (`2000000.pinctrl`): `gpiochip1` carries the WLAN pins at the same offsets as PB0/PB1.
 
 **A733 audio: do not infer capture health from process exit or aggregate RMS.**
 On the installed vendor kernel, TX closing silences ongoing RX even with direct

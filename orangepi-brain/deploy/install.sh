@@ -11,9 +11,9 @@
 #   1. Copies this orangepi-brain/ tree to /opt/robot-owl/orangepi-brain
 #      (idempotent; keeps the installed .venv, models/ and audio/ in place).
 #   2. Refreshes the virtualenv + installs requirements.txt.
-#   3. Ensures the 'robotowl' user (in dialout/audio/i2c groups) exists.
-#   4. Installs the udev rule for the ESP32 USB CDC port.
-#   5. Installs + enables the systemd unit and restarts it.
+#   3. Ensures the 'robotowl' user (in dialout/audio/i2c/gpio groups) exists.
+#   4. Installs the udev rules for the ESP32 USB CDC port and the GPIO chips.
+#   5. Installs + enables the systemd units (brain, power button) and restarts them.
 #
 # Run as root (or with sudo). Re-running is safe. For a FIRST-TIME install
 # (audio stack + config wizard + model download + reboot), run ./setup.sh.
@@ -26,6 +26,10 @@ UNIT_SRC="${SRC_DIR}/deploy/robot-owl-brain.service"
 UDEV_SRC="${SRC_DIR}/deploy/99-robot-owl-serial.rules"
 UDEV_DEST="/etc/udev/rules.d/99-robot-owl-serial.rules"
 UNIT_DEST="/etc/systemd/system/robot-owl-brain.service"
+POWER_UNIT_SRC="${SRC_DIR}/deploy/robot-owl-power.service"
+POWER_UNIT_DEST="/etc/systemd/system/robot-owl-power.service"
+GPIO_RULE_SRC="${SRC_DIR}/deploy/99-robot-owl-gpio.rules"
+GPIO_RULE_DEST="/etc/udev/rules.d/99-robot-owl-gpio.rules"
 SERVICE_USER="robotowl"
 
 log()  { printf '\n\033[1;32m[robot-owl]\033[0m %s\n' "$*"; }
@@ -60,18 +64,23 @@ if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
     chown -R "${SERVICE_USER}:" "${DEST_DIR}"
 fi
 getent group i2c >/dev/null || groupadd --system i2c
-usermod -aG dialout,audio,i2c "${SERVICE_USER}"
+getent group gpio >/dev/null || groupadd --system gpio
+usermod -aG dialout,audio,i2c,gpio "${SERVICE_USER}"
 chown -R "${SERVICE_USER}:" "${DEST_DIR}"
 
-log "4/5 Installing udev rule for the ESP32 serial port"
+log "4/5 Installing udev rules for the ESP32 serial port and the GPIO chips (mute switch)"
 install -m 0644 "${UDEV_SRC}" "${UDEV_DEST}"
+install -m 0644 "${GPIO_RULE_SRC}" "${GPIO_RULE_DEST}"
 systemctl daemon-reload
 udevadm control --reload-rules || true
+udevadm trigger --subsystem-match=gpio || true
 
-log "5/5 Installing + enabling systemd unit"
+log "5/5 Installing + enabling systemd units (brain + power button)"
 install -m 0644 "${UNIT_SRC}" "${UNIT_DEST}"
+install -m 0644 "${POWER_UNIT_SRC}" "${POWER_UNIT_DEST}"
 systemctl daemon-reload
-systemctl enable robot-owl-brain.service
+systemctl enable robot-owl-brain.service robot-owl-power.service
+systemctl restart robot-owl-power.service || warn "power button restart failed — check 'journalctl -u robot-owl-power -f'"
 systemctl restart robot-owl-brain.service || warn "service restart failed — check 'journalctl -u robot-owl-brain -f'"
 
 log "Done."

@@ -281,10 +281,17 @@ Tool note: opening the owl's port (reset) sometimes leaves it silent; a read-onl
   Web UI: `http://owlmate:8080` (or the IP above).
 - XIAO firmware 1.3.0 is deployed in both OTA slots, verified before boot;
   bootloader/partition table/OTA metadata/NVS were preserved byte-for-byte.
-  Full 8 MB backup is retained on the board and the Mac. Current native suite: 287 tests.
+  Full 8 MB backup is retained on the board and the Mac. Native suite at the time: 287.
   The closed-owl safety lock is active after cold boot; IMU calibration restores,
   face inference runs and live serial blink/expression/sleep/wake/heartbeat/OTA
   entry/exit pass. All 16 servo targets, probes and active nav are rejected.
+- **Mute switch (PB1, pin 13) and power button (PB0, pin 11)** deployed 2026-11-04 via
+  `deploy/install.sh`; `mute_switch`/`power_button` enabled in the installed config (backup
+  `config.yaml.bak-gpio-20261104`), `robot-owl-power.service` active and armed, brain read the
+  switch at boot. Mute switch confirmed working by the owner; polarity set to
+  `muted_when: open` (contact open = mute). Power button verified end to end: 2 s hold
+  halts the board, OLED shows `OFF`, next boot mounts ext4 without recovery (SPEC-012
+  Verified facts). Switch off: hold 2 s, wait for the LED, then the power bank.
 - Speech runs on **Vosk** (`models/vosk/vosk-model-small-de-0.15`) with the name gate
   ("Hubert") and the **mood classifier** (`models/mood/`, built by `tools/train_mood.py`),
   deployed and accepted live by the owner 2026-11-04. Whisper models remain on the board
@@ -1097,7 +1104,7 @@ wrong; run the lot only after mechanical work.
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
 | detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
-| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 287 tests pass |
+| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 297 tests pass |
 | firmware/Orange Pi drift | `cd orangepi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
@@ -2216,7 +2223,7 @@ the page loads and each button visibly drives the owl (blink/expression/head).
   saccade head tracking and face-detect scan; vibration fix (self-motion mask + double knock, see
   `specs/007`); status OLED on the Orange Pi (portrait, `owl-i2c2` overlay, `specs/012`); redesigned web UI
   ("Mission Control"); speech: ASR 4-14 s -> ~0.6 s, complete utterances, non-speech tags filtered,
-  `sad_down` for "nein". Orange Pi suite: 287 tests; `tools/check_docs.py` clean.
+  `sad_down` for "nein". Orange Pi suite: 287 at the time; `tools/check_docs.py` clean.
   **Still open from this period:** the speech items under *Speech recognition* above; mechanics (ear/wing
   amplitudes, `HEAD_TRACK_FOV_DEG` 16.5 is estimated, not measured; `IMU_HEADING_OFFSET_DEG` mounting term
   unmeasured); servo type documentation conflict (S18JST 1.8 g vs 3.7 g); a one-off `invalid_json` seen at

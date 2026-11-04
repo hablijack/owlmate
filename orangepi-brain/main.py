@@ -9,6 +9,7 @@ send policy commands (sleep/wake) and temporary overrides.
 import sys
 import os
 import argparse
+import signal
 import time
 import yaml
 import logging
@@ -22,6 +23,14 @@ from brain.banner import print_banner
 from brain.audio import Audio
 from brain.speech import Speech
 from brain.display import StatusDisplay
+from brain.mute_switch import MuteSwitch
+
+
+def _stop_on_sigterm(signum, frame):
+    # systemd stops the service (and a shutdown via the power button stops it) with
+    # SIGTERM. Without this the finally block below never ran: no BRAIN OFF on the
+    # OLED, no clean close of the audio and serial handles.
+    raise KeyboardInterrupt
 
 
 def load_config(config_path: str = "config.yaml") -> dict:
@@ -71,6 +80,11 @@ def main():
     # Initialize audio (MAX98357A I2S amp). Degrades to a no-op if the amp
     # or I2S is not available, so the brain still runs without sound.
     audio = Audio(config)
+
+    # Optional mute switch (slide switch PB1 -> GND): reads its position before the
+    # first sound can play. A pin that cannot be opened leaves the owl audible.
+    mute_switch = MuteSwitch(audio, config)
+    mute_switch.start()
 
     # Initialize supervisor (audio is used for state-change sound cues).
     supervisor = Supervisor(serial, config, audio=audio)
@@ -126,6 +140,7 @@ def main():
             logger.error(f"Web UI failed to start (continuing without it): {e}")
             web_server = None
 
+    signal.signal(signal.SIGTERM, _stop_on_sigterm)
     try:
         # Start the serial read loop. The idle callback runs on quiet
         # iterations so we can warn when telemetry goes stale AND (Phase 4)
@@ -146,6 +161,7 @@ def main():
             speech.stop()
         if web_server:
             web_server.stop()
+        mute_switch.stop()
         audio.close()  # capture is closed before the optional silent TX stream
         serial.disconnect()
         logger.info("Disconnected from ESP32")

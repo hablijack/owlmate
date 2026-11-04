@@ -1,0 +1,15 @@
+[Unit]
+Description=Robot Owl power button (hold PB0 to shut the Orange Pi down)
+# Deliberately independent of robot-owl-brain.service: the button must still
+# work when the brain has crashed. Runs as root because it powers the board off.
+After=local-fs.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/robot-owl/orangepi-brain
+ExecStart=/opt/robot-owl/orangepi-brain/.venv/bin/python -m brain.power_button /opt/robot-owl/orangepi-brain/config.yaml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

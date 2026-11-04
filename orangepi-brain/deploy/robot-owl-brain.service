@@ -6,11 +6,11 @@ After=network.target
 
 [Service]
 Type=simple
-# Run as a dedicated user; setup.sh adds it to dialout, audio and i2c groups
-# (for /dev/ttyACM*). Adjust User= if you prefer your own account.
+# Run as a dedicated user; setup.sh adds it to dialout, audio, i2c and gpio groups
+# (/dev/ttyACM*, the amp, the OLED, the mute switch). Adjust User= if you prefer your own account.
 User=robotowl
 Group=robotowl
-SupplementaryGroups=dialout audio i2c
+SupplementaryGroups=dialout audio i2c gpio
 WorkingDirectory=/opt/robot-owl/orangepi-brain
 ExecStart=/opt/robot-owl/orangepi-brain/.venv/bin/python main.py /opt/robot-owl/orangepi-brain/config.yaml
 Restart=on-failure

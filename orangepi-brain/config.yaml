@@ -136,6 +136,43 @@ audio:
   feedback_tail_s: 0.6  # suppress mic blocks during real playback + this reverb tail
   volume: 0.8        # 0.0 - 1.0 master gain applied to generated samples
 
+# Mute switch: a slide switch from header pin 13 (PB1) to GND. In the mute
+# position the owl plays no sound at all (the amp card has no volume control, so
+# the brain simply starts no player). Read by the brain (brain/mute_switch.py).
+# The pin uses the A733's internal pull-up; nothing else needs wiring.
+#
+#   chip       - gpiochip LABEL ("2000000.pinctrl" = the main pin controller) or a
+#                /dev/gpiochipN path. Prefer the label: gpiochip1 has the WLAN pins
+#                at the same offsets.
+#   line       - port name (PB1) or raw line offset (33)
+#   muted_when - "closed" (switch connects the pin to GND = mute) or "open".
+#                The owl is wired so that OPEN = mute (owner's choice, 2026-11-04).
+#   poll_s     - how often the position is read; a change needs two equal reads
+#
+# Bench check: sudo .venv/bin/python -m brain.gpio PB0 PB1  (1 = contact closed)
+mute_switch:
+  enabled: false
+  chip: 2000000.pinctrl
+  line: PB1
+  muted_when: open
+  poll_s: 0.2
+
+# Power button: a push button from header pin 11 (PB0) to GND shuts the Orange Pi
+# down cleanly (wait for the green LED to go out, then switch the power bank
+# off). NOT run by the brain: deploy/robot-owl-power.service runs
+# brain/power_button.py as root, so it still works when the brain has crashed.
+#
+#   hold_s  - how long the button must be held (a bump must not switch the owl off)
+#   command - what is run; the button only arms after it was seen released once,
+#             so a stuck button cannot shut the owl down on every boot
+power_button:
+  enabled: false
+  chip: 2000000.pinctrl
+  line: PB0
+  hold_s: 2.0
+  poll_s: 0.05
+  command: ["shutdown", "-h", "now"]
+
 # Speech recognition: the owl hears the user and reacts with one of its moods (eyes, body,
 # sound) or a navigation command. ASR runs on the OrangePi (the ICS43434 I2S mic), so the
 # ESP32 firmware is unchanged. Disabled by default: flip 'enabled: true' once the mic and

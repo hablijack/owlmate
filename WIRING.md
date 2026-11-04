@@ -276,6 +276,26 @@ board is the real test, since none of it has been run on the A733 yet.
 
 ---
 
+## 🔘 Mute switch + power button (Orange Pi header)
+
+Both are plain contacts to GND; the A733's **internal pull-up** is enabled in
+software, so no resistor is fitted. Verified 2026-11-04 with
+`sudo .venv/bin/python -m brain.gpio PB0 PB1`: clean edges, no bounce visible at
+50 ms, both lines free on `gpiochip0` (`2000000.pinctrl`, offsets 32/33).
+
+| Device | Orange Pi header pin | A733 pin | Other side | Software |
+|:------:|:--------------------:|:--------:|:----------:|----------|
+| Slide switch (ON-OFF) | pin 13 | PB1 | GND | `brain/mute_switch.py` — contact **open** = mute, no sound (`muted_when: open`) |
+| Push button (make) | pin 11 | PB0 | GND (pin 9) | `brain/power_button.py` — hold 2 s = `shutdown -h now` |
+
+PB0/PB1 double as UART2 TX/RX; UART2 is not enabled on this image. If it ever
+is, the kernel claims the pins and the request fails with `EBUSY`.
+
+**Switching off:** hold the button 2 s, wait for the board's LED to go out, then
+switch the power bank off.
+
+---
+
 ## 📊 I2C Bus Summary (Physically on D0 + D1)
 
 | Device | Address | SDA → D0 | SCL → D1 |
