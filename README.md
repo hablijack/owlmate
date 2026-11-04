@@ -303,7 +303,7 @@ esp32-s3-sense/                    # ESP32 firmware
 orangepi-brain/                    # Orange Pi Zero 3W (A733) brain (Python)
 ├── main.py                        # Entry point, config loading, hands the main thread to read_loop
 ├── config.yaml                    # Serial port + every feature block (all opt-in except audio)
-├── requirements.txt               # pyserial, numpy, pyyaml, flask, sounddevice, pywhispercpp, llama-cpp-python
+├── requirements.txt               # pyserial, numpy, pyyaml, flask, sounddevice, vosk, pywhispercpp, onnxruntime, tokenizers
 ├── setup.sh                       # Orange Pi provisioning: kernel module + DT overlay + asound + wizard + model + reboot
 ├── assets/sounds/                 # Robot-sound WAVs (see SOURCES.md; mood mapping in brain/audio.py) played through the shared 'owl' I2S card
 ├── audio/                         # The A733 'owl' sound card: custom driver + DT overlay + asound.conf
@@ -317,22 +317,22 @@ orangepi-brain/                    # Orange Pi Zero 3W (A733) brain (Python)
 │   └── 99-robot-owl-serial.rules
 ├── tools/
 │   └── gen_expressions.py         # GENERATES brain/expressions.py from the firmware's NAMES[]
-├── tests/                         # 271 tests; run on a plain Mac, no Orange Pi or audio stack needed
+├── tests/                         # 287 tests; run on a plain Mac, no Orange Pi or audio stack needed
 │   ├── run_tests.py               # unittest discovery
 │   ├── stubs.py                   # fakes third-party modules ONLY when not importable
 │   ├── test_protocol.py           # the ESP32<->Orange Pi wire contract (48 tests)
 │   ├── test_expressions.py        # drift guard: Orange Pi list vs firmware NAMES[] (11)
 │   ├── test_navigation*.py        # geo + controller + speech/web triggers (90)
 │   ├── test_speech_*.py           # ASR, VAD pipeline, auto-sleep (39)
-│   └── test_emotion.py, test_docs.py  # emotion layer + the docs checker (13)
+│   └── test_mood.py, test_docs.py  # mood classifier + Vosk path + the docs checker
 └── brain/
     ├── serial_handler.py          # NDJSON parse/send; the _*_FIELDS tables ARE the wire contract
     ├── supervisor.py              # Logs telemetry, sends policy; owns the amp, state and locations
     ├── navigation.py              # "Guide me home": computes the head aim, streams it to the ESP32
     ├── geo.py                     # Bearing, haversine, angle wrap, aim clamp (pure functions)
     ├── locations.py               # Named places + JSON persistence + fuzzy name matching
-    ├── speech.py                  # Mic -> VAD -> whisper.cpp (pywhispercpp) -> reaction pipeline (German)
-    ├── emotion.py                 # Optional: transcript -> emotion (llama.cpp GGUF) -> eye expression
+    ├── speech.py                  # Mic -> Vosk (or whisper.cpp) -> name gate "Hubert" -> reaction pipeline (German)
+    ├── mood.py                    # Sentence -> mood (fine-tuned MiniLM, int8 ONNX) -> eyes + pose + sound
     ├── audio.py                   # WAV/tone playback via aplay on the shared 'owl' I2S card
     ├── display.py                 # Status OLED (0.91" 128x32 SSD1306 on an Orange Pi I2C bus): shows the owl's mode
     ├── web_ui.py                  # Flask control page (LAN only, no auth, disabled by default)
@@ -393,9 +393,10 @@ failure instead of moving hardware. It does not run the reconnect loop.
 2. **Kernel module** — builds + installs `owl_i2s` (the A733 I2S sound card) and loads it at boot.
 3. **DT overlay** — compiles + installs + enables `owl-i2s-overlay` (muxes the I2S0 pins); needs a reboot.
 4. **asound.conf** — installs the shared 48 kHz `owl` card config.
-5. **Install + wizard** — copies the brain to `/opt/robot-owl/orangepi-brain`, builds a `.venv`, and runs a config wizard (serial port, web UI, speech + whisper.cpp model, auto-sleep).
-6. **Model** — downloads the selected whisper.cpp model when speech is enabled,
-   avoiding a network fetch on first use. Loading/inference still take time.
+5. **Install + wizard** — copies the brain to `/opt/robot-owl/orangepi-brain`, builds a `.venv`, and runs a config wizard (serial port, web UI, speech, auto-sleep).
+6. **Model** — downloads the Vosk model (or the whisper.cpp model with `speech.engine: whisper`)
+   when speech is enabled, avoiding a network fetch on first use. The mood model is not
+   downloadable: build it with `tools/train_mood.py` on a dev machine and copy it to `models/mood/`.
 7. **User + udev + systemd** — creates the `robotowl` user, installs the serial-port udev rule, and enables `robot-owl-brain.service`.
 8. **Reboot** — applies the DT overlay; the owl auto-starts on boot unless staged.
    DietPi overlays are installed under `/boot/overlay-user/` and selected through
@@ -585,8 +586,8 @@ python main.py [config.yaml]   # Default config path
 | **Face Detection (Orange Pi)** | ❌ Not implemented | OpenCV/MediaPipe fallback not needed (ESP32 does it); optional future enhancement |
 | **Web UI (Orange Pi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and magnetometer calibration state, and a map place-picker for navigation. Page lives in `brain/templates/index.html`; the `/api/telemetry` payload is derived from the parsed telemetry dataclass, so it cannot fall behind the firmware (the SoftAP password is the one field deliberately withheld) |
 | **I2S Audio (Orange Pi)** | ✅ Hardware verified | `owl` card registers on boot; audible WAV and real mic verified. Opt-in `audio.keep_playback_clock` prevents capture becoming silent after playback stops; continuity check passes. See `specs/015-orangepi-audio.spec` for measurements and permissions. |
-| **Speech (Orange Pi)** | ✅ Implemented; live speech acceptance pending | German. Mic → RMS VAD gate → whisper.cpp (via the `pywhispercpp` binding, an offline `.bin`/`.gguf` model — no torch/CTranslate2) → keyword clusters / navigation triggers. Gated on awake + face + energy; real playback/tail blocks microphone processing and invalidates stale audio/ASR results. Ambient/TV rejection still needs acceptance. Disabled by default. See `specs/014-speech.spec` |
-| **Orange Pi test suite** | ✅ 271 tests | Runs on a plain dev machine with no Orange Pi, mic, PortAudio, whisper.cpp, llama.cpp, Flask or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔Orange Pi wire contract (48, `test_protocol.py`) and firmware-vs-Orange Pi drift guards (11, `test_expressions.py`) |
+| **Speech (Orange Pi)** | ✅ Accepted live 2026-11-04 (on the shoulder) | German. The owl is called **Hubert** and listens only after its name. Mic → Vosk streaming ASR (~0.2 s after speech, offline) → name gate → navigation triggers → sentence-to-mood classifier (fine-tuned MiniLM, int8 ONNX, ~10 ms) → eyes + body pose + sound. whisper.cpp remains as `speech.engine: whisper`; real playback/tail blocks microphone processing and invalidates stale audio/ASR results. Ambient/TV rejection still needs acceptance. Disabled by default. See `specs/014-speech.spec` |
+| **Orange Pi test suite** | ✅ 287 tests | Runs on a plain dev machine with no Orange Pi, mic, PortAudio, Vosk, whisper.cpp, onnxruntime, Flask or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔Orange Pi wire contract (48, `test_protocol.py`) and firmware-vs-Orange Pi drift guards (11, `test_expressions.py`) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
 
 ---

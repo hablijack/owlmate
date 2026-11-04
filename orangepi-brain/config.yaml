@@ -136,13 +136,17 @@ audio:
   feedback_tail_s: 0.6  # suppress mic blocks during real playback + this reverb tail
   volume: 0.8        # 0.0 - 1.0 master gain applied to generated samples
 
-# Speech recognition: the owl hears the user and reacts (expression + owl-call).
-# ASR runs on the OrangePi (the ICS43434 I2S mic) and drives the owl via the
-# EXISTING temporary expression/gaze overrides + local amp audio, so the ESP32
-# firmware is unchanged. Disabled by default: flip 'enabled: true' once the
-# mic + whisper.cpp model are in place.
+# Speech recognition: the owl hears the user and reacts with one of its moods (eyes, body,
+# sound) or a navigation command. ASR runs on the OrangePi (the ICS43434 I2S mic), so the
+# ESP32 firmware is unchanged. Disabled by default: flip 'enabled: true' once the mic and
+# the models (setup.sh) are in place. Why each choice: specs/014-speech.spec.
 #
+#   engine        - "vosk" (streaming: answers ~0.2 s after you stop; as accurate as whisper
+#                   small on the owner's recordings at ~12 % of one core) or "whisper"
+#                   (whisper.cpp; small needs 3-5 s per sentence on the Zero 3W)
+#   vosk_model    - LOCAL directory of the Vosk model (vosk-model-small-de-0.15, setup.sh)
 #   mic_device    - ALSA capture device (from `arecord -l`); "" = default
+#   --- the following only matter for engine: whisper (energy VAD + whisper.cpp) ---
 #   model         - LOCAL path to a whisper.cpp model file (.bin or .gguf),
 #                   e.g. models/whisper/ggml-small.bin. setup.sh downloads it;
 #                   the OrangePi runs offline, so this is a path, not a hub name.
@@ -169,10 +173,19 @@ audio:
 #                     a half-built utterance
 #   cooldown_s  - min seconds between two reactions (the spec's COOLDOWN_TIME)
 #   require_face - only react while a face is in frame (prevents reacting to TV)
-#   clusters    - keyword lists (German) mapped to reaction clusters
+#   clusters    - keyword lists (German) mapped to reaction clusters (used only while mood is off)
 #   reactions   - cluster -> {expression override, sound played on the amp, gesture}.
 #                 gesture is a body move played by the firmware: happy, negative,
 #                 curious or startle (ears, wings, head; ignored while asleep)
+#   name_alone_aliases - what the recogniser makes of the name said ALONE (no sentence around
+#                   it): Vosk heard "Hubert" as "robert"/"rupert". Counted only when the whole
+#                   utterance is that one word, so "Robert hat angerufen" stays unaddressed.
+#   name_keywords - the owl's name as the recogniser may spell it ("hubert"; a word counts when it is >=
+#                   name_threshold similar). With a name the owl reacts ONLY to speech addressed to it
+#                   ("Hubert, das ist toll") and then keeps listening for name_window_s without the
+#                   name; the name alone makes it answer "hello" and open that window. The name also
+#                   wakes a sleeping owl. [] = off (every utterance counts). Set require_face: false
+#                   with it: on a shoulder the owl never sees a face.
 #   wake_keywords - Phase 4: while the owl is ASLEEP it ignores ordinary speech
 #                   (so it isn't startled by the TV). Only a clearly ADDRESSED
 #                   word/phrase here wakes it (the OrangePi sends the existing
@@ -182,6 +195,8 @@ audio:
 #                   face/vibration do, which the firmware already handles on its own).
 speech:
   enabled: false
+  engine: vosk
+  vosk_model: ""       # e.g. models/vosk/vosk-model-small-de-0.15 (setup.sh downloads it)
   language: de
   model: ""            # e.g. models/whisper/ggml-small.bin (setup.sh downloads it)
   mic_device: ""
@@ -202,7 +217,11 @@ speech:
   # reach whisper instead of being cut out. 0 = voiced chunks only (old behaviour).
   context_ms: 300
   cooldown_s: 3.0
-  require_face: true
+  require_face: false
+  name_keywords: ["hubert"]
+  name_alone_aliases: ["robert", "rupert"]
+  name_window_s: 10
+  name_threshold: 0.75
   wake_keywords: ["eule", "wacht auf"]
   # Navigation: phrases that START guiding toward a place. The words AFTER the
   # trigger are treated as the place name and matched (fuzzy) against the saved
@@ -229,35 +248,16 @@ speech:
     negative: { expression: sad_down,  sound: sad,   gesture: negative, own_eyes: true }
     question: { expression: surprised, sound: info,  gesture: curious }
 
-# Emotion classification (optional, OrangePi-only): hand the transcript to a
-# small language model (ringorsolya/Emotion_RoBERTa_german6_v7, run through
-# llama.cpp) and let it name the speaker's emotion, instead of relying only on
-# the fixed keyword clusters above. Disabled by default.
+# Mood from what is said (brain/mood.py): a small BERT, fine-tuned on our own moods, maps
+# "Heute ist wirklich ein Sauwetter" -> sad_down, "Ich habe im Lotto gewonnen" -> glee.
+# It replaces the keyword clusters above while it is on (they stay the fallback when off).
+# Trained on a dev machine by tools/train_mood.py from assets/mood/sentences.yaml -- add
+# sentences there, retrain, copy the output folder to model_dir. ~10 ms per sentence.
 #
-#   enabled      - run the emotion layer (off by default; the keyword clusters
-#                  remain the fallback whenever the model is off or returns an
-#                  unmapped label, so this can only ADD reactions)
-#   model_path   - LOCAL path to the GGUF (setup.sh downloads it), e.g.
-#                  models/emotion/Emotion_RoBERTa_german6_v7.gguf
-#   prompt_template - the completion-style prompt; {text} is replaced by the
-#                  transcript. Kept in config so a different model's prompt
-#                  format can be dropped in without a code change.
-#   max_tokens   - the model emits a single label token; a little headroom
-#   labels       - model output label -> owl eye expression. Labels NOT in this
-#                  map are ignored (the keyword clusters remain the fallback),
-#                  so a typo or model drift degrades to "no emotion reaction".
-#   sounds       - optional: model output label -> sound played alongside
-#                  the expression.
-emotion:
+#   model_dir      - LOCAL folder with model.onnx, tokenizer.json, labels.json
+#   min_confidence - below this the owl does not commit to a mood, it only looks at you
+#                    (a wrong feeling is worse than none)
+mood:
   enabled: false
-  model_path: ""       # e.g. models/emotion/Emotion_RoBERTa_german6_v7.gguf
-  prompt_template: "Klassifiziere die Emotion: {text}"
-  max_tokens: 8
-  labels:
-    Freude:       happy
-    Wut:          angry
-    Trauer:       sad_down
-    Angst:        scared
-    Ueberraschung: surprised
-    Verachtung:   unimpressed
-  sounds: {}
+  model_dir: ""        # e.g. models/mood
+  min_confidence: 0.5

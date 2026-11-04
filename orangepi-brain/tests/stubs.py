@@ -2,11 +2,11 @@
 Shared test helpers for the Robot Owl OrangePi brain.
 
 These tests run on a plain dev machine (e.g. a Mac) WITHOUT the OrangePi,
-a microphone, PortAudio, whisper.cpp or llama.cpp installed. They do that by:
+a microphone, PortAudio, whisper.cpp, Vosk or onnxruntime installed. They do that by:
 
   * stubbing the third-party modules the brain imports (serial, flask, yaml at
-    import time; whispercpp and llama_cpp lazily, when their feature starts)
-    with minimal fakes, and
+    import time; whispercpp and vosk lazily, when speech starts) with minimal
+    fakes, and
   * stubbing the *audio* module (sounddevice) for the Phase-2 ASR tests,
     feeding the Speech worker a stream of synthetic 48 kHz STEREO chunks (the
     I2S card's native format: mic on one channel, amp on the other) and a
@@ -15,11 +15,10 @@ a microphone, PortAudio, whisper.cpp or llama.cpp installed. They do that by:
 So the whole Phase-1 pipeline AND the Phase-2 capture->VAD->ASR->react loop
 are exercised without any real hardware.
 
-The whispercpp / llama_cpp stubs installed here are SAFE DEFAULTS: their
-models return an empty transcript / empty label, so a test that forgets to
-override them gets a no-op (no reaction) rather than a crash. The ASR test
-overrides the whisper.cpp stub with a transcript-specific one, and the emotion
-test overrides the llama.cpp stub with a label-specific one.
+The whispercpp / vosk stubs installed here are SAFE DEFAULTS: they never return
+a transcript, so a test that forgets to override them gets a no-op (no reaction)
+rather than a crash. The ASR tests install transcript-specific ones. The mood
+model is not stubbed here: speech tests hand Speech a fake classifier.
 """
 
 import sys
@@ -124,28 +123,33 @@ def install_stub_modules() -> None:
         sys.modules["pywhispercpp"] = package
         sys.modules["pywhispercpp.model"] = m
 
-    # llama_cpp: brain/emotion.py imports it lazily inside start() (only when
-    # emotion.enabled). The default stub returns an EMPTY label, so classify()
-    # reports "no opinion" and feed() falls through to the keyword clusters --
-    # the safe no-op. The emotion test installs its own label-specific stub.
-    if not _has("llama_cpp"):
-        m = types.ModuleType("llama_cpp")
+    # vosk: brain/speech.py imports it lazily inside start() when speech.engine is vosk.
+    # The default recogniser never finishes a sentence (no reaction); the Vosk ASR test
+    # installs its own scripted one.
+    if not _has("vosk"):
+        m = types.ModuleType("vosk")
 
-        class _Llama:
-            def __init__(self, model_path=None, n_ctx=512, **kw):
-                self.model_path = model_path
-                self.n_ctx = n_ctx
-                self.prompts = []
+        class _VoskModel:
+            def __init__(self, path=None):
+                self.path = path
 
-            def create_completion(self, prompt, max_tokens=8, temperature=0.0,
-                                  **kw):
-                self.prompts.append(prompt)
-                # Default: no opinion (empty text -> classify() returns "").
-                return {"choices": [{"text": ""}]}
+        class _KaldiRecognizer:
+            def __init__(self, model=None, rate=16000):
+                self.model, self.rate, self.resets = model, rate, 0
 
-        m.Llama = _Llama
-        sys.modules["llama_cpp"] = m
+            def AcceptWaveform(self, data):
+                return False
 
+            def Result(self):
+                return '{"text": ""}'
+
+            def Reset(self):
+                self.resets += 1
+
+        m.Model = _VoskModel
+        m.KaldiRecognizer = _KaldiRecognizer
+        m.SetLogLevel = lambda level: None
+        sys.modules["vosk"] = m
 
 class FakeAudio:
     """Stand-in for brain.audio.Audio: records play() calls."""
@@ -283,6 +287,7 @@ class FakeSupervisor:
         # Commands this fake supervisor was asked to send. (These used to be
         # appended to the telemetry object itself, which nothing ever read.)
         self.commands = []
+        self.moods = []
         self.audio = audio if audio is not None else FakeAudio()
         # The real Supervisor builds these in __init__; here the tests that
         # exercise navigation attach them, and the rest leave them None -- so
@@ -315,6 +320,15 @@ class FakeSupervisor:
     def play_sound(self, sound):
         """Mirrors Supervisor.play_sound(): the supervisor owns the amp."""
         return self.audio.play(sound) if self.audio else False
+
+    def show_mood(self, mood, body=True, sound=True):
+        """Mirrors Supervisor.show_mood(): records the mood and plays its sound."""
+        from brain import audio as _audio
+        self.moods.append(mood)
+        sfx = _audio.MOOD_SOUNDS.get(mood) if sound else None
+        if sfx:
+            self.play_sound(sfx)
+        return True, sfx
 
     def current_state(self):
         """Mirrors Supervisor.current_state()."""
@@ -429,26 +443,9 @@ def make_config(**overrides):
             "sound_start": "detecting",
             "sound_stop": "waking",
         },
-        # Optional sentence-level emotion layer (llama.cpp). DISABLED by default
-        # here (matching the real config.yaml default) so the existing
-        # keyword-cluster tests are unaffected: with it off, feed() never calls
-        # EmotionClassifier.classify() and the llama.cpp stub is never invoked.
-        # The emotion test overrides enabled=True + the label map.
-        "emotion": {
-            "enabled": False,
-            "model_path": "",
-            "prompt_template": "Klassifiziere die Emotion: {text}",
-            "max_tokens": 8,
-            "labels": {
-                "Freude": "happy",
-                "Wut": "angry",
-                "Trauer": "sad_down",
-                "Angst": "scared",
-                "Ueberraschung": "surprised",
-                "Verachtung": "unimpressed",
-            },
-            "sounds": {},
-        },
+        # Sentence -> mood model (brain/mood.py). DISABLED here, as in config.yaml's default, so
+        # the keyword-cluster tests are unaffected; the mood tests give Speech a fake classifier.
+        "mood": {"enabled": False, "model_dir": "", "min_confidence": 0.5},
     }
     for k, v in overrides.items():
         cfg["speech"][k] = v

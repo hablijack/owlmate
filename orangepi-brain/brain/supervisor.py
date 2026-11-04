@@ -294,6 +294,23 @@ class Supervisor:
         """
         return self.audio.play(sound) if self.audio else False
 
+    def show_mood(self, mood: str, body: bool = True, sound: bool = True):
+        """Show one of the owl's moods: eyes, body pose (ears, wings, head) and its sound.
+
+        The one way a mood is shown -- the web UI's Expressions panel and speech both come
+        through here. The pose goes out first (`react`, which brings its own eyes); the eyes
+        go out again afterwards so they also change where the body cannot move (asleep,
+        locked image). Returns (eyes_ok, sound_played_or_None).
+        """
+        from brain import audio
+        if body:
+            self.serial.react(mood)
+        ok = self.serial.set_expression(mood)
+        sfx = audio.MOOD_SOUNDS.get(mood) if sound else None
+        if sfx:
+            self.play_sound(sfx)
+        return ok, sfx
+
     # ------------------------------------------------------------------
     # Sound cues tied to behavior state transitions
     # ------------------------------------------------------------------

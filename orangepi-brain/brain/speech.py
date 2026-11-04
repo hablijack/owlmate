@@ -1,11 +1,20 @@
 """
 Robot Owl OrangePi Brain - Speech Recognition
 
-The owl hears the user's voice and reacts: a short utterance is transcribed
-(offline whisper.cpp on the OrangePi) and mapped to a reaction (eye expression
-+ an owl-call on the MAX98357A amp). This is the OrangePi-side "behavior
-pipeline" from the speech spec: cooldown -> (optional emotion) -> keyword
-cluster -> action.
+The owl hears the user's voice and reacts: what is said to it ("Hubert, ...") is
+transcribed offline on the OrangePi and mapped to one of its moods (eyes + body + sound,
+brain/mood.py) or to a navigation command. This is the OrangePi-side "behavior
+pipeline" from the speech spec: name -> cooldown -> navigation -> mood (or keyword
+clusters when the mood model is off) -> action.
+
+Two recognisers (speech.engine):
+  * "vosk" (the default since 2026-11-04): Kaldi-based, STREAMING -- every chunk goes in
+    as it arrives and a sentence comes out ~0.2 s after the speaker stops. Measured on
+    the owner's own recordings it is as accurate as whisper small (12 % word errors) at
+    ~12 % of one core, and it finds the name "Hubert" more often. specs/014.
+  * "whisper" (whisper.cpp): the energy VAD below cuts an utterance, then it is
+    transcribed as a whole. small takes 3-5 s per sentence on the Zero 3W, tiny/base
+    do not understand quiet shoulder speech. Kept for comparison.
 
 Design (see specs/014-speech.spec, and specs/015 for the OrangePi audio path):
   * ASR runs on the OrangePi -- the ESP32 has no mic / no ASR headroom.
@@ -20,29 +29,25 @@ Two OrangePi-specific differences from the RPi brain:
     is fixed at 48 kHz and is STEREO (the mic is on one channel, the amp on
     the other). We therefore capture at 48 kHz / 2 ch, take the mic channel,
     and resample to 16 kHz (whisper's native rate) before the VAD + ASR.
-  * The ASR engine is whisper.cpp (via pywhispercpp), not faster-whisper: a
-    single self-contained C++ runtime with no torch / CTranslate2 dependency.
-    The model is a local .bin/.gguf file downloaded by setup.sh (offline).
-  * An OPTIONAL emotion layer (brain/emotion.py, llama.cpp) can tag the
-    transcript with a sentence-level emotion that takes precedence over the
-    keyword clusters. It is off by default; when on, an unmapped label simply
-    falls through to the keyword clusters, so it can only add reactions.
+  * Both engines are self-contained native runtimes (no torch); their models are local
+    files downloaded by setup.sh, so the OrangePi runs offline.
 
 Threading model
   A single daemon worker thread owns the whole audio path. It pulls mic chunks
   from a queue (filled by sounddevice's input callback), resamples them to the
-  ASR rate, runs the energy VAD, and -- only when the gate is open --
-  transcribes the accumulated window with whisper.cpp and hands the transcript
-  (plus an optional emotion label) to feed(). All reactions (serial commands,
-  amp audio) happen in this worker, never in the foreground serial read loop.
+  ASR rate and hands them to the recogniser: Vosk streams every chunk, whisper
+  runs the energy VAD and transcribes a closed utterance. Either way the
+  transcript goes to feed(). All reactions (serial commands, amp audio) happen
+  in this worker, never in the foreground serial read loop.
 
-  whisper.cpp + PortAudio (+ llama.cpp if emotion is on) are imported lazily
-  (inside start()) so that:
+  The recogniser, the mood model and PortAudio are imported lazily (inside
+  start()) so that:
   * the brain still runs on a machine with no mic / no ASR engine installed,
   * the heavy ASR import stays out of the normal (speech-disabled) startup.
   With speech.enabled: false nothing here is imported or started.
 """
 
+import difflib
 import logging
 import math
 import os
@@ -54,7 +59,7 @@ import time
 
 from brain.serial_handler import SerialHandler
 from brain.supervisor import Supervisor
-from brain.emotion import EmotionClassifier
+from brain.mood import MoodClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +146,23 @@ class Speech:
         # one of these is heard while the owl is asleep). Kept strict/short so
         # the owl isn't woken by the TV. Empty = speech never wakes it.
         self.wake_keywords = [str(k).lower() for k in (cfg.get("wake_keywords") or [])]
+        # Name activation: the owl only reacts to speech that is addressed to it ("Hubert, das ist
+        # toll"), then keeps listening for name_window_s without needing the name again. Whisper
+        # spells an unusual name many ways (Hubert, Huber, Hupert ...), so a word counts when it is
+        # at least name_threshold similar to one of the names. Empty list = off (every utterance
+        # counts, as before). With a name the face gate is pointless -- on a shoulder the owl never
+        # sees a face -- so set require_face: false.
+        self.name_keywords = [str(k).lower() for k in (cfg.get("name_keywords") or [])]
+        self.name_window_s = float(cfg.get("name_window_s", 10.0))
+        self.name_threshold = float(cfg.get("name_threshold", 0.75))
+        # What the recogniser makes of the name when it is said ALONE (no sentence to give it
+        # context): Vosk heard "Hubert" as "robert"/"rupert" there. Accepted only when the
+        # utterance is just that word, so "Robert hat angerufen" stays unaddressed.
+        self.name_alone_aliases = [str(k).lower() for k in (cfg.get("name_alone_aliases") or [])]
+        # Recogniser: "vosk" (streaming, the default) or "whisper" (see the module docstring).
+        self.engine = str(cfg.get("engine", "whisper") or "whisper").lower()
+        self.vosk_model = cfg.get("vosk_model", "") or ""
+        self._name_until = 0.0
 
         # Navigation ("guide me home"): phrases that START guiding toward a
         # place (the words after the trigger are the place name, fuzzy-matched
@@ -158,9 +180,9 @@ class Speech:
         # utterance is transcribed.
         self.last_heard_at: float = 0.0
 
-        # Optional sentence-level emotion layer (llama.cpp). Always constructed
-        # (so feed() can always ask it); it no-ops unless emotion.enabled.
-        self.emotion = EmotionClassifier(config)
+        # Sentence -> mood (brain/mood.py). Always constructed so feed() can always ask it;
+        # it answers ("", 0.0) unless mood.enabled.
+        self.mood = MoodClassifier(config)
 
         # Worker-thread plumbing (populated in start()).
         self._queue: "queue.Queue" = queue.Queue(maxsize=64)
@@ -171,8 +193,10 @@ class Speech:
         self._voice_started = 0.0
         self._silence_frames = 0
         self._utterance_generation = None
-        # Lazy-loaded whisper.cpp model (loaded on the worker thread in start()).
+        # Lazy-loaded recogniser (start()): whisper.cpp model or Vosk recogniser.
         self._whisper = None
+        self._vosk = None
+        self._vosk_generation = None
 
     # ==================================================================
     # Lifecycle (called from main.py, mirroring the web UI pattern)
@@ -195,33 +219,41 @@ class Speech:
         logger.info(
             "Speech recognition starting (lang=%s, model=%s, mic=%s, "
             "capture=%d Hz/%dch, asr=%d Hz, window=%.1fs, cooldown=%.1fs, "
-            "require_face=%s, emotion=%s)",
-            self.language, self.model or "default", self.mic_device or "default",
+            "require_face=%s, mood=%s)",
+            self.language, self.vosk_model if self.engine == "vosk" else (self.model or "default"),
+            self.mic_device or "default",
             self.capture_rate, self.capture_channels, self.sample_rate,
             self.window_s, self.cooldown_s, self.require_face,
-            "on" if self.emotion.enabled else "off",
+            "on" if self.mood.enabled else "off",
         )
 
-        # Lazy heavy imports: only pay for whisper.cpp + portaudio (+ llama.cpp
-        # if the emotion layer is on) when the feature is actually enabled.
+        # Lazy heavy imports: only pay for the recogniser + portaudio when the feature is on.
         import numpy as np  # noqa: F401  (ensures numpy is present early)
         import sounddevice as sd
-        from pywhispercpp.model import Model
 
-        # Load the whisper.cpp model once on the worker thread. It is a local
-        # file (setup.sh downloads it), so there is no first-run hub fetch and
-        # the OrangePi works fully offline.
-        if not self.model:
-            raise RuntimeError("speech is enabled but speech.model (whisper.cpp model path) is empty")
-        try:
-            self._whisper = Model(self.model, language=self.language, n_threads=self.threads,
-                                  print_realtime=False, print_progress=False)
-        except Exception as e:
-            raise RuntimeError(f"Could not load whisper.cpp model {self.model!r}: {e}") from e
+        # The recogniser's model is a local file/directory (setup.sh downloads it), so there
+        # is no first-run hub fetch and the OrangePi works fully offline.
+        if self.engine == "vosk":
+            from vosk import KaldiRecognizer, Model as VoskModel, SetLogLevel
+            if not self.vosk_model:
+                raise RuntimeError("speech.engine is vosk but speech.vosk_model is empty")
+            SetLogLevel(-1)
+            try:
+                self._vosk = KaldiRecognizer(VoskModel(self.vosk_model), self.sample_rate)
+            except Exception as e:
+                raise RuntimeError(f"Could not load Vosk model {self.vosk_model!r}: {e}") from e
+        else:
+            from pywhispercpp.model import Model
+            if not self.model:
+                raise RuntimeError("speech is enabled but speech.model (whisper.cpp model path) is empty")
+            try:
+                self._whisper = Model(self.model, language=self.language, n_threads=self.threads,
+                                      print_realtime=False, print_progress=False)
+            except Exception as e:
+                raise RuntimeError(f"Could not load whisper.cpp model {self.model!r}: {e}") from e
 
-        # Optional emotion layer: load the LLM only when enabled.
-        if self.emotion.enabled:
-            self.emotion.start()
+        if self.mood.enabled:
+            self.mood.start()
 
         # Open the mic. The I2S card is fixed at capture_rate and is stereo
         # (mic on mic_channel, amp on the other), so we capture the whole card
@@ -242,6 +274,7 @@ class Speech:
             self._stream.start()
         except Exception as e:
             self._whisper = None
+            self._vosk = None
             raise RuntimeError(f"Could not open microphone {self.mic_device or 'default'}: {e}") from e
 
         self._stop.clear()
@@ -278,8 +311,6 @@ class Speech:
             except Exception:
                 pass
             self._stream = None
-        if self.emotion.enabled:
-            self.emotion.stop()
         logger.info("Speech recognition stopped")
 
     # ==================================================================
@@ -333,11 +364,12 @@ class Speech:
             else:
                 mono = raw
             # Normalize to float32 in [-1, 1] (the card may deliver int32),
-            # then resample from the card rate down to the ASR rate. The VAD
-            # below is written for the ASR rate, so it sees 16 kHz mono.
-            self._process_chunk(self._resample(self._to_float(mono),
-                                                self.capture_rate, self.sample_rate),
-                                captured_generation=generation, captured_at=captured_at)
+            # then resample from the card rate down to the ASR rate (16 kHz mono).
+            chunk16 = self._resample(self._to_float(mono), self.capture_rate, self.sample_rate)
+            if self._vosk is not None:
+                self._process_chunk_vosk(chunk16, captured_generation=generation, captured_at=captured_at)
+            else:
+                self._process_chunk(chunk16, captured_generation=generation, captured_at=captured_at)
 
     def _to_float(self, raw):
         """Normalize captured samples to float32 in [-1, 1].
@@ -454,6 +486,44 @@ class Speech:
                     self._transcribe_and_feed()
             # else: still in silence, nothing to do
 
+    def _process_chunk_vosk(self, chunk, captured_generation=None, captured_at=None) -> None:
+        """Vosk path: stream every chunk into the recogniser; a finished sentence goes to feed().
+
+        No energy VAD here -- Vosk finds the end of a sentence itself (Kaldi endpointing),
+        which is what makes it answer ~0.2 s after the speaker stops. The owl's own sound
+        must not reach it: chunks under a playback barrier are dropped and the recogniser is
+        reset, so a sentence never straddles the owl's own voice. It also listens while the
+        owl is ASLEEP (the name wakes it, feed() decides), only not in update/error.
+        """
+        import json
+        import numpy as np
+        generation, safe_after = self.supervisor.audio_capture_guard()
+        stale = (time.monotonic() < safe_after
+                 or (captured_generation is not None and captured_generation != generation)
+                 or (captured_at is not None and safe_after > 0 and captured_at < safe_after))
+        last = self.supervisor.last
+        if stale or last is None or last.state in ("update", "error"):
+            if self._vosk_generation is not None:
+                self._vosk.Reset()
+                self._vosk_generation = None
+            return
+        if self._vosk_generation not in (None, generation):
+            self._vosk.Reset()
+        self._vosk_generation = generation
+        pcm = (np.clip(chunk, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+        if not self._vosk.AcceptWaveform(pcm):
+            return
+        transcript = (json.loads(self._vosk.Result()).get("text") or "").strip()
+        self._vosk_generation = None
+        if not transcript:
+            return
+        logger.info("Speech: heard %r (vosk)", transcript)
+        latest_generation, safe_after = self.supervisor.audio_capture_guard()
+        if latest_generation != generation or time.monotonic() < safe_after:
+            logger.debug("Speech: discarding result invalidated by playback")
+            return
+        self.feed(transcript)
+
     def _gate_open(self) -> bool:
         """True if the owl is in a reactive state and (optionally) a face is
         in frame. Cheap: reads the supervisor's cached last telemetry."""
@@ -492,8 +562,6 @@ class Speech:
 
         pywhispercpp.Model.transcribe() returns a list of Segment objects.
         Join their text before passing the transcript to the behavior pipeline.
-        If the optional emotion layer is on, we also tag the transcript with a
-        sentence-level emotion and hand both to feed().
         """
         import numpy as np
 
@@ -548,25 +616,22 @@ class Speech:
                     utterance.size / self.sample_rate, peak, asr_s, self.threads, self.audio_ctx, transcript)
         if not transcript or _only_non_speech(transcript):
             return
-        # Optional sentence-level emotion tag (llama.cpp). Empty when the layer
-        # is off or has no opinion; feed() then just falls through to keywords.
-        emotion = self.emotion.classify(transcript) if self.emotion.enabled else ""
         latest_generation, safe_after = self.supervisor.audio_capture_guard()
         if latest_generation != generation or time.monotonic() < safe_after:
             logger.debug("Speech: discarding ASR result invalidated by playback")
             return
         logger.debug("Speech: heard %r", transcript)
-        self.feed(transcript, emotion=emotion)
+        self.feed(transcript)
 
     # ==================================================================
     # Behavior pipeline (Phase 1). Called by the worker with a transcript.
     # ==================================================================
-    def feed(self, transcript: str, emotion: str = "") -> None:
+    def feed(self, transcript: str) -> None:
         """Run the behavior pipeline on a transcript.
 
         Mirrors the spec's handle_behavior_pipeline(), plus the Phase-4
-        wake-on-speech exception, the navigation override, and the OrangePi
-        optional emotion layer:
+        wake-on-speech exception, the name activation, the navigation override
+        and the mood classifier:
           0. (Phase 4) the user is an interaction trigger -> reset the
               auto-sleep inactivity timer; if the owl is asleep, a wake keyword
               wakes it, a navigation STOP keyword ends an in-progress navigation
@@ -581,22 +646,20 @@ class Speech:
               phrase that started it)
           3. enforce the cooldown
           4. navigation START trigger -> start guiding toward the named place
-              (checked BEFORE the emotion layer and the keyword clusters, so a
+              (checked BEFORE the mood classifier and the keyword clusters, so a
               nav sentence is not stolen by a single question word, e.g.
               "wie komm ich zu hotel")
-          4.5. (OrangePi, optional) a tagged sentence-level emotion -> set the
-              matching expression (+ optional owl-call) and return. An empty
-              tag or a label not in the mapping falls through to the keyword
-              clusters, so enabling emotion can only ADD reactions.
-          5. keyword clusters (first match wins, in cluster definition order)
-          6) else stochastic ambient fallback (gaze at user / idle)
+          5. mood classifier (if mood.enabled): a confident mood is shown with eyes,
+              body and sound; "neutral" or an unsure answer -> the owl just looks at you.
+              The keyword clusters below are then not used.
+          6. keyword clusters (first match wins) -- only when the mood model is off
+          7. else stochastic ambient fallback (gaze at user / idle)
         """
         if not self.enabled:
             return
         transcript = (transcript or "").strip()
         if not transcript:
             return
-        emotion = (emotion or "").strip()
 
         self.last_heard = transcript
         now = time.time()
@@ -612,7 +675,7 @@ class Speech:
             # "stop" always works, even from the sofa while the owl sleeps).
             # Any other speech is ignored so the sleeping owl is not startled
             # by the TV / ambient words.
-            if any(self._keyword_hit(normalized, kw) for kw in self.wake_keywords):
+            if self._addressed(normalized) or any(self._keyword_hit(normalized, kw) for kw in self.wake_keywords):
                 logger.info("Speech: wake keyword %r heard while asleep -> waking", transcript)
                 self.serial.wake()
                 self.supervisor.last_state = "idle"  # optimistic; telemetry confirms
@@ -623,6 +686,26 @@ class Speech:
                 return
             logger.debug("Speech: %r heard while asleep (not wake/stop) -> ignored", transcript)
             return
+
+        # 0.5) Name activation: ignore speech that is not addressed to the owl. A navigation
+        #      STOP is exempt for the same reason as below ("stop" must always work).
+        if self.name_keywords and not self._nav_stop_hit(normalized):
+            if self._addressed(normalized):
+                self._name_until = now + self.name_window_s
+                if len(re.findall(r"[a-zäöüß]+", normalized)) <= 2:
+                    # Just the name: show that it is listening (ears up, eyes on you) and wait
+                    # for the sentence -- that one needs no name (name_window_s).
+                    logger.info("Speech: name heard (%r) -> listening for %.0f s", transcript, self.name_window_s)
+                    self.serial.set_gaze(0.0, 0.0)
+                    self.supervisor.show_mood("focused", sound=False)
+                    self.supervisor.play_sound("hello")
+                    self._last_reaction = now
+                    return
+            elif now > self._name_until:
+                logger.debug("Speech: %r not addressed to the owl, ignoring", transcript)
+                return
+            else:
+                self._name_until = now + self.name_window_s   # a follow-up keeps the conversation open
 
         # 1) Face-gate: only react while a face is in frame (prevents the owl
         #    reacting to ambient TV / the user's own amp). A navigation STOP
@@ -645,36 +728,32 @@ class Speech:
             logger.debug("Speech: in cooldown, ignoring %r", transcript)
             return
 
-        # 4) Navigation START trigger (checked before the emotion layer and the
+        # 4) Navigation START trigger (checked before the mood classifier and the
         #    keyword clusters so a nav sentence isn't claimed by a single word).
         if self.nav_triggers and self._nav_trigger_hit(normalized):
             self._react_navigate(transcript)
             return
 
-        # 4.5) Optional sentence-level emotion (llama.cpp). Only honoured when
-        #      the layer is enabled AND the tag maps to an expression; then it
-        #      takes precedence over the keyword clusters. An empty tag (no
-        #      opinion), a disabled layer, or an unmapped label falls through
-        #      to the keyword clusters below.
-        if emotion and self.emotion.enabled:
-            expression = self.emotion.labels.get(emotion)
-            if expression:
-                sound = self.emotion.sounds.get(emotion)
-                logger.info("Speech: emotion %r in %r -> %s", emotion, transcript, expression)
-                self.serial.set_expression(expression)
-                if sound:
-                    self.supervisor.play_sound(sound)
-                self._last_reaction = now
-                return
-            # else: unmapped label -> fall through to the keyword clusters
+        # 5) Mood classifier: the sentence decides the mood (eyes + body + sound). A wrong
+        #    feeling is worse than none, so "neutral" or an unsure answer only looks at you.
+        if self.mood.enabled:
+            mood, p = self.mood.classify(normalized)
+            if mood and mood != "neutral" and p >= self.mood.min_confidence:
+                logger.info("Speech: %r -> %s (%.2f)", transcript, mood, p)
+                self.supervisor.show_mood(mood)
+            else:
+                logger.info("Speech: %r -> no mood (%s %.2f), gaze at user", transcript, mood or "-", p)
+                self.serial.set_gaze(0.0, 0.0)
+            self._last_reaction = now
+            return
 
-        # 5) Keyword clusters (first match wins, in cluster definition order).
+        # 6) Keyword clusters (first match wins, in cluster definition order).
         for cluster, keywords in self.clusters.items():
             if any(self._keyword_hit(normalized, kw) for kw in keywords):
                 self._react(cluster, transcript)
                 return
 
-        # 6) No keyword matched: stochastic ambient fallback (spec's else-branch).
+        # 7) No keyword matched: stochastic ambient fallback (spec's else-branch).
         #    Default 0.8 act / 0.2 idle -> we act (gaze at user) most of the time.
         if random.random() < 0.8:
             logger.info("Speech: ambient %r -> gaze at user", transcript)
@@ -685,6 +764,23 @@ class Speech:
     # ------------------------------------------------------------------
     # Keyword matching
     # ------------------------------------------------------------------
+    def _addressed(self, text: str) -> bool:
+        """The owl's name is in `text` -- or `text` is just one of the name_alone_aliases."""
+        if self._name_hit(text):
+            return True
+        w = re.findall(r"[a-zäöüß]+", text)
+        return len(w) == 1 and w[0] in self.name_alone_aliases
+
+    def _name_hit(self, text: str) -> bool:
+        """True if any word of `text` is (nearly) one of the owl's names."""
+        if not self.name_keywords:
+            return False
+        for word in re.findall(r"[a-zäöüß]+", text):
+            for name in self.name_keywords:
+                if difflib.SequenceMatcher(None, word, name).ratio() >= self.name_threshold:
+                    return True
+        return False
+
     @staticmethod
     def _keyword_hit(text: str, keyword: str) -> bool:
         """True if `keyword` occurs in `text` as a whole word / phrase.

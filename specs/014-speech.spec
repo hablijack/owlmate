@@ -1,14 +1,19 @@
 # SPEC-014: Speech — hearing the user and reacting
 
-Status: partial — controlled live reaction verified; ambient/own-sound robustness pending
-Verified: 2026-10-18 — real mic/VAD/ASR, happy command ACK and telemetry;
-          owner confirmed one visible happy-eye reaction
+Status: partial — name-gated Vosk + mood classifier accepted live by the owner;
+        sustained ambient/TV robustness pending
+Verified: 2026-11-04 — on the shoulder: "Hubert" alone, Sauwetter -> sad_down,
+          Lotto -> glee, Fuss/Treppe -> scared, neutral -> gaze only
+          (earlier: 2026-10-18 real mic/VAD/ASR, happy command ACK)
 Depends on: 001, 012, 013
 
 ## Intent
 
-The owl hears a short utterance, transcribes it offline on the Orange Pi, and reacts
-with an eye expression and a sound. It is a reaction engine, not a
+The owl is called **Hubert** (written "Huubert"). It sits on the owner's shoulder,
+so it is never looked at while spoken to: it listens only when its name is said,
+transcribes offline on the Orange Pi, and shows the *mood the sentence implies*
+("Heute ist wirklich ein Sauwetter" -> sad_down, "Ich habe im Lotto gewonnen" ->
+glee, "Ich habe mir den Fuss angestossen" -> scared) with eyes, body pose and sound. It is a reaction engine, not a
 conversation: there is no dialogue state, no intent model, no reply. German.
 
 Absorbed from `SPEECH_RECOGNITION_PLAN.md` (deleted 2026-08-27), which was the
@@ -27,10 +32,60 @@ pre-implementation design.
 * **R-014.6** Keywords, clusters and reactions are configuration, not code.
 * **R-014.7** Real owl playback and a configurable reverb tail must not become
   speech input. Drop overlapping/stale mic blocks, reset partial utterances and
-  invalidate in-flight ASR/emotion results across playback. Keep capture and the
+  invalidate in-flight ASR/mood results across playback. Keep capture and the
   silent I2S TX alive; the silent stream itself must not inhibit listening.
 
 ## Decisions
+
+**Since 2026-11-04 the pipeline is: Vosk (streaming) -> name gate -> navigation ->
+mood classifier.** It replaces whisper + face gate + keyword clusters for the
+default configuration (`speech.engine: vosk`, `mood.enabled`). The whisper path
+and the clusters remain for `engine: whisper` / `mood.enabled: false`. Measured
+on a corpus the owner recorded on the shoulder (33 utterances, 20 containing the
+name, 12 without it; A733, same audio for every engine):
+
+| engine | latency after speech | name hits /20 | false names /12 | WER |
+|---|---|---|---|---|
+| whisper tiny | 0.70 s | 3 | 1 | 52 % |
+| whisper base | 1.29 s | 11 | 0 | 23 % |
+| whisper small q8_0, 4 threads | 3.30 s | 15 | 1 | 12 % |
+| whisper small, 8 threads | 3.36 s (p90 6.07) | 15 | - | 11 % |
+| whisper medium q5 | ~12 s | - | - | - |
+| whisper large-v3-turbo q5 | 21-80 s, repetition loops | - | - | - |
+| **Vosk small-de-0.15, free text** | **~0.2 s** (RTF 0.124) | **14** | **0** | **12 %** |
+
+Vosk is as accurate as whisper small at a fifteenth of the delay, because it
+decodes while the user speaks; whisper must wait for the end and then encode.
+Live on 2026-11-04 the mood reaction followed the transcript by ~10 ms.
+
+**The name gate (`_addressed`).** A fuzzy match of any word against
+`name_keywords` (`hubert`, ratio >= `name_threshold` 0.75) opens a
+`name_window_s` (10 s) window; inside it the name is not needed again. Said alone
+the name shows `focused` + the `hello` sound. Vosk's most frequent mishearings of
+the name said *alone* ("robert", "rupert") count only when they are the whole
+utterance (`name_alone_aliases`) -- in a sentence "Robert hat angerufen" must not
+address the owl. The face gate is off (`require_face: false`): on the shoulder
+the camera never sees the speaker. The own-voice barrier (R-014.7) still resets
+the recogniser across playback.
+
+**Sentence -> mood is a fine-tuned small BERT, not keywords and not an LLM.**
+None of the owner's example sentences names its feeling, so keyword clusters
+cannot work. `paraphrase-multilingual-MiniLM-L12-v2` is fine-tuned on
+`orangepi-brain/assets/mood/sentences.yaml` (12 moods, ~570 training sentences,
+106 held-out test sentences) by `orangepi-brain/tools/train_mood.py` on a dev
+machine, exported as int8 ONNX (118 MB) and run by `brain/mood.py` with
+onnxruntime + tokenizers -- no torch on the Pi, ~10 ms per sentence. Every
+training sentence is also taught in Vosk's form (lowercase, no punctuation, with
+"hubert" before or after), because that is what arrives. Held-out score: 94/106
+(torch), 92/106 (int8). Below `min_confidence` (0.5) or for `neutral` the owl
+only looks at the user: a wrong feeling is worse than none. Comparison on 41
+unseen sentences: German-Emotions (XLM-R, GoEmotions labels) 11; Qwen2.5
+0.5B/1.5B/3B by prompt 6/16/26; embedding kNN 23-32; frozen embeddings + logistic
+regression 34-39; fine-tuned MiniLM 38, gbert-base 37 (MiniLM chosen: smaller,
+multilingual, same score).
+
+**Superseded 2026-11-04 for the default engine:** the two decisions below (whisper
+tiny, three-part gate with a face) still describe `engine: whisper`.
 
 **whisper.cpp (via pywhispercpp), not openai-whisper.** No torch on the Orange
 Pi. The installer defaults to the multilingual **`tiny` model**, a local `.bin`
@@ -60,7 +115,7 @@ Supervisor. The PortAudio callback drops blocks overlapping playback/tail,
 using ADC age where available and block duration as fallback. Queue entries
 carry capture generation and start time: an old block cannot become safe just
 because ASR dequeues it after playback ends. Generation changes reset partial
-utterances. Results of ASR/optional emotion inference are checked again before
+utterances. Results of ASR/mood inference are checked again before
 feed(), including when a whole sound has started and ended during inference.
 No mic reopen, clock stop or new firmware behavior is involved.
 
@@ -243,6 +298,24 @@ spoken sentence ~5 s after another).
 
 ## Falsified
 
+* **"Whisper base/small just needs tuning to hear 'Hubert'."** Base produced
+  sound tags or nothing for the name; small hears it in sentences (15/20) but
+  spells it alone as "Hupiert", "Uppet", "Hulbett", "Uppert" -- and costs 3-6 s.
+  medium (~12 s) and large-v3-turbo (21-80 s, repetition hallucinations) are not
+  usable on the A733. Measured 2026-11-04, table in Decisions.
+* **"Pinning whisper to the two A76 cores is faster."** small on the A76 pair
+  with 2 threads: 7.65 s, against 3.36 s with 8 threads on all cores.
+* **"Vosk's grammar mode (`["hubert", "[unk]"]`) makes a good wake word."** With
+  only one real word to choose from, the decoder maps much ordinary speech onto
+  it -- massive false positives. Free-text mode plus a fuzzy match is used.
+* **"A ready-made German emotion model maps sentences to our moods."**
+  German-Emotions scored 11/41: it recognises *named* feelings, not situations
+  ("Ich bin die Treppe runtergefallen"), and its GoEmotions labels are not ours.
+* **"A local LLM classifies moods by prompt."** Qwen2.5 3B, the largest that
+  fits, reached 26/41 and needs seconds per sentence; 0.5B was near chance.
+* **"Speech needs a face in frame."** On the shoulder the owner never faces the
+  owl; the face gate blocked every real use. Replaced by the name gate.
+
 * **"The generic 0.02 energy threshold suits the installed mic."** The measured
   real speech chunks were all below it. A gate can be perfectly unit-tested
   against loud synthetic tones and still reject every real utterance.
@@ -300,18 +373,21 @@ spoken sentence ~5 s after another).
 
 ## Open
 
-* **Re-run the five-sentence test on the shoulder after the last changes
-  (2026-11-01).** The `own_eyes` change and the 3 s cooldown are deployed but
-  were not heard live afterwards. Expected: "Nein, lass das" -> `sad_down` with
-  head shake; "Du bist eine gute Eule" -> happy.
+* **The name inside a sentence is still sometimes misheard** (live 2026-11-04:
+  "wird", "gerd", "gucke", "robert ich hab mir ..."), so the owner occasionally
+  repeats the sentence. Collect these from the log; if it stays frequent, a
+  custom wake-word model (~50 recordings of the owner) is the next lever, not a
+  bigger ASR.
+* **Misclassified real sentences are training data.** The log line
+  `'<text>' -> <mood> (<p>)` shows each decision; add wrong ones to
+  `assets/mood/sentences.yaml` (train) and retrain.
+
 * **Mic level.** Peak levels of 0.002-0.006 are low. Software gain before the
   VAD, or the ICS43434's placement/window in the case, may help; sentences below
   `vad_threshold` (0.002) are never heard. Lowering it toward 0.0015 trades
   against more music/ambient blips -- measure both.
-* **Keyword robustness.** Whisper-tiny mishears; the clusters now carry
-  observed variants ("lasst das", "gute eure/eume/eile"). A fuzzy or
-  prefix match, or the sentence-level emotion layer (disabled, model not
-  installed on the Pi), would be the structural fix.
+* **Keyword robustness** (whisper path only). Superseded for the default
+  configuration by the mood classifier (Decisions, 2026-11-04).
 
 * **Production VAD calibration and ambient rejection.** The default threshold
   rejects measured speech; temporary 0.0006 admitted a confirmed live reaction

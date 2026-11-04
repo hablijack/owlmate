@@ -19,8 +19,9 @@
 #   4. Install the ALSA mixer config (asound.conf) for the shared 48 kHz card.
 #   5. Install the brain to /  6. Run an INTERACTIVE CONFIG WIZARD (serial port, web
 #      UI, speech, auto-sleep) and write the choices to config.yaml.
-#   7. Pre-download the whisper.cpp model (and note the emotion GGUF) so the
-#      first real transcription is instant instead of a several-minute fetch.
+#   7. Pre-download the speech model (Vosk, or whisper.cpp with engine: whisper)
+#      so the first transcription is instant instead of a long fetch. The mood
+#      model is built on a dev machine (tools/train_mood.py) and copied over.
 #   8. Create a dedicated 'robotowl' user + a udev rule for the ESP32 port.
 #   9. Install + enable the systemd service.
 #   10. Reboot to apply the DT overlay (which loads the sound card). The robot
@@ -47,6 +48,8 @@ MODULE_LOAD_CONF="/etc/modules-load.d/robot-owl-i2s.conf"
 SERVICE_USER="robotowl"
 OVERLAY_NAME="owl-i2s-overlay"
 WHISPER_MODEL_BASE="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+VOSK_MODEL_NAME="vosk-model-small-de-0.15"
+VOSK_MODEL_URL="https://alphacephei.com/vosk/models/${VOSK_MODEL_NAME}.zip"
 
 log()  { printf '\n\033[1;32m[robot-owl]\033[0m %s\n' "$*"; }
 info() { printf '\033[0;37m[robot-owl]\033[0m %s\n' "$*"; }
@@ -130,8 +133,8 @@ run_config_wizard() {
     # probed here — leave mic_device empty (= the default card).
     local speech_enabled="false" speech_model="tiny" speech_lang="de"
     if [ "${INTERACTIVE}" -eq 1 ]; then
-        ask "Enable speech recognition (I2S mic -> whisper.cpp)? [false]" speech_enabled
-        ask "Whisper.cpp model (tiny/base/small/medium; tiny = measured low latency) [tiny]" speech_model
+        ask "Enable speech recognition (I2S mic -> Vosk)? [false]" speech_enabled
+        ask "Whisper.cpp model, only used with speech.engine: whisper (tiny/base/small) [tiny]" speech_model
         ask "Spoken language (ISO code) [de]" speech_lang
     fi
     [ -z "${speech_model}" ] && speech_model="tiny"
@@ -344,37 +347,57 @@ if [ "${INTERACTIVE}" -eq 1 ] || [ ! -f "${DEST_DIR}/config.yaml" ]; then
 fi
 
 # ----------------------------------------------------------------------------
-# Step 7 — pre-download the whisper.cpp model
+# Step 7 — pre-download the speech model (Vosk by default, whisper.cpp optional)
 # ----------------------------------------------------------------------------
-log "Step 7/10 — whisper.cpp model"
-SPEECH_ENABLED=$("${DEST_DIR}/.venv/bin/python" -c "import yaml;print(yaml.safe_load(open('${DEST_DIR}/config.yaml'))['speech']['enabled'])" 2>/dev/null || echo false)
+log "Step 7/10 — speech model"
+_cfg() { "${DEST_DIR}/.venv/bin/python" -c "import yaml;c=yaml.safe_load(open('${DEST_DIR}/config.yaml'));print($1)" 2>/dev/null; }
+_set_key() {  # _set_key <indented key> <value>: replace one config.yaml line in place
+    awk -v k="$1" -v v="$2" '$0 ~ "^"k":" { print k": \"" v "\""; next } { print }' \
+        "${DEST_DIR}/config.yaml" > "${DEST_DIR}/config.yaml.tmp" && mv "${DEST_DIR}/config.yaml.tmp" "${DEST_DIR}/config.yaml"
+}
+SPEECH_ENABLED=$(_cfg "c['speech']['enabled']" || echo false)
 if [ "${SPEECH_ENABLED}" = "True" ] || [ "${SPEECH_ENABLED}" = "true" ]; then
-    MODEL_SIZE=$("${DEST_DIR}/.venv/bin/python" -c "import yaml;print(yaml.safe_load(open('${DEST_DIR}/config.yaml'))['speech']['model'])" 2>/dev/null || echo tiny)
-    case "${MODEL_SIZE}" in
-        tiny|base|small|medium) ;;
-        *) warn "speech.model '${MODEL_SIZE}' is not a known size — skipping download."; MODEL_SIZE="" ;;
-    esac
-    if [ -n "${MODEL_SIZE}" ]; then
-        MODELS_DIR="${DEST_DIR}/models/whisper"
-        mkdir -p "${MODELS_DIR}"
-        if [ -f "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin" ]; then
-            info "Model already present: ${MODELS_DIR}/ggml-${MODEL_SIZE}.bin"
+    ENGINE=$(_cfg "c['speech'].get('engine','whisper')" || echo vosk)
+    if [ "${ENGINE}" = "vosk" ]; then
+        VOSK_DIR="${DEST_DIR}/models/vosk"
+        mkdir -p "${VOSK_DIR}"
+        if [ -d "${VOSK_DIR}/${VOSK_MODEL_NAME}" ]; then
+            info "Vosk model already present: ${VOSK_DIR}/${VOSK_MODEL_NAME}"
         else
-            info "Downloading ggml-${MODEL_SIZE}.bin (this can be a large download) ..."
-            curl -fL --retry 3 -o "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin.part" \
-                "${WHISPER_MODEL_BASE}/ggml-${MODEL_SIZE}.bin"
-            mv "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin.part" "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin"
+            info "Downloading ${VOSK_MODEL_NAME} (~45 MB) ..."
+            curl -fL --retry 3 -o "${VOSK_DIR}/model.zip.part" "${VOSK_MODEL_URL}"
+            # python's zipfile, not unzip: DietPi does not ship unzip.
+            "${DEST_DIR}/.venv/bin/python" -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
+                "${VOSK_DIR}/model.zip.part" "${VOSK_DIR}"
+            rm -f "${VOSK_DIR}/model.zip.part"
         fi
-        # Point config.yaml at the absolute installed path.
-        awk -v p="${MODELS_DIR}/ggml-${MODEL_SIZE}.bin" '
-            $0 ~ /^  model:/ { print "  model: \"" p "\""; next } { print }' \
-            "${DEST_DIR}/config.yaml" > "${DEST_DIR}/config.yaml.tmp" \
-            && mv "${DEST_DIR}/config.yaml.tmp" "${DEST_DIR}/config.yaml"
-        info "speech.model -> ${MODELS_DIR}/ggml-${MODEL_SIZE}.bin"
-        warn "Emotion GGUF is NOT auto-downloaded (the exact GGUF URL for the"
-        warn "German emotion model is not pinned down). If you enable emotion,"
-        warn "download the .gguf into ${DEST_DIR}/models/emotion/ and set"
-        warn "emotion.model in config.yaml — the brain errors clearly if it is missing."
+        _set_key "  vosk_model" "${VOSK_DIR}/${VOSK_MODEL_NAME}"
+        info "speech.vosk_model -> ${VOSK_DIR}/${VOSK_MODEL_NAME}"
+    else
+        MODEL_SIZE=$(_cfg "c['speech']['model']" || echo tiny)
+        case "${MODEL_SIZE}" in
+            tiny|base|small|medium) ;;
+            *) warn "speech.model '${MODEL_SIZE}' is not a known size — skipping download."; MODEL_SIZE="" ;;
+        esac
+        if [ -n "${MODEL_SIZE}" ]; then
+            MODELS_DIR="${DEST_DIR}/models/whisper"
+            mkdir -p "${MODELS_DIR}"
+            if [ -f "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin" ]; then
+                info "Model already present: ${MODELS_DIR}/ggml-${MODEL_SIZE}.bin"
+            else
+                info "Downloading ggml-${MODEL_SIZE}.bin (this can be a large download) ..."
+                curl -fL --retry 3 -o "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin.part" \
+                    "${WHISPER_MODEL_BASE}/ggml-${MODEL_SIZE}.bin"
+                mv "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin.part" "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin"
+            fi
+            _set_key "  model" "${MODELS_DIR}/ggml-${MODEL_SIZE}.bin"
+            info "speech.model -> ${MODELS_DIR}/ggml-${MODEL_SIZE}.bin"
+        fi
+    fi
+    if [ ! -f "${DEST_DIR}/models/mood/model.onnx" ]; then
+        warn "No mood model in ${DEST_DIR}/models/mood/. It is not downloadable: build it on a"
+        warn "dev machine with 'python3 tools/train_mood.py' and copy build/mood/* there, then"
+        warn "set mood.enabled: true and mood.model_dir: ${DEST_DIR}/models/mood in config.yaml."
     fi
 else
     info "Speech is disabled in config.yaml — no model download."

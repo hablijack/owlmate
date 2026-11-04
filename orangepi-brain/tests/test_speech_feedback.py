@@ -121,7 +121,7 @@ class TestSpeechFeedback(unittest.TestCase):
         self.assertEqual(len(self.speech._utterance), 1)
         self.speech.window_s = .3
         self.speech._process_chunk(self.voice)
-        self.speech.feed.assert_called_once_with('Das ist toll.', emotion='')
+        self.speech.feed.assert_called_once_with('Das ist toll.')
 
     def test_sound_during_inference_invalidates_even_after_playback_finishes(self):
         def transcribe(*args, **kwargs):

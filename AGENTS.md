@@ -177,7 +177,7 @@ taking the IMU calibration with it. Flash the pieces separately:
 ### Orange Pi brain (`orangepi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (271 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (287 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
@@ -185,9 +185,9 @@ python3 main.py [config.yaml]           # run the brain (default config.yaml)
 sudo ./setup.sh [--non-interactive]     # full Orange Pi provisioning (idempotent, reboots at the end)
 ```
 
-The suite runs on a plain Mac with **no** Orange Pi, mic, PortAudio, whisper.cpp or llama.cpp:
+The suite runs on a plain Mac with **no** Orange Pi, mic, PortAudio, Vosk, whisper.cpp or onnxruntime:
 `tests/stubs.py`
-`install_stub_modules()` fakes `serial`/`flask`/`yaml`/`pywhispercpp.model`/`llama_cpp` *only when the
+`install_stub_modules()` fakes `serial`/`flask`/`yaml`/`pywhispercpp.model`/`vosk` *only when the
 real module is not importable*. Every test file calls it before importing `brain.*`, so keep new
 tests in that order (`install_stub_modules()` then `from brain... # noqa: E402`). numpy is the one
 hard dependency. There is no linter configured.
@@ -679,8 +679,13 @@ without it" rather than exiting. The idle callback runs `supervisor.check_stale(
   holds the angle it is told. `geo.aim_angle()`'s `sign` comes from `navigation.aim_sign` in
   config — **flip that config value** if the head points the wrong way on hardware (this is still
   unverified against real hardware). Places persist to `~/.config/robot-owl/locations.json`.
-- `speech.py` — sounddevice capture → RMS VAD gate → whisper.cpp (via pywhispercpp, **not**
-  openai-whisper/torch) → `feed(transcript)`. In `feed()`, nav triggers are matched *before* the
+- `speech.py` — sounddevice capture → **Vosk** streaming ASR (default; whisper.cpp via pywhispercpp
+  with `speech.engine: whisper`) → `feed(transcript)`. The owl is called **Hubert**: `feed()` acts only
+  when the name is heard (fuzzy, then a 10 s window) — on the shoulder there is no face to gate on.
+  Then navigation, then `mood.py` maps the sentence to a mood (fine-tuned MiniLM as int8 ONNX, trained
+  off the Pi by `tools/train_mood.py` from `assets/mood/sentences.yaml`; no torch on the Pi). Shown via
+  `supervisor.show_mood()`. Why Vosk and not a bigger whisper, and why not an LLM: `specs/014`.
+  In `feed()`, nav triggers are matched *before* the mood and the
   keyword clusters so "wie komme ich zum Zoo" isn't stolen by the `question` cluster. German
   keywords/clusters/reactions all live in `config.yaml`, not in code. Heavy imports are lazy so the
   brain starts on a machine with no mic.

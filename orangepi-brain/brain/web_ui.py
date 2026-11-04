@@ -17,7 +17,7 @@ import threading
 
 from flask import Flask, jsonify, render_template_string, request
 
-from brain import audio, expressions
+from brain import expressions
 from brain.serial_handler import SerialHandler, Telemetry
 from brain.supervisor import Supervisor
 
@@ -247,17 +247,10 @@ class WebUI:
         def api_expression():
             body = request.get_json(silent=True) or {}
             value = body.get("value", "neutral")
-            # A mood is its eyes AND its body (ears, wings, head tilt): `react` plays both. The
-            # expression goes out again afterwards, so the eyes also change where the body cannot
-            # move (asleep, locked image). {"body": false} sends the eyes only.
+            # A mood is its eyes, its body and its sound (Supervisor.show_mood). {"body": false}
+            # sends the eyes only, {"sound": false} keeps it silent.
             with_body = bool(body.get("body", True)) and value in EXPRESSIONS
-            if with_body:
-                self.serial.react(value)
-            ok = self.serial.set_expression(value)
-            # The mood's own sound, unless the page unticked it (or the mood is silent).
-            sound = audio.MOOD_SOUNDS.get(value) if body.get("sound", True) else None
-            if sound:
-                self.supervisor.play_sound(sound)
+            ok, sound = self.supervisor.show_mood(value, body=with_body, sound=bool(body.get("sound", True)))
             return jsonify({"ok": ok, "body": with_body, "sound": sound})
 
         @app.route("/api/head", methods=["POST"])

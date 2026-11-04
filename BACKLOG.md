@@ -281,14 +281,14 @@ Tool note: opening the owl's port (reset) sometimes leaves it silent; a read-onl
   Web UI: `http://owlmate:8080` (or the IP above).
 - XIAO firmware 1.3.0 is deployed in both OTA slots, verified before boot;
   bootloader/partition table/OTA metadata/NVS were preserved byte-for-byte.
-  Full 8 MB backup is retained on the board and the Mac. Current native suite: 271 tests.
+  Full 8 MB backup is retained on the board and the Mac. Current native suite: 287 tests.
   The closed-owl safety lock is active after cold boot; IMU calibration restores,
   face inference runs and live serial blink/expression/sleep/wake/heartbeat/OTA
   entry/exit pass. All 16 servo targets, probes and active nav are rejected.
-- Both small/tiny Whisper models are downloaded. Tiny is selected for deployment
-  (speech enabled on the deployed board); inference comparison is in SPEC-014.
-  Optional llama.cpp runtime is installed; emotion stays disabled because no
-  validated compatible model is configured.
+- Speech runs on **Vosk** (`models/vosk/vosk-model-small-de-0.15`) with the name gate
+  ("Hubert") and the **mood classifier** (`models/mood/`, built by `tools/train_mood.py`),
+  deployed and accepted live by the owner 2026-11-04. Whisper models remain on the board
+  for `engine: whisper`; the llama.cpp emotion layer is removed. Comparison in SPEC-014.
 - Audio overlay and module activate after boot: `owl` registers. Owner confirms
   owl WAV is audible. Mono capture and 16 kHz sounddevice input work; left mic
   slot carries audio, right is zero. Deeper duplex analysis found RX goes silent
@@ -867,7 +867,10 @@ preview them first with `esp32-s3-sense/tools/preview_eyes.py`. Order:
    `tiny-desk-companion/voice` repo, one per mood in `MOOD_SOUNDS` (`brain/audio.py`), played by the web UI's
    Expressions panel (checkbox "with sound"). The mapping was made from file names, **not by ear** -- audition
    and swap in `MOOD_SOUNDS`. Provenance/licence of the MP3s is unknown (`assets/sounds/SOURCES.md`).
-5. [ ] **Then** map moods to triggers (keyword clusters, states, vibration, ...) -- the owner's second step.
+5. [~] **Then** map moods to triggers -- **speech DONE 2026-11-04**: the owl listens on its name
+   ("Hubert") via Vosk and a fine-tuned MiniLM maps the sentence to a mood (`brain/mood.py`,
+   training data `orangepi-brain/assets/mood/sentences.yaml`, `tools/train_mood.py`); accepted live
+   by the owner (Sauwetter -> sad_down, Lotto -> glee, Fuss -> scared). States, vibration, ... still open.
 
 ### Step 6 — Software backlog (no owl required)  `[ ]`
 
@@ -1094,7 +1097,7 @@ wrong; run the lot only after mechanical work.
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
 | detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
-| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 271 tests pass |
+| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 287 tests pass |
 | firmware/Orange Pi drift | `cd orangepi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
@@ -1922,18 +1925,24 @@ waiting on it. Out of scope for the eyes session.
 
 ## Speech recognition (Orange Pi-side)
 
+**Status 2026-11-04: replaced by Vosk + name gate + mood classifier** (owner: "funktioniert
+super"); decision, corpus benchmark and falsified paths in `specs/014-speech.spec`. Open:
+- [ ] **Name misheard inside a sentence** now and then ("wird", "gerd", "gucke" in the live log) --
+  collect cases; a custom wake-word model from ~50 owner recordings is the fallback.
+- [ ] **Retrain on real misclassifications**: copy wrong `'<text>' -> <mood>` log lines into
+  `assets/mood/sentences.yaml` (train), run `tools/train_mood.py`, copy `build/mood/` to the Pi.
+
+The whisper-era notes below apply to `engine: whisper` only.
+
 **Status 2026-11-01 (speech on hardware).** ASR is now ~0.6 s per utterance (was 4-14 s):
 `speech.threads: 4`, `speech.audio_ctx: 192`, `speech.context_ms: 300`; whisper stays `tiny`
 (`small` measured no better). On the shoulder the owl recognised "Das ist toll", "Wie geht es dir
 heute?" and "Nein, lasst das." correctly; across the room the mic signal is too quiet. "Nein, lass das"
 now plays the head shake with `sad_down` eyes (`own_eyes: true`). Reasoning and measurements:
 `specs/014-speech.spec`. Open, in order:
-- [ ] **Re-test the five sentences on the shoulder** with the final config (cooldown 3 s, `own_eyes`,
-  extra keyword variants) -- the last changes were deployed but not heard live.
 - [ ] **Mic level**: decide on software gain / `vad_threshold` toward 0.0015 / mic placement; two of five
   sentences were never picked up across the room.
-- [ ] **Keyword robustness** beyond hand-added variants (fuzzy match or the disabled emotion layer;
-  the RoBERTa model is not installed on the Pi).
+- [x] **Keyword robustness** -- superseded 2026-11-04 by the mood classifier.
 - [ ] More emotions/gestures: the owner supplies words per cluster; each new group needs a `reactions`
   row (gesture + optional `own_eyes`).
 - [ ] **Orange Pi fan cycles on/off at idle (measured 2026-11-01) -- optional overlay.** Not a fault: the
@@ -2207,7 +2216,7 @@ the page loads and each button visibly drives the owl (blink/expression/head).
   saccade head tracking and face-detect scan; vibration fix (self-motion mask + double knock, see
   `specs/007`); status OLED on the Orange Pi (portrait, `owl-i2c2` overlay, `specs/012`); redesigned web UI
   ("Mission Control"); speech: ASR 4-14 s -> ~0.6 s, complete utterances, non-speech tags filtered,
-  `sad_down` for "nein". Orange Pi suite: 271 tests; `tools/check_docs.py` clean.
+  `sad_down` for "nein". Orange Pi suite: 287 tests; `tools/check_docs.py` clean.
   **Still open from this period:** the speech items under *Speech recognition* above; mechanics (ear/wing
   amplitudes, `HEAD_TRACK_FOV_DEG` 16.5 is estimated, not measured; `IMU_HEADING_OFFSET_DEG` mounting term
   unmeasured); servo type documentation conflict (S18JST 1.8 g vs 3.7 g); a one-off `invalid_json` seen at

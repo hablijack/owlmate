@@ -1,0 +1,726 @@
+# Satz -> Stimmung: Trainings- und Pruefsaetze fuer den Gefuehls-Klassifikator (brain/mood.py).
+#
+# train: woraus tools/train_mood.py lernt. test: Saetze, die das Training NIE sieht -- an ihnen
+# wird gemessen, ob das Modell verallgemeinert. Neue Saetze (vor allem echte, die die Eule
+# falsch eingeordnet hat) gehoeren nach train; test nur erweitern, nie daraus trainieren.
+#
+# Die Saetze stehen in normaler Schreibung. tools/train_mood.py uebt zusaetzlich die Form,
+# in der Vosk sie liefert (klein, ohne Satzzeichen) und mit vorangestelltem Namen.
+#
+# Jeder Schluessel muss eine Stimmung der Firmware sein (NAMES[] in lib/Eyes/Eyes.cpp).
+# Was die Stimmungen hier bedeuten -- die Reaktion der Eule auf das GESAGTE:
+#   glee        Jubel: grosses Glueck, Erfolg, Gewinn, tolle Neuigkeit
+#   happy       Freude: Lob, Zuneigung, Dank, etwas Nettes, gute Laune
+#   sad_down    Traurigkeit: Verlust, Enttaeuschung, Pech, mieses Wetter, Einsamkeit
+#   scared      Erschrecken: Schmerz, Verletzung, Unfall, Gefahr, Angst, ploetzlicher Laerm
+#   surprised   Ueberraschung: etwas Unerwartetes, Verblueffung
+#   awe         Staunen: etwas Schoenes, Grosses, Beeindruckendes sehen
+#   angry       Wut: Aerger ueber jemanden, Ungerechtigkeit, Betrug, Beleidigung
+#   annoyed     Genervt: Stoerung, Laerm, Warten, "lass das", Technik streikt
+#   sleepy      Muedigkeit: muede, schlafen, gute Nacht
+#   unimpressed Gleichgueltig: Langeweile, egal, nichts Besonderes
+#   skeptic     Zweifel: Unglaube, Misstrauen, "das stimmt doch nicht"
+#   neutral     kein Gefuehl: Frage, Feststellung, Bitte -> die Eule schaut nur zu dir
+train:
+  glee:
+    - Ich habe gerade im Lotto gewonnen!
+    - Ich habe die Prüfung bestanden!
+    - Wir fahren morgen in den Urlaub!
+    - Ich bekomme eine Gehaltserhöhung!
+    - Endlich Wochenende!
+    - Wir haben das Spiel gewonnen!
+    - Ich habe den Job bekommen!
+    - Heute ist mein Geburtstag!
+    - Ich habe eine Million gewonnen!
+    - Wir bekommen ein Baby!
+    - Ich habe meinen Führerschein bestanden!
+    - Unser Team ist Meister geworden!
+    - Ich wurde befördert!
+    - Morgen fliegen wir nach Spanien!
+    - Ich habe das Rennen gewonnen!
+    - Sie hat ja gesagt, wir heiraten!
+    - Ich habe den ersten Preis bekommen!
+    - Ich habe eine Eins in Mathe!
+    - Die Wohnung gehört jetzt uns!
+    - Ich habe Karten für das Konzert ergattert!
+    - Wir haben gewonnen, wir haben gewonnen!
+    - Juhu, endlich Ferien!
+    - Ich habe meinen Traumjob!
+    - Mein Antrag wurde genehmigt!
+    - Ich bin an der Uni angenommen worden!
+    - Das Geld ist endlich da!
+    - Der Arzt sagt, ich bin wieder gesund!
+    - Hurra, es hat geklappt!
+    - Wir haben im Preisausschreiben gewonnen!
+    - Ich habe das Abitur geschafft!
+    - Ich habe den Marathon zu Ende gelaufen!
+    - Meine Tochter hat ihre Prüfung bestanden!
+    - Wir haben die Wohnung bekommen, die wir wollten!
+    - Ich habe meine Doktorarbeit abgegeben!
+    - Das Projekt ist ein voller Erfolg!
+    - Unser Hund hat sieben Welpen bekommen!
+    - Ich habe den Wettbewerb gewonnen!
+    - Ich kriege einen neuen Dienstwagen!
+    - Die Steuer zahlt mir tausend Euro zurück!
+    - Ich habe endlich abgenommen, zehn Kilo!
+    - Mein Bruder kommt nach Jahren zu Besuch!
+    - Wir sind aufgestiegen!
+    - Ich habe die Wette gewonnen!
+    - Der Kredit ist endlich abbezahlt!
+    - Die Operation ist super verlaufen!
+    - Ich darf ab Montag im Homeoffice arbeiten!
+    - Ich habe ein Tor geschossen!
+    - Wir haben das Finale erreicht!
+    - Mein Buch wird veröffentlicht!
+    - Ich habe Tickets für die Weltmeisterschaft!
+    - Yes, geschafft!
+    - Ich bin so glücklich, ich könnte die ganze Welt umarmen!
+    - Wir sind Weltmeister!
+    - Mein Chef hat mir zwei Wochen extra Urlaub gegeben!
+    - Ich habe meinen verlorenen Ring wiedergefunden!
+    - Die Bewerbung hat geklappt, ich fange nächsten Monat an!
+    - Ich habe beim Bingo den Hauptpreis gewonnen!
+    - Heute hat endlich alles geklappt!
+  happy:
+    - Das ist toll.
+    - Du bist eine gute Eule.
+    - Das hast du fein gemacht.
+    - Ich mag dich.
+    - Was für ein schöner Tag.
+    - Danke, das ist lieb von dir.
+    - Das Essen war richtig lecker.
+    - Super gemacht!
+    - Du bist mein Lieblingsvogel.
+    - Brave Eule.
+    - Das gefällt mir.
+    - Schön hast du das gemacht.
+    - Du bist echt niedlich.
+    - Ich hab dich lieb.
+    - Vielen Dank, Hubert.
+    - Das war ein schöner Abend.
+    - Du machst mich froh.
+    - Gut so, weiter so.
+    - Der Kaffee schmeckt heute richtig gut.
+    - Du bist ein toller Kerl.
+    - Fein gemacht.
+    - Ich freue mich, dich zu sehen.
+    - Das hast du prima gemacht.
+    - Wie nett von dir.
+    - Ich bin heute gut gelaunt.
+    - Du bist so klug.
+    - Was für ein netter Tag mit dir.
+    - Das Lied ist wirklich schön.
+    - Die Sonne scheint so schön heute.
+    - Ich habe mit Freunden gegrillt, das war lustig.
+    - Meine Kollegin hat mir Blumen geschenkt.
+    - Der Spaziergang hat richtig gutgetan.
+    - Du bist der Beste.
+    - Ich bin stolz auf dich.
+    - Das riecht aber gut hier.
+    - Wir hatten heute richtig viel Spaß.
+    - Ich habe ein nettes Gespräch mit der Nachbarin gehabt.
+    - Der Film war richtig gut.
+    - Mir geht es heute richtig gut.
+    - Endlich mal wieder ausgeschlafen.
+    - Die Kinder haben so schön gespielt.
+    - Danke schön.
+    - Toll, dass du da bist.
+    - Das ist ja nett.
+    - Gute Arbeit.
+    - Klasse!
+    - Prima!
+    - Wunderbar.
+    - Schön!
+    - Das hat Spaß gemacht.
+    - Der Kuchen ist richtig lecker geworden.
+    - Ich habe heute ein Lächeln geschenkt bekommen.
+    - Der Tag war angenehm und ruhig.
+    - Wir hatten ein schönes Frühstück.
+    - Das Wetter ist herrlich.
+    - Ich freue mich auf heute Abend.
+  sad_down:
+    - Heute ist wirklich ein Sauwetter.
+    - Das ist traurig.
+    - Mein Hund ist gestorben.
+    - Ich fühle mich so allein.
+    - Es regnet schon den ganzen Tag.
+    - Das Konzert wurde abgesagt.
+    - Ich vermisse meine Familie.
+    - Wir haben leider verloren.
+    - Es schüttet wie aus Eimern.
+    - Mein Urlaub ist vorbei.
+    - Ich habe meinen Job verloren.
+    - Mein Opa ist gestorben.
+    - Niemand ist zu meiner Feier gekommen.
+    - Ich habe die Prüfung nicht bestanden.
+    - Meine Freundin hat Schluss gemacht.
+    - Der Ausflug fällt ins Wasser.
+    - Ich bin krank und muss im Bett bleiben.
+    - Mein Lieblingsbecher ist kaputt.
+    - Heute ist so ein trüber Tag.
+    - Ich habe mein Handy verloren.
+    - Ich bin so traurig.
+    - Das Wetter ist richtig mies.
+    - Unsere Katze ist weggelaufen.
+    - Wir müssen umziehen und ich will nicht.
+    - Ich habe niemanden zum Reden.
+    - Der Film hatte ein trauriges Ende.
+    - Es ist so dunkel und nass draußen.
+    - Mein bester Freund zieht weg.
+    - Leider hat es nicht geklappt.
+    - Ich habe den Bus verpasst und muss eine Stunde warten.
+    - Die Bewerbung wurde abgelehnt.
+    - Meine Pflanze ist eingegangen.
+    - Der Urlaub ist ins Wasser gefallen.
+    - Keiner hat an meinen Geburtstag gedacht.
+    - Unser Spiel ist ausgefallen.
+    - Ich habe mich mit meiner Schwester gestritten.
+    - Es ist Montag und es regnet.
+    - Das Restaurant hat für immer geschlossen.
+    - Mein Auto ist kaputt und die Reparatur ist teuer.
+    - Ich bin so enttäuscht.
+    - Schade.
+    - Leider nein.
+    - So ein Pech.
+    - Die Ferien sind schon wieder vorbei.
+    - Mir geht es heute nicht so gut.
+    - Ich habe Heimweh.
+    - Meine Freunde haben keine Zeit für mich.
+    - Der Sommer ist vorbei.
+    - Wir haben das Finale verloren.
+    - Mein Laptop ist kaputt und alle Fotos sind weg.
+    - Ich habe Liebeskummer.
+    - Die Oma ist im Krankenhaus.
+    - Es nieselt schon seit Tagen.
+    - Grauer Himmel, Regen, Kälte, furchtbar.
+    - Ich habe meine Brieftasche verloren.
+    - Mein Kuchen ist total misslungen.
+    - Das Wochenende ist schon vorbei.
+    - Ich habe keinen Platz im Kurs bekommen.
+  scared:
+    - Ich habe mir gerade den Fuß angestoßen.
+    - Da war ein lauter Knall!
+    - Au, das tut weh!
+    - Ich habe mich in den Finger geschnitten.
+    - Da ist eine riesige Spinne!
+    - Pass auf, das Auto!
+    - Ich habe Angst im Dunkeln.
+    - Hilfe, es brennt!
+    - Ich habe mir den Kopf gestoßen.
+    - Au, mein Zeh!
+    - Ich bin ausgerutscht und hingefallen.
+    - Mich hat eine Wespe gestochen!
+    - Ich habe mich an der Herdplatte verbrannt.
+    - Da hinten bellt ein großer Hund!
+    - Vorsicht, das Regal kippt!
+    - Ich habe mir den Knöchel verknackst.
+    - Oh Gott, da ist eine Maus!
+    - Das Gewitter ist so laut.
+    - Ich hätte fast einen Unfall gehabt!
+    - Es hat an der Tür gepoltert!
+    - Ich habe mich mit dem Messer geschnitten.
+    - Mein Finger ist in der Tür eingeklemmt!
+    - Hilfe, ich falle!
+    - Da steht jemand im Garten!
+    - Ich habe mir den Ellbogen angeschlagen.
+    - Autsch, das war heiß!
+    - Ein Ast ist direkt neben mir runtergekracht!
+    - Das Licht ist ausgegangen und es ist stockdunkel.
+    - Ich bin vom Fahrrad gestürzt.
+    - Mich hat fast ein Auto erwischt!
+    - Aua!
+    - Autsch!
+    - Ich habe mir das Knie aufgeschlagen.
+    - Ich habe mir auf die Zunge gebissen.
+    - Mir ist ein Hammer auf den Fuß gefallen.
+    - Ich bin gegen die Tür gelaufen.
+    - Die Katze hat mich gekratzt.
+    - Ich habe mich am Bügeleisen verbrannt.
+    - Ich habe eine Zecke am Bein.
+    - Das Glas ist runtergefallen und zersplittert!
+    - Da ist ein Einbrecher im Haus!
+    - Der Rauchmelder piept!
+    - Ein Hund hat mich angesprungen!
+    - Es hat gerade geblitzt und gedonnert!
+    - Ich habe mir den Rücken verrenkt.
+    - Ich habe Angst vor morgen.
+    - Ich habe einen Albtraum gehabt.
+    - Ich habe mich furchtbar erschreckt.
+    - Da raschelt etwas im Gebüsch!
+    - Der Boden wackelt!
+    - Ich bin die Leiter runtergefallen.
+    - Ich habe mich an einem Dorn gestochen.
+    - Mein Kind ist hingefallen und blutet.
+    - Da ist eine Schlange!
+    - Vorsicht, heiß!
+    - Mir tut der Zahn so weh.
+    - Ein Auto hat gerade eine Vollbremsung direkt vor mir gemacht!
+    - Ich bin mit dem Kopf gegen den Schrank geknallt.
+  surprised:
+    - Was, wirklich?
+    - Das hätte ich nie gedacht!
+    - Ach du meine Güte!
+    - Damit habe ich nicht gerechnet.
+    - Echt jetzt?
+    - Du bist ja schon wieder da!
+    - Was, du bist schon zurück?
+    - Oh, das ist ja neu!
+    - Nanu, wer ist denn das?
+    - Huch, wo kommt das denn her?
+    - Das gibt's doch nicht!
+    - Ach so, das wusste ich gar nicht.
+    - Ehrlich?
+    - Was, so spät schon?
+    - Oh, es schneit ja!
+    - Na sowas, der Laden hat zu.
+    - Hä, wie ist das passiert?
+    - Ach, du bist es!
+    - Ups, das ging schnell.
+    - Hoppla!
+    - Ach nee, wirklich?
+    - Das ist ja ein Ding!
+    - Was, die beiden sind ein Paar?
+    - Oh, du hast ja eine neue Brille!
+    - Schon fertig? Das ging aber schnell.
+    - Wie, heute ist schon Freitag?
+    - Oh, da ist ja Post für mich!
+    - Was, das kostet nur einen Euro?
+    - Mensch, du bist aber groß geworden!
+    - Ach was, das ist ja interessant.
+    - Nicht dein Ernst!
+    - Oh, die Tür war gar nicht abgeschlossen.
+    - Huch, der Strom ist wieder da.
+    - Mein Nachbar hat einen Papagei, wusstest du das?
+    - Was, es ist schon dunkel draußen?
+    - Na so was!
+    - Wie bitte?
+    - Ach du lieber Himmel, das ist ja eine Überraschung!
+    - Oh, ich habe gar nicht gemerkt, dass du da bist.
+    - Wer hätte das gedacht!
+    - Oh, der Kuchen ist ja schon fertig!
+    - Ich habe gerade meinen alten Schulfreund in der Stadt getroffen!
+    - Plötzlich stand der Postbote mit einem Paket vor der Tür.
+    - Das Wasser ist schon warm, so schnell?
+  awe:
+    - Schau mal, ein Regenbogen!
+    - Wow, was für ein Ausblick!
+    - Sieh dir diese Sterne an.
+    - Das ist ja unglaublich schön.
+    - Was für ein riesiges Schiff!
+    - Der Sonnenuntergang ist wunderschön.
+    - Schau dir diesen Mond an!
+    - Wow, ist das ein großer Baum!
+    - Der Wasserfall ist gigantisch.
+    - Was für ein Feuerwerk!
+    - Guck mal, wie die Sonne glitzert.
+    - Das Meer ist so weit und blau.
+    - Die Kathedrale ist riesig.
+    - So eine schöne Blume habe ich noch nie gesehen.
+    - Sieh mal, die Polarlichter!
+    - Das Flugzeug ist ja riesig.
+    - Unglaublich, wie viele Sterne man hier sieht.
+    - Was für eine prächtige Landschaft.
+    - Schau, ein Adler!
+    - Die Aussicht vom Gipfel ist fantastisch.
+    - Ist der Schmetterling schön.
+    - Wahnsinn, diese Farben am Himmel.
+    - Guck mal, ein Heißluftballon!
+    - Schau mal, wie der Schnee glitzert.
+    - Das Museum ist beeindruckend.
+    - Sieh mal, die vielen Lichter der Stadt.
+    - Was für ein mächtiger Elefant.
+    - Der Dom ist ja gewaltig.
+    - Guck mal, da springt ein Delfin!
+    - Was für ein wunderschönes Bild.
+    - Wow!
+    - Wahnsinn!
+    - Schau mal da oben!
+    - Das ist ja atemberaubend.
+    - Guck mal, eine Sternschnuppe!
+    - Der Vollmond ist heute riesig.
+    - Was für eine tolle Musik, Gänsehaut.
+    - Sieh dir die Wellen an, so hoch!
+    - Schau, wie hoch der Wolkenkratzer ist.
+    - Die Herbstblätter leuchten so bunt.
+    - Guck mal, ein Reh am Waldrand!
+    - Der Nebel über dem See sieht magisch aus.
+    - Das Orchester spielt einfach traumhaft.
+    - Guck mal, wie riesig die Brücke ist!
+  angry:
+    - Ich bin so wütend auf meinen Chef.
+    - Das macht mich richtig sauer!
+    - Jetzt reicht es mir aber!
+    - So eine Frechheit!
+    - Der hat mir die Vorfahrt genommen!
+    - Ich könnte platzen vor Wut.
+    - Ich bin total wütend.
+    - Der hat mich einfach beleidigt!
+    - Das ist eine Unverschämtheit!
+    - Mein Nachbar hat mein Auto zerkratzt!
+    - Die haben mich belogen!
+    - Ich lasse mir das nicht gefallen!
+    - Das ist so ungerecht!
+    - Ich koche vor Wut.
+    - Der Kellner war total unverschämt.
+    - Die Bahn hat schon wieder Verspätung, ich raste aus!
+    - Jemand hat mein Fahrrad kaputt gemacht!
+    - Ich bin so sauer auf dich.
+    - Das hat er mit Absicht gemacht!
+    - Mir platzt gleich der Kragen!
+    - So ein Mist, verdammt!
+    - Die Firma hat mich betrogen!
+    - Mein Kollege hat meine Idee als seine ausgegeben!
+    - Der Handwerker hat einfach nicht angerufen und uns versetzt!
+    - Die Versicherung will nicht zahlen, das ist eine Sauerei!
+    - Jemand hat mir den Parkplatz vor der Nase weggeschnappt!
+    - Mein Bruder hat schon wieder mein Ladekabel geklaut!
+    - Das lasse ich mir nicht länger bieten!
+    - Wie kann man nur so dreist sein!
+    - Ich bin stocksauer auf die Nachbarn!
+    - Die Telefongesellschaft hat mir zu viel abgebucht!
+    - Der Schiedsrichter hat total falsch gepfiffen!
+    - Der Typ hat sich einfach vorgedrängelt!
+    - Unverschämt, wie der mit mir geredet hat!
+    - Jetzt hat der Hund schon wieder meinen Schuh zerkaut, ich bin sauer!
+    - Ich bin echt wütend.
+    - Verdammt noch mal!
+    - So ein Idiot!
+    - Die haben mich einfach angelogen!
+    - Ich habe die Nase gestrichen voll!
+    - Das ist doch eine bodenlose Frechheit!
+    - Mein Paket wurde einfach geklaut!
+  annoyed:
+    - Nein, lass das!
+    - Hör auf damit.
+    - Das nervt.
+    - Schon wieder Stau.
+    - Der Drucker geht schon wieder nicht.
+    - Mach das nicht nochmal.
+    - Lass das bitte.
+    - Nicht schon wieder.
+    - Hör endlich auf.
+    - Das ist so nervig.
+    - Die Fliege summt die ganze Zeit.
+    - Der Rasenmäher ist so laut.
+    - Warum klingelt ständig das Telefon?
+    - Ich warte schon ewig.
+    - Der Computer hängt schon wieder.
+    - Mann, ist das umständlich.
+    - Stör mich nicht.
+    - Pfui, lass das.
+    - Das Internet ist schon wieder weg.
+    - Immer dieser Lärm.
+    - Nein, nicht anfassen!
+    - Jetzt hör doch mal auf.
+    - Nein.
+    - Lass das.
+    - Aufhören!
+    - Nicht jetzt.
+    - Ruhe bitte.
+    - Der Nachbar bohrt schon wieder.
+    - Die Ampel ist schon wieder rot.
+    - Das Update dauert ewig.
+    - Die Mücke lässt mich nicht schlafen.
+    - Ständig diese Werbung.
+    - Schon wieder ist die Milch leer.
+    - Die Schlange an der Kasse ist endlos.
+    - Mein Handy hat schon wieder keinen Empfang.
+    - Das Passwort funktioniert nicht.
+    - Der Zug hat schon wieder zehn Minuten Verspätung.
+    - Immer muss ich alles zweimal sagen.
+    - Puh, ist das anstrengend.
+    - Ach Mann.
+    - Menno.
+    - Nervig, wirklich.
+    - Geh weg.
+    - Schon wieder Spam im Briefkasten.
+  sleepy:
+    - Ich bin total müde.
+    - Gute Nacht.
+    - Ich gehe jetzt schlafen.
+    - Ich habe kaum geschlafen.
+    - Mir fallen gleich die Augen zu.
+    - Zeit fürs Bett.
+    - Ich bin so erschöpft.
+    - Ich muss jetzt ins Bett.
+    - Schlaf gut, Hubert.
+    - Ich kann kaum noch die Augen offen halten.
+    - Es ist schon spät, ich gehe schlafen.
+    - Ich brauche eine Mütze Schlaf.
+    - Gähn.
+    - Ich bin völlig fertig.
+    - Ich leg mich kurz hin.
+    - Zeit zum Schlafen.
+    - Ich war die ganze Nacht wach.
+    - Ich bin so schläfrig.
+    - Gute Nacht, kleine Eule.
+    - Ich bin todmüde.
+    - Lass uns schlafen gehen.
+    - Ich mache die Augen zu.
+    - Schlaf schön.
+    - Ich bin platt.
+    - Ich könnte im Stehen einschlafen.
+    - Heute war ein langer Tag, ich bin kaputt.
+    - Ich mache jetzt Feierabend und lege mich hin.
+    - Es ist Zeit, ins Bett zu gehen.
+    - Ich brauche dringend Schlaf.
+    - Nach dem Essen bin ich immer so müde.
+    - Ich gähne die ganze Zeit.
+    - Ich bin heute so schlapp.
+    - Träum was Schönes.
+    - Ich gehe jetzt ins Bett, bis morgen.
+    - Die Nacht war viel zu kurz.
+    - Ich bin um fünf aufgestanden, ich bin erledigt.
+    - Ich halte kaum noch durch, so müde bin ich.
+    - Mittagsschlaf wäre jetzt schön.
+    - Ich bin reif fürs Bett.
+  unimpressed:
+    - Das ist mir doch egal.
+    - Mir ist langweilig.
+    - Na und?
+    - Wie öde.
+    - Schon wieder das Gleiche.
+    - Interessiert mich nicht.
+    - Das ist doch nichts Besonderes.
+    - Na ja, geht so.
+    - Ist doch egal.
+    - Kenn ich schon.
+    - Gähnend langweilig.
+    - Mir doch wurscht.
+    - Wen interessiert das?
+    - Das ist total öde.
+    - Nichts los heute.
+    - Ich habe keine Lust.
+    - Was soll's.
+    - Ganz nett, aber nicht toll.
+    - Das reißt mich nicht vom Hocker.
+    - Ist mir schnuppe.
+    - Das Programm im Fernsehen ist langweilig.
+    - Hab ich schon hundertmal gehört.
+    - Meh.
+    - Joa, okay.
+    - Egal.
+    - Mir ist so fad.
+    - Der Vortrag war stinklangweilig.
+    - Schon wieder Nudeln, wie langweilig.
+    - Das Spiel war total öde.
+    - Keine Ahnung, ist mir gleich.
+    - Hm, kann man machen.
+    - Das Buch ist zäh wie Kaugummi.
+    - Da passiert ja gar nichts.
+    - Meinetwegen.
+    - Dieses Lied läuft schon wieder.
+    - Das ist doch ein alter Hut.
+    - Ich weiß nicht, was ich machen soll, alles öde.
+    - Ein ganz normaler, langweiliger Tag.
+    - Das finde ich nicht so spannend.
+  skeptic:
+    - Das glaube ich dir nicht.
+    - Bist du dir da sicher?
+    - Das klingt komisch.
+    - Hm, ich weiß nicht so recht.
+    - Das kann doch nicht stimmen.
+    - Wer's glaubt, wird selig.
+    - Das bezweifle ich.
+    - Echt? Das glaube ich kaum.
+    - Da bin ich mir nicht so sicher.
+    - Das ist doch Quatsch.
+    - Du flunkerst doch.
+    - Das klingt zu schön, um wahr zu sein.
+    - Na, ob das gut geht?
+    - Ich traue dem nicht.
+    - Hm, komisch.
+    - Das kommt mir verdächtig vor.
+    - Wirklich? Erzähl keinen Unsinn.
+    - Das halte ich für ein Gerücht.
+    - Ich weiß nicht, ob ich das glauben soll.
+    - Da stimmt doch was nicht.
+    - Das kann ich mir nicht vorstellen.
+    - Wer hat dir denn das erzählt?
+    - Das glaube ich erst, wenn ich es sehe.
+    - Der Verkäufer hat mir zu viel versprochen.
+    - Das Angebot ist doch ein Trick.
+    - Die Wettervorhersage stimmt doch nie.
+    - Ob der Handwerker wirklich morgen kommt?
+    - Klingt nach Fake News.
+    - Mal sehen, ob das stimmt.
+    - Da ist doch ein Haken dabei.
+    - Das hast du dir ausgedacht.
+    - Ich habe da so meine Zweifel.
+    - Das riecht nach Betrug.
+    - Na ja, ob das so stimmt.
+    - Angeblich soll das Wundermittel helfen.
+    - So ein Unsinn.
+    - Das wäre ja zu einfach.
+    - Wirklich jetzt? Glaube ich nicht.
+    - Der behauptet, er hat einen Ufo gesehen.
+    - Hmm.
+  neutral:
+    - Wie geht es dir?
+    - Ich habe Hunger.
+    - Wie spät ist es?
+    - Ich gehe jetzt einkaufen.
+    - Was machen wir heute?
+    - Das Fenster ist offen.
+    - Ich koche jetzt Nudeln.
+    - Es ist halb drei.
+    - Wir gehen gleich spazieren.
+    - Wo ist die Fernbedienung?
+    - Ich rufe kurz Mama an.
+    - Heute ist Montag.
+    - Kannst du mich hören?
+    - Ich lese ein Buch.
+    - Was gibt es zum Abendessen?
+    - Ich muss noch Wäsche waschen.
+    - Wie heißt du?
+    - Wie alt bist du?
+    - Ich fahre jetzt zur Arbeit.
+    - Was machst du gerade?
+    - Bring mich zum Bahnhof.
+    - Ich setze mich auf das Sofa.
+    - Hallo Hubert.
+    - Wir sind gleich da.
+    - Ich muss noch die Spülmaschine ausräumen.
+    - Morgen habe ich einen Termin beim Zahnarzt.
+    - Der Bus kommt um acht.
+    - Ich trinke ein Glas Wasser.
+    - Das Auto steht in der Garage.
+    - Wir brauchen noch Brot.
+    - Ich ziehe mir eine Jacke an.
+    - Hast du das gehört?
+    - Kannst du mir helfen?
+    - Was meinst du dazu?
+    - Ich schreibe eine E-Mail.
+    - Das Paket kommt morgen.
+    - Ich mache mal das Licht an.
+    - Wir essen um sieben.
+    - Ich bin im Wohnzimmer.
+    - Hallo.
+    - Hörst du mich?
+    - Bist du wach?
+    - Ich telefoniere gleich mit meinem Bruder.
+    - Die Waschmaschine ist fertig.
+    - Ich gehe kurz raus.
+    - Was hast du gesagt?
+    - Erzähl mal was.
+    - Ich räume jetzt auf.
+    - Heute Nachmittag gehe ich zum Friseur.
+test:
+  glee:
+    - Ich bin Oma geworden!
+    - Wir haben das Haus gekauft!
+    - Ich habe hundert Euro auf der Straße gefunden!
+    - Die Ferien fangen an!
+    - Ich habe die Stelle als Teamleiter bekommen!
+    - Wir haben den Pokal geholt!
+    - Ich habe die Fahrprüfung im ersten Versuch geschafft!
+    - Unsere Reise nach Japan ist gebucht!
+    - Meine Band hat den Wettbewerb gewonnen!
+    - Ich habe gerade einen Gutschein über fünfhundert Euro gewonnen!
+  happy:
+    - Du bist so süß.
+    - Gut gemacht, Hubert.
+    - Der Kuchen ist dir gelungen.
+    - Schön, dass du da bist.
+    - Danke für deine Hilfe.
+    - Was für ein gemütlicher Abend.
+    - Du bist eine schlaue Eule.
+    - Das Konzert gestern war richtig schön.
+    - Ich bin heute richtig zufrieden.
+    - Lecker, die Suppe.
+  sad_down:
+    - Mein Fahrrad wurde geklaut.
+    - Es ist so grau und kalt draußen.
+    - Meine Oma liegt im Krankenhaus.
+    - Ich habe meinen Zug verpasst.
+    - Unser Hamster ist heute gestorben.
+    - Die Party fällt aus.
+    - Ich habe die Stelle nicht bekommen.
+    - Draußen stürmt und regnet es ohne Ende.
+    - Meine beste Freundin zieht nach Amerika.
+    - Mein Lieblingsteam ist abgestiegen.
+  scared:
+    - Ich bin die Treppe runtergefallen.
+    - Da hat gerade etwas am Fenster gekratzt.
+    - Mein Knie blutet.
+    - Oh nein, das Glas fällt runter!
+    - Ich habe mir den Daumen mit dem Hammer getroffen.
+    - Eine Biene hat mich in den Arm gestochen!
+    - Da ist eine Wespe im Auto!
+    - Ich habe mir den Kopf an der Dachschräge gestoßen.
+    - Es hat gerade fürchterlich gekracht!
+    - Ich habe mich am Wasserkocher verbrüht.
+  surprised:
+    - Ach was, du auch hier?
+    - Das ist ja eine Überraschung!
+    - Wie bitte, schon fertig?
+    - Was, der Laden hat heute zu?
+    - Oh, da liegt ja Schnee!
+    - Du hast ja deine Haare abgeschnitten!
+    - Was, das ist schon zehn Jahre her?
+    - Sieh an, der Postbote ist schon da.
+  awe:
+    - Guck mal, wie hoch der Turm ist!
+    - Die Berge sind atemberaubend.
+    - So viele Vögel auf einmal!
+    - Schau mal, der Himmel ist ganz rot!
+    - Was für ein gigantisches Kreuzfahrtschiff!
+    - Sieh dir diese riesige Eiche an.
+    - Guck mal, die Milchstraße!
+    - Die Gletscher sind unglaublich.
+  angry:
+    - Der Typ hat mich angeschrien!
+    - Die haben mich schon wieder abgezockt.
+    - Ich bin stinksauer.
+    - Der Vermieter hat einfach die Miete erhöht, unverschämt!
+    - Jemand hat mir eine Delle ins Auto gefahren und ist abgehauen!
+    - Mein Kollege hat mich vor allen blamiert, ich bin so wütend!
+    - Die haben meine Bestellung schon wieder vermasselt, Frechheit!
+    - Ich bin echt geladen.
+  annoyed:
+    - Lass mich in Ruhe.
+    - Die Baustelle ist so laut.
+    - Warum dauert das so lange?
+    - Hör auf zu zappeln.
+    - Schon wieder ist der Akku leer.
+    - Der Fernseher spinnt schon wieder.
+    - Nicht schon wieder diese Musik.
+    - Mann, die Tür klemmt.
+  sleepy:
+    - Ich bin hundemüde.
+    - Ich mache ein Nickerchen.
+    - Gähn, war das ein langer Tag.
+    - Ich gehe gleich schlafen.
+    - Ich kann nicht mehr, ich bin so müde.
+    - Ab ins Bett.
+    - Gute Nacht, Hubert.
+    - Ich habe die halbe Nacht nicht geschlafen.
+  unimpressed:
+    - Langweilig.
+    - Das habe ich schon tausendmal gesehen.
+    - Ist mir wurscht.
+    - Nicht so spannend.
+    - Kann man machen, muss man aber nicht.
+    - Mir ist so langweilig heute.
+    - Das ist mir ziemlich egal.
+    - Joa, ganz okay.
+  skeptic:
+    - Das ist doch erfunden.
+    - Kann ich mir kaum vorstellen.
+    - Ob das wohl stimmt?
+    - Das glaube ich nicht so ganz.
+    - Da hat dich jemand reingelegt.
+    - Hm, das klingt nach einem Märchen.
+    - Ich bin da skeptisch.
+    - Das ist doch nie im Leben echt.
+  neutral:
+    - Ich trinke einen Kaffee.
+    - Morgen ist Dienstag.
+    - Wo ist mein Schlüssel?
+    - Bring mich nach Hause.
+    - Ich mache jetzt das Abendessen.
+    - Wie ist das Wetter morgen?
+    - Ich lege mich auf die Couch und lese.
+    - Kannst du mich verstehen?
+    - Wir fahren gleich los.
+    - Ich muss noch tanken.

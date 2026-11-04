@@ -7,6 +7,7 @@ from stubs import install_stub_modules, call_web_view
 install_stub_modules()
 
 from brain.serial_handler import SerialHandler  # noqa: E402
+from brain.supervisor import Supervisor  # noqa: E402
 from brain.web_ui import WebUI  # noqa: E402
 import brain.web_ui as webui  # noqa: E402
 
@@ -38,7 +39,7 @@ class TestUpdateMode(unittest.TestCase):
 
     def test_expression_plays_its_body_unless_eyes_only(self):
         serial = Mock()
-        ui = WebUI(serial, Mock())
+        ui = WebUI(serial, Supervisor(serial, {}))
         self.assertTrue(call_web_view(ui, 'api_expression', {'value': 'angry'})['body'])
         serial.react.assert_called_once_with('angry')
         serial.set_expression.assert_called_once_with('angry')   # eyes also where the body cannot move
@@ -53,14 +54,14 @@ class TestUpdateMode(unittest.TestCase):
         serial.react.assert_not_called()
 
     def test_expression_plays_its_sound_unless_unticked(self):
-        serial, supervisor = Mock(), Mock()
-        ui = WebUI(serial, supervisor)
+        serial, audio = Mock(), Mock()
+        ui = WebUI(serial, Supervisor(serial, {}, audio=audio))
         self.assertEqual(call_web_view(ui, 'api_expression', {'value': 'scared'})['sound'], 'ohno')
-        supervisor.play_sound.assert_called_once_with('ohno')
-        supervisor.reset_mock()
+        audio.play.assert_called_once_with('ohno')
+        audio.reset_mock()
         self.assertIsNone(call_web_view(ui, 'api_expression', {'value': 'scared', 'sound': False})['sound'])
         self.assertIsNone(call_web_view(ui, 'api_expression', {'value': 'neutral'})['sound'])   # silent mood
-        supervisor.play_sound.assert_not_called()
+        audio.play.assert_not_called()
 
     def test_vibration_cannot_control_ota(self):
         # Source guard, not a substitute for the hardware walking acceptance test.
