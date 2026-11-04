@@ -207,13 +207,13 @@ void handleCommand(const char* json) {
         sendAck("wake_ack");
 
     } else if (strcmp(type, "react") == 0) {
-        // Koerpergeste aus dem Brain (Lob, Ablehnung, Frage ...). Rein kosmetisch: aendert nie den
+        // Stimmung mit Koerper aus dem Brain (Lob, Ablehnung, Frage, Weboberflaeche ...). Rein kosmetisch: aendert nie den
         // Zustand, wird im Schlaf und im gesperrten Image ignoriert; "played" sagt, ob sie lief.
         const char* name = doc["name"] | "";
         JsonDocument resp;
         resp["type"] = "react_ack";
         resp["name"] = name;
-        resp["played"] = motion::react(name);
+        resp["played"] = motion::react(name, true);   // vom Brain/von Hand: kein Cooldown
         sendJson(resp);
 
     } else if (strcmp(type, "blink") == 0) {

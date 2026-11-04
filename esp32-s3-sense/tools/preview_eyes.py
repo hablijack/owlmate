@@ -25,16 +25,16 @@ ROW = re.compile(r"/\*\s*(\w+)\s*\*/\s*\{\s*" + r",\s*".join([r"(-?\d+)"] * 9) +
 
 # Reihenfolge wie auf der Vorlage, damit man direkt vergleichen kann.
 SHEET = [
-    ["NEUTRAL", "BLINK_HIGH", "HAPPY", "GLEE", "BLINK_LOW", "SAD_DOWN", "SAD_UP"],
-    ["WORRIED", "FOCUSED", "ANNOYED", "SURPRISED", "SKEPTIC", "BORED", "UNIMPRESSED"],
+    ["NEUTRAL", "BLINK_HIGH", "HAPPY", "GLEE", "BLINK_LOW", "SAD_DOWN"],
+    ["FOCUSED", "ANNOYED", "SURPRISED", "SKEPTIC", "UNIMPRESSED"],
     ["SLEEPY", "SUSPICIOUS", "SQUINT", "ANGRY", "FURIOUS", "SCARED", "AWE"],
     ["SLEEPING", "SEARCHING", "DETECTING"],
 ]
 LABEL = {
     "BLINK_HIGH": "Blink (high)", "BLINK_LOW": "Blink (low)",
-    "SAD_DOWN": "Sad (looking down)", "SAD_UP": "Sad (looking up)",
-    "FOCUSED": "Focused / Determined", "BORED": "Frustrated / Bored",
-    "SEARCHING": "searching (= suspicious)", "DETECTING": "detecting (= focused)",
+    "SAD_DOWN": "Sad (looking down)",
+    "FOCUSED": "Focused / Determined",
+    "SEARCHING": "searching (Fadenkreuz)", "DETECTING": "detecting (= focused)",
     "SLEEPING": "sleeping (Balken)",
 }
 KEYS = "halfW halfH roundness topSag botRise yOff slantIn slantOut asymH".split()

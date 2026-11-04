@@ -27,6 +27,10 @@
 //   HAPPY    Lob: Ohren wippen im Wechsel, ein Fluegelschlag (1,5 s).
 //   NEGATIVE Ablehnung: Ohren sinken, der Kopf schuettelt sich zweimal (1,3 s).
 //   CURIOUS  Frage: Kopf kippt zu einer zufaelligen Seite, das Ohr dieser Seite geht hoch (1,8 s).
+// Posen (triggerPose()): eine feste Koerperhaltung pro Stimmung (Ohren, Fluegel, Kopfneigung), die
+// POSE_HOLD_MS gehalten wird, solange die Emotion gezeigt wird. Sie ueberlagert Modus und Geste wie
+// eine Geste (nie im REST, Kopf nur mit headValid), ersetzt aber eine laufende Geste/Pose sofort und
+// kennt keinen Cooldown: sie wird von Hand ausgewaehlt (Weboberflaeche), nicht von Sensoren ausgeloest.
 // Nur NEGATIVE und CURIOUS bewegen den Kopf, als Versatz auf das Ziel von Tracking/Blick (nie in NAV).
 //
 // Kopfverfolgung als Sakkade: Das Kamerabild dreht sich mit dem Kopf, also ist gaze_x ein
@@ -43,6 +47,14 @@
 
 enum OwlMode { OM_REST, OM_IDLE, OM_ALERT, OM_ENGAGED, OM_NAV };
 enum OwlGesture { OG_NONE, OG_STARTLE, OG_HAPPY, OG_NEGATIVE, OG_CURIOUS };
+
+// Eine feste Koerperhaltung. Ohren/Fluegel 0..100, Kopf in Grad als Versatz auf das Ziel von
+// Tracking/Blick (positiv = links).
+struct OwlPose {
+    float earL, earR, wingL, wingR;
+    float headDeg;
+    uint8_t flaps;   // so oft schlagen beide Fluegel zu Beginn der Pose runter und wieder hoch (0 = nie)
+};
 
 struct ChoreoConfig {
     float headSign;          // +1/-1: Drehrichtung der Kopfverfolgung
@@ -68,7 +80,11 @@ public:
     void update(uint32_t nowMs, OwlMode mode, bool face, float gazeX, ChoreoOut& out);
     // Startet eine Geste (ignoriert, wenn gerade eine laeuft oder der Cooldown nicht um ist).
     // Gibt zurueck, ob sie angenommen wurde.
-    bool trigger(OwlGesture g, uint32_t nowMs);
+    // force=true ueberspringt Cooldown und laufende Geste (Aufruf von Hand/Weboberflaeche).
+    bool trigger(OwlGesture g, uint32_t nowMs, bool force = false);
+    // Haelt `p` fuer POSE_HOLD_MS; ersetzt jede laufende Geste/Pose. Immer angenommen.
+    void triggerPose(const OwlPose& p, uint32_t nowMs);
+    bool poseActive() const { return _poseUntil != 0; }
     OwlGesture gesture() const { return _gesture; }
     bool trackingSuspended(uint32_t nowMs) const { return nowMs < _trackOffUntil; }
 
@@ -89,6 +105,8 @@ private:
     uint32_t _nextRuffle, _ruffleStart;
     float _gxFilt;
     OwlGesture _gesture;
+    OwlPose _pose;
+    uint32_t _poseUntil, _poseStart;
     uint32_t _gestureStart, _gestureReadyAt;
     float _gestureSide, _headOffset;
 };

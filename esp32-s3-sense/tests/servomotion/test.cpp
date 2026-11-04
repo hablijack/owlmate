@@ -302,6 +302,58 @@ int main() {
         c.update(tt + 200, OM_NAV, false, 0, o);
         assert(!o.headValid && o.head == 0.0f);
     }
+    {   // poses: a held body posture per mood; replaces a running gesture, no cooldown, never in REST, head only if valid
+        OwlChoreo c(CFG, rng); ChoreoOut o;
+        uint32_t tt = 200000;
+        const OwlPose sad = {0, 0, 0, 0, 0};
+        const OwlPose skeptic = {100, 15, 0, 0, 15};
+        c.update(tt, OM_IDLE, false, 0, o);
+        c.triggerPose(skeptic, tt);
+        c.update(tt + 100, OM_IDLE, false, 0, o);
+        assert(c.poseActive() && o.earL == 100.0f && o.earR == 15.0f && o.wingL == 0.0f);
+        assert(std::fabs(o.head - 15.0f) < 0.01f);                 // positive = left, an offset on the head target
+        c.update(tt + 3000, OM_IDLE, false, 0, o);
+        assert(o.earL == 100.0f && o.earR == 15.0f);               // still held
+        c.update(tt + 3600, OM_IDLE, false, 0, o);
+        assert(!c.poseActive() && std::fabs(o.earL - 50.0f) < 0.01f && std::fabs(o.head) < 0.01f);   // back to the mode
+        c.triggerPose(sad, tt + 4000);                             // no cooldown between poses
+        c.triggerPose(skeptic, tt + 4100);
+        c.update(tt + 4200, OM_IDLE, false, 0, o);
+        assert(o.earL == 100.0f);
+        assert(c.trigger(OG_STARTLE, tt + 4300, true));            // a forced gesture replaces the pose at once
+        c.update(tt + 4400, OM_IDLE, false, 0, o);
+        assert(!c.poseActive() && o.wingL == 100.0f);
+        assert(c.trigger(OG_HAPPY, tt + 4500, true));              // force skips the cooldown and the running gesture
+        c.triggerPose(sad, tt + 4600);                             // ... and a pose replaces a gesture
+        assert(c.gesture() == OG_NONE);
+        c.update(tt + 4700, OM_IDLE, false, 0, o);
+        assert(o.earL == 0.0f && o.wingL == 0.0f);
+        OwlChoreo r(CFG, rng);
+        r.update(tt, OM_REST, false, 0, o);
+        r.triggerPose({100, 100, 100, 100, 0}, tt);
+        r.update(tt + 100, OM_REST, false, 0, o);
+        assert(o.earL == 5.0f && o.wingL == 0.0f);                 // asleep: no pose
+        OwlChoreo n(CFG, rng);
+        n.update(tt, OM_NAV, false, 0, o);
+        n.triggerPose(skeptic, tt);
+        n.update(tt + 100, OM_NAV, false, 0, o);
+        assert(!o.headValid && o.head == 0.0f && o.earL == 100.0f);   // the navigation keeps the head, ears still pose
+        {   // flaps: three quick down-and-up wing strokes at the start of the pose, then the held wings
+            OwlChoreo f(CFG, rng);
+            f.update(tt, OM_IDLE, false, 0, o);
+            f.triggerPose({100, 100, 100, 100, 0, 3}, tt);
+            f.update(tt + 100, OM_IDLE, false, 0, o);              // first half of stroke 1: wings down
+            assert(o.wingL == 20.0f && o.wingR == 20.0f && o.earL == 100.0f);
+            f.update(tt + 250, OM_IDLE, false, 0, o);              // still down just before the half period
+            assert(o.wingL == 20.0f);
+            f.update(tt + 400, OM_IDLE, false, 0, o);              // second half: back up
+            assert(o.wingL == 100.0f);
+            f.update(tt + 560 * 2 + 100, OM_IDLE, false, 0, o);    // stroke 3 is still a down stroke
+            assert(o.wingL == 20.0f);
+            f.update(tt + 560 * 3 + 100, OM_IDLE, false, 0, o);    // after three strokes: held up
+            assert(o.wingL == 100.0f);
+        }
+    }
     {   // tracking: sign, deadband, limit, stuck guard, greeting, NAV, REST
         OwlChoreo c(CFG, rng); ChoreoOut o;
         uint32_t tt = 0;

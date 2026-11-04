@@ -14,7 +14,7 @@ OwlChoreo::OwlChoreo(const ChoreoConfig& cfg, Rng rng)
     : _cfg(cfg), _rng(rng), _init(false), _saccadeLockUntil(0), _mode(OM_REST), _last(0), _modeSince(0),
       _headTarget(0), _nextTwitch(0), _twitchUntil(0), _twitchEar(0), _nextGlance(0),
       _glanceUntil(0), _glanceTarget(0), _stuckSince(0), _trackOffUntil(0),
-      _nextRuffle(0), _ruffleStart(0), _gxFilt(0), _gesture(OG_NONE), _gestureStart(0), _gestureReadyAt(0), _gestureSide(1.0f), _headOffset(0.0f) {}
+      _nextRuffle(0), _ruffleStart(0), _gxFilt(0), _gesture(OG_NONE), _pose{0, 0, 0, 0, 0}, _poseUntil(0), _poseStart(0), _gestureStart(0), _gestureReadyAt(0), _gestureSide(1.0f), _headOffset(0.0f) {}
 
 static const uint32_t GESTURE_COOLDOWN_MS = 4000;
 static const uint32_t STARTLE_MS = 1300;
@@ -32,8 +32,23 @@ static uint32_t gestureLength(OwlGesture g) {
     }
 }
 
-bool OwlChoreo::trigger(OwlGesture g, uint32_t now) {
-    if (g == OG_NONE || _gesture != OG_NONE || now < _gestureReadyAt) return false;
+static const uint32_t POSE_HOLD_MS = 3500;
+// Ein Fluegelschlag der Pose: runter auf FLAP_LOW und zurueck in 560 ms. Die Servos schaffen laut
+// Profil ~300 Einheiten/s, also ~270 ms pro Hub von 80 Einheiten - schneller wuerde der Hub verschluckt.
+static const uint32_t FLAP_PERIOD_MS = 560;
+static const float FLAP_LOW = 20.0f;
+
+void OwlChoreo::triggerPose(const OwlPose& p, uint32_t now) {
+    _pose = p;
+    _poseUntil = now + POSE_HOLD_MS;
+    _poseStart = now;
+    _gesture = OG_NONE;   // eine Pose ersetzt eine laufende Geste
+}
+
+bool OwlChoreo::trigger(OwlGesture g, uint32_t now, bool force) {
+    if (g == OG_NONE) return false;
+    if (!force && (_gesture != OG_NONE || now < _gestureReadyAt)) return false;
+    _poseUntil = 0;       // eine Geste ersetzt eine laufende Pose
     _gesture = g;
     _gestureStart = now;
     _gestureSide = (_rng() & 1u) ? 1.0f : -1.0f;
@@ -184,7 +199,25 @@ void OwlChoreo::update(uint32_t now, OwlMode mode, bool face, float gx, ChoreoOu
             }
         }
     }
+    if (_poseUntil != 0) {
+        if (now >= _poseUntil) {
+            _poseUntil = 0;
+        } else if (mode != OM_REST) {
+            out.earL = _pose.earL;
+            out.earR = _pose.earR;
+            out.wingL = _pose.wingL;
+            out.wingR = _pose.wingR;
+            const uint32_t sincePose = now - _poseStart;
+            if (sincePose < uint32_t(_pose.flaps) * FLAP_PERIOD_MS && (sincePose % FLAP_PERIOD_MS) < FLAP_PERIOD_MS / 2) {
+                out.wingL = FLAP_LOW;
+                out.wingR = FLAP_LOW;
+            }
+            if (out.headValid) _headOffset = _pose.headDeg;
+        }
+    }
     out.earL = clampf(out.earL, 0.0f, 100.0f);
     out.earR = clampf(out.earR, 0.0f, 100.0f);
+    out.wingL = clampf(out.wingL, 0.0f, 100.0f);
+    out.wingR = clampf(out.wingR, 0.0f, 100.0f);
     out.head = out.headValid ? clampf(_headTarget + _headOffset, -_cfg.trackLimitDeg, _cfg.trackLimitDeg) : _headTarget;
 }

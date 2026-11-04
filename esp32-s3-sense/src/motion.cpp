@@ -25,25 +25,66 @@ bool knockSeen = false;   // vorheriger Zustand von vibration.detected, fuer die
 
 namespace motion {
 
-bool react(const char* name) {
+#if SERVO_MOTION_ENABLED
+namespace {
+// Jede Stimmung bringt ihre Augen UND ihren Koerper mit: entweder eine Geste (bewegte Abfolge,
+// nur 4 Stueck) oder eine gehaltene Pose (Ohren, Fluegel, Kopfneigung). Die Posen sind die
+// Wuensche des Besitzers aus der Emotionen-Durchsicht (2026-11-03, specs/004): Ohren 0 = tief,
+// 100 = ganz oben; Fluegel 100 = ganz auf; Kopf positiv = links. skeptic: das groessere Auge
+// (links, SHAPES[].asymH kuerzt nur das rechte) bekommt das aufgestellte Ohr.
+struct Mood {
+    const char* name;
+    EyeExpression eyes;
+    OwlGesture gesture;   // OG_NONE: Pose
+    OwlPose pose;
+};
+const Mood MOODS[] = {
+    // Alte Gestennamen (Sprachreaktionen im Brain): Augen wie bisher.
+    {"startle",     EyeExpression::SURPRISED,   OG_STARTLE,  {0, 0, 0, 0, 0}},
+    {"negative",    EyeExpression::ANNOYED,     OG_NEGATIVE, {0, 0, 0, 0, 0}},
+    {"curious",     EyeExpression::SKEPTIC,     OG_CURIOUS,  {0, 0, 0, 0, 0}},
+    // Stimmungen
+    {"neutral",     EyeExpression::NEUTRAL,     OG_NONE,     {50, 50, 0, 0, 0}},
+    {"happy",       EyeExpression::HAPPY,       OG_HAPPY,    {0, 0, 0, 0, 0}},
+    {"glee",        EyeExpression::GLEE,        OG_NONE,     {100, 100, 100, 100, 0}},
+    {"squint",      EyeExpression::SQUINT,      OG_NONE,     {65, 65, 0, 0, 0}},
+    {"sad_down",    EyeExpression::SAD_DOWN,    OG_NONE,     {0, 0, 0, 0, 0}},
+    {"focused",     EyeExpression::FOCUSED,     OG_NONE,     {100, 100, 0, 0, 0}},
+    {"sleepy",      EyeExpression::SLEEPY,      OG_NONE,     {0, 0, 0, 0, 0}},
+    {"unimpressed", EyeExpression::UNIMPRESSED, OG_NONE,     {0, 0, 0, 0, 0}},
+    {"skeptic",     EyeExpression::SKEPTIC,     OG_NONE,     {100, 15, 0, 0, 15}},
+    {"suspicious",  EyeExpression::SUSPICIOUS,  OG_CURIOUS,  {0, 0, 0, 0, 0}},
+    {"surprised",   EyeExpression::SURPRISED,   OG_STARTLE,  {0, 0, 0, 0, 0}},
+    {"awe",         EyeExpression::AWE,         OG_NONE,     {100, 100, 55, 55, 0}},
+    {"annoyed",     EyeExpression::ANNOYED,     OG_NEGATIVE, {0, 0, 0, 0, 0}},
+    {"angry",       EyeExpression::ANGRY,       OG_NONE,     {100, 100, 100, 100, 0}},
+    {"furious",     EyeExpression::FURIOUS,     OG_NONE,     {100, 100, 100, 100, 0, 3}},
+    {"scared",      EyeExpression::SCARED,      OG_NONE,     {0, 0, 100, 100, 0}},
+};
+}  // namespace
+#endif
+
+bool react(const char* name, bool force) {
 #if SERVO_MOTION_ENABLED
     if (!name || servos.locked() || !servos.ready()) return false;
     switch (behavior::current()) {
         case State::BOOT: case State::SLEEPING: case State::UPDATE: case State::ERROR: return false;
         default: break;
     }
-    // Jede Geste bringt ihre Augen mit: Koerper und Gesicht gehoeren zusammen, sonst wirkt es leer.
-    OwlGesture g = OG_NONE;
-    EyeExpression eyes = EyeExpression::NEUTRAL;
-    if (strcmp(name, "startle") == 0) { g = OG_STARTLE; eyes = EyeExpression::SURPRISED; }
-    else if (strcmp(name, "happy") == 0) { g = OG_HAPPY; eyes = EyeExpression::GLEE; }
-    else if (strcmp(name, "negative") == 0) { g = OG_NEGATIVE; eyes = EyeExpression::ANNOYED; }
-    else if (strcmp(name, "curious") == 0) { g = OG_CURIOUS; eyes = EyeExpression::SKEPTIC; }
-    if (!choreo.trigger(g, millis())) return false;
-    behavior::overrideExpression(eyes);
-    return true;
+    for (const Mood& m : MOODS) {
+        if (strcmp(name, m.name) != 0) continue;
+        if (m.gesture != OG_NONE) {
+            if (!choreo.trigger(m.gesture, millis(), force)) return false;
+        } else {
+            choreo.triggerPose(m.pose, millis());
+        }
+        // Koerper und Gesicht gehoeren zusammen, sonst wirkt es leer.
+        behavior::overrideExpression(m.eyes);
+        return true;
+    }
+    return false;
 #else
-    (void)name;
+    (void)name; (void)force;
     return false;
 #endif
 }
@@ -69,7 +110,7 @@ void update() {
     // Nach behavior::update() aufgerufen, damit der Zustandswechsel IDLE->DETECTING den
     // Ausdruck nicht wieder loescht. Im Schlaf (REST) spielt die Choreografie nichts.
     const bool knock = sensors.getVibration().knock;
-    if (knock && !knockSeen && mode != OM_REST) react("startle");
+    if (knock && !knockSeen && mode != OM_REST) react("startle", false);
     knockSeen = knock;
 
     ChoreoOut out;

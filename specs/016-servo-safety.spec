@@ -150,7 +150,7 @@ No factory image, full erase, bootloader rewrite or NVS rewrite is used.
 compile-time data (`include/servo_profiles.h`), so no write path to NVS (which holds the IMU
 calibration) is added and there is nothing for a corrupted store or a serial command to
 loosen. Per-servo changes need a new image, deliberately. Tabelle ends = limits: wing right
-1160..1990, wing left 1010..1730 (never near 1776), ear left 1985..2310, ear right 545..800,
+1160..1990, wing left 1010..1730 (never near 1776), ear left 2010..2310, ear right 545..770 (lowered end raised 2026-11-04: the servos hummed at full down),
 head 520..2150 µs (head linear on the servo axis, 11.1 µs per nominal degree; the degree scale
 is assumed, not measured). Speeds are deliberately low (head 40°/s, wings 300 %/s so a full-travel beat is visible, ears 220 %/s),
 all eased by two cascaded critically damped springs plus a hard speed cap (a single spring jumps to

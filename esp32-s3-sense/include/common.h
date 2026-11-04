@@ -20,13 +20,10 @@ enum class EyeExpression {
     HAPPY,
     GLEE,
     SAD_DOWN,        // sad, looking down
-    SAD_UP,          // sad, looking up at the user
-    WORRIED,
     FOCUSED,         // focused / determined
     ANNOYED,
     SURPRISED,
     SKEPTIC,
-    BORED,           // frustrated / bored
     UNIMPRESSED,
     SLEEPY,
     SUSPICIOUS,
@@ -37,7 +34,7 @@ enum class EyeExpression {
     AWE,
     // --- states the owl needs that the sheet does not cover ---
     SLEEPING,        // fully closed lash bar
-    SEARCHING,       // scanning; drawn as SUSPICIOUS
+    SEARCHING,       // boot / navigation; drawn as a crosshair
     DETECTING,       // locked on; drawn as FOCUSED
     UPDATE,          // OTA spinner, not an eye
     ERROR,           // cross, not an eye

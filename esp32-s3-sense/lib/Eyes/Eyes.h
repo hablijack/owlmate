@@ -11,11 +11,11 @@
 // reference sheet. On top of that:
 //
 //   topSag   pushes the TOP edge down in the middle    -> flat / dome-down moods
-//                                                        (annoyed, bored, skeptic)
+//                                                        (annoyed, skeptic, unimpressed)
 //   botRise  pushes the BOTTOM edge up in the middle   -> crescents
 //                                                        (happy, glee, squint)
 //   slantIn  drops the top edge linearly toward the INNER corner  -> angry, furious
-//   slantOut drops the top edge linearly toward the OUTER corner  -> worried, sad
+//   slantOut drops the top edge linearly toward the OUTER corner  -> sad_down
 //   yOff     shifts the whole shape vertically
 //   asymH    shortens the RIGHT eye only, for moods that are deliberately
 //            lopsided (skeptic)
@@ -62,6 +62,8 @@ private:
     void drawLids(GC9D01& lcd, float openness);
     void drawSpinner(GC9D01& lcd);
     void drawErrorX(GC9D01& lcd);
+    void drawCrosshair(GC9D01& lcd, int cx, int cy);
+    void drawZzz(GC9D01& lcd, int cx, int cy);
     void drawClosed(GC9D01& lcd);
     float currentOpenness() const;
 

@@ -54,10 +54,15 @@ only when the boot-time probe found them, which makes telemetry a presence
 indicator for free — no separate health field needed.
 
 **Commands** (Orange Pi → ESP32): `sleep`, `wake`, `expression`, `servo`, `gaze`,
-`nav`, `blink`, `react`, `heartbeat`, `update_mode`. `react` (`name`: `startle`, `happy`,
-`negative`, `curious`) plays a body gesture from `OwlChoreo`; `react_ack.played` says whether it ran
-(false asleep, in the locked image, during another gesture or its 4 s cooldown). It never changes
-the state. `update_mode`: the latter requires boolean `active`:
+`nav`, `blink`, `react`, `heartbeat`, `update_mode`. `react` (`name`: a mood of the
+web palette -- `happy`, `glee`, `squint`, `sad_down`, `focused`, `sleepy`, `unimpressed`, `skeptic`,
+`suspicious`, `surprised`, `awe`, `annoyed`, `angry`, `furious`, `scared`, `neutral` -- or one of the
+old gesture names `startle`, `negative`, `curious`) shows the mood's **eyes and body together**: a
+`OwlChoreo` gesture or a held pose (ears, wings, head tilt, ~3.5 s; table in `src/motion.cpp`).
+`react_ack.played` says whether it ran (false for an unknown name, asleep, in the locked image).
+A `react` from the brain skips the gesture cooldown and replaces a running gesture/pose, so moods
+can be clicked through; only the owl's own double-knock startle keeps the 4 s cooldown. It never
+changes the state. `update_mode`: the latter requires boolean `active`:
 true enters OTA, false exits to IDLE (a no-op outside UPDATE). Repeated commands
 are idempotent. `update_mode_ack` reports the resulting `active`; a missing or
 non-boolean value emits `error` with `msg: invalid_update_mode` and changes nothing.

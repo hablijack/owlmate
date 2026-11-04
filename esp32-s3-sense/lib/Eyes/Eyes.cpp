@@ -134,6 +134,17 @@ void Eyes::render() {
     int irisCX = EYE_CX + (int)(gx * TRAVEL_X);
     int irisCY = EYE_CY + (int)(gy * TRAVEL_Y);
 
+    // FURIOUS trembles: +-2 px sideways, a new frame every 120 ms. Slower than the
+    // spinner on purpose -- every frame re-flushes the slit's rows on both panels
+    // (~50 ms), so a faster tremble would eat the loop. The mood is a short override.
+    if (_expr == EyeExpression::FURIOUS) {
+        if (now - _lastAnimFrame >= 120) {
+            _dirty = true;
+            _animPhase = (_animPhase + 30) % 360;
+        }
+        irisCX += ((_animPhase / 30) & 1) ? 2 : -2;
+    }
+
     // The UPDATE spinner animates continuously: force a new frame
     // every 50ms (~20fps) while the update expression is active.
     if (_expr == EyeExpression::UPDATE && now - _lastAnimFrame >= 50) {
@@ -177,25 +188,22 @@ static const EyeShape SHAPES[] = {
     /* BLINK_HIGH  */ { 32,  8, 22,  0,  0, -14,  0,  0, 0 },
     /* BLINK_LOW   */ { 32,  8, 22,  0,  0,  14,  0,  0, 0 },
     /* HAPPY       */ { 36, 42, 24,  0, 62,   6,  0,  0, 0 },
-    /* GLEE        */ { 30, 30, 24,  0, 28,   4,  0,  0, 0 },
+    /* GLEE        */ { 40, 44, 24,  0, 26,   0,  0,  0, 0 },
     /* SAD_DOWN    */ { 32, 34, 26,  0,  0,   8,  0, 30, 0 },
-    /* SAD_UP      */ { 31, 34, 29,  0,  0,  -2,  0,  0, 0 },
-    /* WORRIED     */ { 33, 38, 26,  0,  0,   2,  0, 34, 0 },
     /* FOCUSED     */ { 34, 30, 26,  0, 12,   2,  0, 10, 0 },
     /* ANNOYED     */ { 34, 32, 26, 26,  0,  -2,  0,  0, 0 },
-    /* SURPRISED   */ { 40, 47, 26,  0,  0,   0,  0,  0, 0 },
-    /* SKEPTIC     */ { 32, 27, 26, 20,  0,   0,  0,  0, 7 },
-    /* BORED       */ { 34, 21, 24, 15,  0,   0,  0,  0, 0 },
-    /* UNIMPRESSED */ { 34, 18, 22, 12,  0,   0,  0,  0, 0 },
+    /* SURPRISED   */ { 70, 74, 22,  0,  0,   0,  0,  0, 0 },
+    /* SKEPTIC     */ { 32, 34, 26, 20,  0,   0,  0,  0, 14 },
+    /* UNIMPRESSED */ { 34, 18, 22, 12,  0,  22,  0,  0, 0 },
     /* SLEEPY      */ { 33, 30, 29,  6,  0,   6,  0,  0, 0 },
     /* SUSPICIOUS  */ { 33, 32, 26,  0, 14,   0,  0,  0, 0 },
     /* SQUINT      */ { 33, 34, 22,  0, 52,   4,  0,  0, 0 },
-    /* ANGRY       */ { 36, 40, 24,  0,  0,   2, 36,  0, 0 },
-    /* FURIOUS     */ { 36, 42, 22,  0,  0,   2, 52,  0, 0 },
-    /* SCARED      */ { 31, 45, 26,  0,  0,   0,  0,  0, 0 },
+    /* ANGRY       */ { 38, 38, 22,  0,  0,   2, 52,  0, 0 },
+    /* FURIOUS     */ { 42, 24, 20,  0,  0,   4, 36,  0, 0 },
+    /* SCARED      */ { 17, 26, 24,  0,  0,   0,  0,  0, 0 },
     /* AWE         */ { 42, 42, 32,  0,  0,   0,  0,  0, 0 },
     /* SLEEPING    */ { 32,  8, 22,  0,  0,  14,  0,  0, 0 },  // drawn as a bar
-    /* SEARCHING   */ { 33, 32, 26,  0, 14,   0,  0,  0, 0 },  // = SUSPICIOUS
+    /* SEARCHING   */ { 33, 32, 26,  0, 14,   0,  0,  0, 0 },  // crosshair instead
     /* DETECTING   */ { 34, 30, 26,  0, 12,   2,  0, 10, 0 },  // = FOCUSED
     /* UPDATE      */ { 33, 40, 26,  0,  0,   0,  0,  0, 0 },  // spinner instead
     /* ERROR       */ { 33, 40, 26,  0,  0,   0,  0,  0, 0 },  // cross instead
@@ -205,8 +213,8 @@ static const EyeShape SHAPES[] = {
 // {"type":"expression","value":"..."} and that telemetry reports back as "eye".
 static const char* const NAMES[] = {
     "neutral", "blink_high", "blink_low", "happy", "glee",
-    "sad_down", "sad_up", "worried", "focused", "annoyed",
-    "surprised", "skeptic", "bored", "unimpressed", "sleepy",
+    "sad_down", "focused", "annoyed",
+    "surprised", "skeptic", "unimpressed", "sleepy",
     "suspicious", "squint", "angry", "furious", "scared",
     "awe", "sleeping", "searching", "detecting", "update", "error",
 };
@@ -276,9 +284,11 @@ void Eyes::drawShape(GC9D01& lcd, int cx, int cy, bool mirrored) {
         case EyeExpression::UPDATE:   drawSpinner(lcd); return;   // not an eye
         case EyeExpression::ERROR:    drawErrorX(lcd);  return;   // not an eye
         case EyeExpression::SLEEPING: drawClosed(lcd);  return;   // fully shut
+        case EyeExpression::SEARCHING: drawCrosshair(lcd, cx, cy); return;   // boot / navigation
         default: break;
     }
     drawBlob(lcd, shapeOf(_expr), cx, cy, mirrored);
+    if (_expr == EyeExpression::SLEEPY) drawZzz(lcd, cx, cy);   // comic snore on the heavy lids
 }
 
 // Draw one mood from its table row, column by column: for each x, work out
@@ -345,6 +355,36 @@ void Eyes::drawSpinner(GC9D01& lcd) {
         lcd.fillCircle(EYE_CX + (int)(cosf(rad) * R),
                        EYE_CY + (int)(sinf(rad) * R), 6, COLOR_INK);
     }
+}
+
+// Searching (boot, navigation): a ring with a gap-cross and a dot, so it cannot be
+// mistaken for a mood. Follows the gaze like an eye does.
+void Eyes::drawCrosshair(GC9D01& lcd, int cx, int cy) {
+    lcd.fillCircle(cx, cy, 44, COLOR_INK);
+    lcd.fillCircle(cx, cy, 37, COLOR_BG);
+    for (int t = -2; t <= 2; t++) {
+        lcd.drawFastHLine(cx - 56, cy + t, 42, COLOR_INK);   // left arm
+        lcd.drawFastHLine(cx + 15, cy + t, 42, COLOR_INK);   // right arm
+        lcd.drawFastVLine(cx + t, cy - 56, 42, COLOR_INK);   // upper arm
+        lcd.drawFastVLine(cx + t, cy + 15, 42, COLOR_INK);   // lower arm
+    }
+    lcd.fillCircle(cx, cy, 5, COLOR_INK);
+}
+
+// One comic "Z": top bar, diagonal, bottom bar, `size` px wide, 3 px strokes.
+static void drawZ(GC9D01& lcd, int x, int y, int size, uint16_t color) {
+    for (int t = 0; t < 3; t++) {
+        lcd.drawFastHLine(x, y + t, size, color);
+        lcd.drawFastHLine(x, y + size - t, size, color);
+        lcd.drawLine(x + size - t, y, x - t, y + size, color);
+    }
+}
+
+// "z Z Z" rising to the upper right, knocked out of the sleepy eye in the paper colour.
+void Eyes::drawZzz(GC9D01& lcd, int cx, int cy) {
+    drawZ(lcd, cx - 24, cy + 12, 9,  COLOR_BG);
+    drawZ(lcd, cx - 9,  cy + 1,  13, COLOR_BG);
+    drawZ(lcd, cx + 7,  cy - 12, 17, COLOR_BG);
 }
 
 void Eyes::drawErrorX(GC9D01& lcd) {
