@@ -135,7 +135,7 @@ Full design, math and open questions: `specs/013-navigation.spec`.
 ### Eye Renderer
 - Two 160×160 LCDs with PSRAM framebuffers (2×51.2 KB each)
 - Procedural eye drawing: sclera → iris → pupil → eyelids
-- 26 expressions (24 user-selectable), all from ONE parametric routine driven by the `SHAPES[]` table
+- 23 expressions (21 selectable, 16 offered as moods in the web UI), all from ONE parametric routine driven by the `SHAPES[]` table
 - Deliberately **two colours only**, black on white: no iris, no pupil, no sclera, no grey lids. The panels are 160 px behind small openings and that detail turned to mush — it was removed on purpose, see `specs/004-eye-expressions.spec`
 - Auto-blink every 2–5 seconds
 - Gaze tracking: iris/pupil offset based on face position or remote command
@@ -186,7 +186,7 @@ Full design, math and open questions: `specs/013-navigation.spec`.
 | `servo` | `{"type":"servo","channel":0,"angle":15.0}` | Set servo angle (-45 to 45) |
 | `gaze` | `{"type":"gaze","x":-0.5,"y":0.2}` | Temporary gaze override (3s) |
 | `blink` | `{"type":"blink","speed":3}` | Trigger blink animation |
-| `react` | `{"type":"react","name":"happy"}` | Body gesture: `startle`, `happy`, `negative`, `curious` (ears, wings, head; ignored asleep) |
+| `react` | `{"type":"react","name":"happy"}` | A mood with its body: any palette mood (`happy`, `angry`, `skeptic` ...) or `startle`/`negative`/`curious` -- eyes plus ears, wings, head; ignored asleep |
 | `heartbeat` | `{"type":"heartbeat"}` | Request state ack |
 | `update_mode` | `{"type":"update_mode","active":true}` | Enter OTA; `false` exits. Explicit boolean required; repeated requests are harmless |
 | `servo_step` | `{"type":"servo_step","channel":7,"direction":1}` | Maintenance: one raw PWM tick from an active output; direction ±1; IDLE only; holds autonomous behavior until `wake` or state-changing command |
@@ -241,7 +241,7 @@ went into believing a measurement that could not mean what it appeared to mean.
 | One behaviour state machine, on the ESP32; the Orange Pi supervises | [001](specs/001-system-architecture.spec) |
 | `framework = arduino, espidf`, octal PSRAM, partitions, flashing | [002](specs/002-build-and-toolchain.spec) |
 | Two LCDs on one SPI bus, software chip-select, custom GC9D01 driver | [003](specs/003-display-bus.spec) |
-| Two colours, one parametric shape routine for all 26 moods | [004](specs/004-eye-expressions.spec) |
+| Two colours, one parametric shape routine for all 18 moods | [004](specs/004-eye-expressions.spec) |
 | I2C bus and its three devices | [005](specs/005-i2c-bus.spec) |
 | IMU axes, mounting, calibration, true-north heading | [006](specs/006-imu-orientation.spec) |
 | Closed-owl servo lock; controlled two-slot deployment | [016](specs/016-servo-safety.spec) |
@@ -276,7 +276,7 @@ esp32-s3-sense/                    # ESP32 firmware
 │   │   ├── GC9D01.h/.cpp          # Init, framebuffer, flush, pixel drawing
 │   │   └── common.h               # Display constants
 │   ├── Eyes/                      # Eye renderer class
-│   │   ├── Eyes.h/.cpp            # SHAPES[] table + drawBlob(): 26 expressions, lids, blink
+│   │   ├── Eyes.h/.cpp            # SHAPES[] table + drawBlob(): 23 expressions, lids, blink
 │   │   └── common.h               # Eye geometry, colors
 │   └── FaceDetector/              # Face detection module (esp-dl v3)
 │       ├── FaceDetector.h/.cpp    # OV3660 + HumanFaceDetect (v3 API) integration
@@ -305,7 +305,7 @@ orangepi-brain/                    # Orange Pi Zero 3W (A733) brain (Python)
 ├── config.yaml                    # Serial port + every feature block (all opt-in except audio)
 ├── requirements.txt               # pyserial, numpy, pyyaml, flask, sounddevice, pywhispercpp, llama-cpp-python
 ├── setup.sh                       # Orange Pi provisioning: kernel module + DT overlay + asound + wizard + model + reboot
-├── assets/sounds/                 # Owl-call WAVs played through the shared 'owl' I2S card
+├── assets/sounds/                 # Robot-sound WAVs (see SOURCES.md; mood mapping in brain/audio.py) played through the shared 'owl' I2S card
 ├── audio/                         # The A733 'owl' sound card: custom driver + DT overlay + asound.conf
 │   ├── owl_i2s.c                  # Custom I2S0 driver (one-bit data-delay fix a DT overlay can't express)
 │   ├── owl-i2s-overlay.dts        # Muxes the I2S0 pins (BCLK/LRCK/DOUT/DIN) onto the 40-pin header
@@ -317,7 +317,7 @@ orangepi-brain/                    # Orange Pi Zero 3W (A733) brain (Python)
 │   └── 99-robot-owl-serial.rules
 ├── tools/
 │   └── gen_expressions.py         # GENERATES brain/expressions.py from the firmware's NAMES[]
-├── tests/                         # 265 tests; run on a plain Mac, no Orange Pi or audio stack needed
+├── tests/                         # 271 tests; run on a plain Mac, no Orange Pi or audio stack needed
 │   ├── run_tests.py               # unittest discovery
 │   ├── stubs.py                   # fakes third-party modules ONLY when not importable
 │   ├── test_protocol.py           # the ESP32<->Orange Pi wire contract (48 tests)
@@ -572,7 +572,7 @@ python main.py [config.yaml]   # Default config path
 | Component | Status | Notes |
 |---|---|---|
 | **GC9D01 LCD Driver** | ✅ Complete | Custom SPI driver, PSRAM framebuffers, software chip-select, 16 MHz. Both panels verified working on one shared bus |
-| **Eye Renderer** | ✅ Complete | 26 expressions (24 user-selectable) from ONE parametric routine driven by the `SHAPES[]` table — retune a mood by editing numbers, never by adding a draw function. Auto-blink, gaze, eyelids. Two colours only, black on white (see `AGENTS.md` and `specs/004-eye-expressions.spec`) |
+| **Eye Renderer** | ✅ Complete | 23 expressions (21 selectable) from ONE parametric routine driven by the `SHAPES[]` table — retune a mood by editing numbers, never by adding a draw function. Auto-blink, gaze, eyelids. Two colours only, black on white (see `AGENTS.md` and `specs/004-eye-expressions.spec`) |
 | **LSM303AGR IMU** | ⚠️ Ported, unmeasured | Driver, software fusion and hard-iron calibration are in and validated on hardware (`\|a\|` = 9.77 m/s², both `WHO_AM_I` correct). **Not yet mounted, so the axis remap and the heading offset's mounting term are both unmeasured** — `imu.yaw` is not trustworthy until then (`specs/006` Open) |
 | **PA1010D GPS** | ✅ Complete | Native I2C (Adafruit_GPS), RMC+GGA NMEA parsing |
 | **SW420 Vibration** | ✅ Complete | **Edge-counting ISR**, evaluated once per main loop (~60 Hz). Explicitly *not* a level read and *not* debounced: the sensor emits ~1 kHz pulse bursts, and reading it as a stable level is what pinned the owl in DETECTING forever. `vibration.pulses` reports raw edges since boot so a dead sensor is distinguishable from a quiet one. See `specs/007-vibration-and-ota.spec` |
@@ -586,7 +586,7 @@ python main.py [config.yaml]   # Default config path
 | **Web UI (Orange Pi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and magnetometer calibration state, and a map place-picker for navigation. Page lives in `brain/templates/index.html`; the `/api/telemetry` payload is derived from the parsed telemetry dataclass, so it cannot fall behind the firmware (the SoftAP password is the one field deliberately withheld) |
 | **I2S Audio (Orange Pi)** | ✅ Hardware verified | `owl` card registers on boot; audible WAV and real mic verified. Opt-in `audio.keep_playback_clock` prevents capture becoming silent after playback stops; continuity check passes. See `specs/015-orangepi-audio.spec` for measurements and permissions. |
 | **Speech (Orange Pi)** | ✅ Implemented; live speech acceptance pending | German. Mic → RMS VAD gate → whisper.cpp (via the `pywhispercpp` binding, an offline `.bin`/`.gguf` model — no torch/CTranslate2) → keyword clusters / navigation triggers. Gated on awake + face + energy; real playback/tail blocks microphone processing and invalidates stale audio/ASR results. Ambient/TV rejection still needs acceptance. Disabled by default. See `specs/014-speech.spec` |
-| **Orange Pi test suite** | ✅ 265 tests | Runs on a plain dev machine with no Orange Pi, mic, PortAudio, whisper.cpp, llama.cpp, Flask or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔Orange Pi wire contract (48, `test_protocol.py`) and firmware-vs-Orange Pi drift guards (11, `test_expressions.py`) |
+| **Orange Pi test suite** | ✅ 271 tests | Runs on a plain dev machine with no Orange Pi, mic, PortAudio, whisper.cpp, llama.cpp, Flask or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔Orange Pi wire contract (48, `test_protocol.py`) and firmware-vs-Orange Pi drift guards (11, `test_expressions.py`) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
 
 ---

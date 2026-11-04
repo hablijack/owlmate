@@ -443,7 +443,7 @@ def make_config(**overrides):
                 "Freude": "happy",
                 "Wut": "angry",
                 "Trauer": "sad_down",
-                "Angst": "worried",
+                "Angst": "scared",
                 "Ueberraschung": "surprised",
                 "Verachtung": "unimpressed",
             },

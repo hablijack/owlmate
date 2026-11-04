@@ -31,6 +31,8 @@
   .brand { display:flex; align-items:center; gap:10px; font-family:var(--mono); letter-spacing:.28em; font-size:12px; color:var(--muted); text-transform:uppercase; }
   .brand b { color:var(--fg); letter-spacing:.28em; }
   .brand i { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 10px var(--green); }
+  .topright { display:flex; align-items:center; gap:16px; }
+  .lang { font-family:var(--mono); font-size:11px; letter-spacing:.16em; padding:5px 10px; }
   .link { font-family:var(--mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); display:flex; gap:8px; align-items:center; }
   .link.off { color:var(--red); }
   .link.off i { background:var(--red); box-shadow:0 0 10px var(--red); }
@@ -101,11 +103,10 @@
   button.danger { border-color:rgba(244,63,94,.5); background:rgba(244,63,94,.10); }
   button.danger:hover:not(:disabled) { background:rgba(244,63,94,.24); border-color:var(--red); box-shadow:0 0 18px -4px var(--red); }
   .btns { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
-  .gesture { flex:1 1 150px; padding:18px 12px; text-align:center; font-size:15px; font-weight:600; letter-spacing:.04em; }
-  .gesture small { display:block; margin-top:5px; font-family:var(--mono); font-size:10px; font-weight:400; letter-spacing:.14em; color:var(--muted); text-transform:uppercase; }
+  #expressions h3 { margin:14px 0 8px; }
+  #expressions h3:first-child { margin-top:0; }
   .emo { display:grid; grid-template-columns:repeat(auto-fill, minmax(118px, 1fr)); gap:9px; }
   .emo button { padding:10px 8px; font-size:13px; text-transform:capitalize; position:relative; }
-  .emo button.gest::after { content:"\2726"; position:absolute; top:5px; right:7px; font-size:10px; color:var(--violet); }
   .emo button.active { border-color:var(--state); background:color-mix(in srgb, var(--state) 22%, transparent); box-shadow:0 0 16px -4px var(--state); }
   .legend { margin-top:10px; font-size:12px; color:var(--muted); }
   .legend span { color:var(--violet); }
@@ -157,7 +158,10 @@
 
   <div class="topbar">
     <div class="brand"><i></i><b>Robot Owl</b> &middot; Mission Control</div>
-    <div class="link" id="link"><i></i><span id="link-txt">connecting</span></div>
+    <div class="topright">
+      <button id="lang-btn" class="lang" aria-label="Language">DE</button>
+      <div class="link" id="link"><i></i><span id="link-txt">connecting</span></div>
+    </div>
   </div>
 
   <!-- ===== LIVE STATE ===== -->
@@ -250,20 +254,11 @@
   </div>
 
   <!-- ===== EMOTIONS ===== -->
-  <h2 class="sec"><span>02</span> Gestures &amp; emotions</h2>
+  <h2 class="sec"><span>02</span> Expressions</h2>
   <div class="panel">
-    <h3>Body gestures &middot; eyes, ears, wings and head together</h3>
-    <div class="btns">
-      <button class="gesture" data-act="react" data-name="startle">Startle<small>knock reaction</small></button>
-      <button class="gesture" data-act="react" data-name="happy">Happy<small>praise</small></button>
-      <button class="gesture" data-act="react" data-name="negative">Negative<small>refusal</small></button>
-      <button class="gesture" data-act="react" data-name="curious">Curious<small>question</small></button>
-    </div>
-  </div>
-  <div class="panel" style="margin-top:14px">
-    <h3>Expressions</h3>
-    <div class="emo" id="expressions"></div>
-    <div class="legend"><span>&#10022;</span> plays the full gesture (body + eyes); the others change the eyes only.</div>
+    <div id="expressions"></div>
+    <label class="legend" style="display:block"><input type="checkbox" id="with-body" checked> Move ears, wings and head together with the eyes (untick for the eyes only)</label>
+    <label class="legend" style="display:block"><input type="checkbox" id="with-sound" checked> Play the mood's sound</label>
     <div class="btns" style="margin-top:14px">
       <button class="primary" data-act="blink">Blink</button>
       <select id="blink-speed" aria-label="blink speed">
@@ -276,15 +271,8 @@
     </div>
   </div>
 
-  <!-- ===== VOICE ===== -->
-  <h2 class="sec"><span>03</span> Voice &amp; sounds</h2>
-  <div class="panel">
-    <h3>Owl calls (amp on the Orange Pi)</h3>
-    <div class="emo" id="sounds"></div>
-  </div>
-
   <!-- ===== MOTION ===== -->
-  <h2 class="sec"><span>04</span> Manual motion</h2>
+  <h2 class="sec"><span>03</span> Manual motion</h2>
   <div class="grid g2">
     <div class="panel">
       <h3>Head</h3>
@@ -319,7 +307,7 @@
   </div>
 
   <!-- ===== NAVIGATION ===== -->
-  <h2 class="sec"><span>05</span> Places &amp; navigation</h2>
+  <h2 class="sec"><span>04</span> Places &amp; navigation</h2>
   <div class="panel" id="nav-card">
     <p class="hint" style="margin-top:0">Teach the owl a place (name + coordinates), then press Start &mdash;
     its head turns to point at that place, and keeps re-aiming as you walk. Say
@@ -359,7 +347,7 @@
   </div>
 
   <!-- ===== SYSTEM ===== -->
-  <h2 class="sec"><span>06</span> System</h2>
+  <h2 class="sec"><span>05</span> System</h2>
   <div class="grid g2">
     <div class="panel">
       <h3>Power</h3>
@@ -432,18 +420,18 @@
     function refreshPlaces() {
       fetch('/api/locations').then(function(r){ return r.json(); }).then(function(d) {
         if (!d.ok) { document.getElementById('places').innerHTML =
-          '<span class="hint">Navigation is disabled in config.</span>'; return; }
+          '<span class="hint">' + tr('Navigation is disabled in config.') + '</span>'; return; }
         var list = document.getElementById('places');
         var sel = document.getElementById('nav-target');
         list.innerHTML = ''; sel.innerHTML = '';
-        if (!d.locations.length) { list.innerHTML = '<span class="hint">No places yet &mdash; add one above.</span>'; return; }
+        if (!d.locations.length) { list.innerHTML = '<span class="hint">' + tr('No places yet \u2014 add one above.') + '</span>'; return; }
         d.locations.forEach(function(loc) {
           var row = document.createElement('div');
           row.className = 'place';
           row.innerHTML = '<span class="grow">' + escapeHtml(loc.name) +
             ' <span class="hint">' + loc.lat.toFixed(5) + ', ' + loc.lon.toFixed(5) + '</span></span>';
           var del = document.createElement('button');
-          del.textContent = 'Remove'; del.className = 'danger';
+          del.textContent = tr('Remove'); del.className = 'danger';
           del.onclick = function(){ post('/api/locations/delete', {name: loc.name}).then(refreshPlaces); };
           row.appendChild(del);
           list.appendChild(row);
@@ -457,16 +445,16 @@
       var el = document.getElementById('nav-status');
       var big = document.getElementById('n-state');
       var n = t.navigation;
-      if (!n) { el.textContent = 'Navigation is disabled in config.'; big.textContent = 'off'; big.style.color = ''; return; }
+      if (!n) { el.textContent = tr('Navigation is disabled in config.'); big.textContent = tr('off'); big.style.color = ''; return; }
       if (n.active) {
-        big.textContent = 'active'; big.style.color = '#fbbf24';
-        el.innerHTML = 'Pointing at <b>' + escapeHtml(n.target||'?') + '</b> &middot; bearing ' +
+        big.textContent = tr('active'); big.style.color = '#fbbf24';
+        el.innerHTML = tr('Pointing at') + ' <b>' + escapeHtml(n.target||'?') + '</b> &middot; ' + tr('bearing') + ' ' +
           (n.bearing!=null? n.bearing.toFixed(0)+'&deg;':'&ndash;') + ' &middot; ' +
           (n.distance_m!=null? n.distance_m.toFixed(0)+' m':'&ndash;') +
-          ' &middot; head ' + (n.aim!=null? n.aim.toFixed(0)+'&deg;':'&ndash;');
+          ' &middot; ' + tr('head') + ' ' + (n.aim!=null? n.aim.toFixed(0)+'&deg;':'&ndash;');
       } else {
-        big.textContent = 'standby'; big.style.color = '';
-        el.textContent = 'Not navigating.';
+        big.textContent = tr('standby'); big.style.color = '';
+        el.textContent = tr('Not navigating.');
       }
     }
     // Wire the buttons (id- and data-act based).
@@ -476,7 +464,7 @@
         var name = document.getElementById('place-name').value.trim();
         var la = parseFloat(document.getElementById('place-lat').value);
         var lo = parseFloat(document.getElementById('place-lon').value);
-        if (!name || isNaN(la) || isNaN(lo)) { alert('Enter a name and valid lat/lon.'); return; }
+        if (!name || isNaN(la) || isNaN(lo)) { alert(tr('Enter a name and valid lat/lon.')); return; }
         post('/api/locations', {name: name, lat: la, lon: lo}).then(function(d) {
           if (d.ok) { document.getElementById('place-name').value = ''; }
           refreshPlaces();
@@ -490,8 +478,8 @@
       var startBtn = document.querySelector('[data-act="nav-start"]');
       if (startBtn) startBtn.onclick = function() {
         var name = document.getElementById('nav-target').value;
-        if (!name) { alert('Add a place first (or say "bring mich nach <name>").'); return; }
-        post('/api/nav/start', {name: name}).then(function(d){ if (!d.ok) alert('Could not start: ' + (d.error||'unknown place')); });
+        if (!name) { alert(tr('Add a place first (or say "bring mich nach <name>").')); return; }
+        post('/api/nav/start', {name: name}).then(function(d){ if (!d.ok) alert(tr('Could not start:') + ' ' + (d.error||'unknown place')); });
       };
       var stopBtn = document.querySelector('[data-act="nav-stop"]');
       if (stopBtn) stopBtn.onclick = function(){ post('/api/nav/stop', {}); };
@@ -506,10 +494,89 @@
   })();
 
 const $ = (s) => document.querySelector(s);
-const exprs = {{ expressions | tojson }};
-const sounds = {{ sounds | tojson }};
-const soundLabels = {{ sound_labels | tojson }};
-const exprGestures = {{ expression_gestures | tojson }};
+
+// ---- Language switch (EN <-> DE) -------------------------------------------
+// English is the source text. DE maps an English string to its German one; tr()
+// translates dynamic strings, and applyLang() walks the static page text (each text
+// node remembers its English original, so switching back is lossless). A string with
+// no entry simply stays English.
+const DE = {
+  'Mission Control': 'Kommandozentrale', 'connecting': 'verbinde', 'live': 'live', 'offline': 'offline',
+  'no telemetry': 'keine Telemetrie', 'NO LINK': 'KEINE VERBINDUNG',
+  'Current mode': 'Aktueller Modus', 'waiting for telemetry…': 'warte auf Telemetrie…',
+  'Eyes': 'Augen', 'Face': 'Gesicht', 'Loop': 'Schleife', 'Uptime': 'Laufzeit', 'Firmware': 'Firmware', 'Servos': 'Servos',
+  'Sensors': 'Sensoren', 'Vision': 'Sehen', 'Orientation (IMU)': 'Lage (IMU)', 'Position (GPS)': 'Position (GPS)',
+  'Touch (vibration)': 'Berührung (Vibration)', 'Navigation': 'Navigation',
+  'detected': 'erkannt', 'gaze x / y': 'Blick x / y', 'faces seen': 'Gesichter gesehen', 'inference': 'Inferenz',
+  'roll / pitch': 'Roll / Nick', 'compass': 'Kompass', 'mag axes': 'Mag-Achsen',
+  'latitude': 'Breitengrad', 'longitude': 'Längengrad', 'satellites': 'Satelliten',
+  'taps': 'Klopfer', 'edges since boot': 'Flanken seit Start',
+  'LOCKED': 'GESPERRT', 'MOTION ON': 'BEWEGUNG AN',
+  'Servo safety not confirmed; motion controls locked.': 'Servo-Sicherheit nicht bestätigt; Bewegungssteuerung gesperrt.',
+  'Expressions': 'Ausdrücke', 'Calm': 'Ruhig', 'Joy': 'Freude', 'Curious': 'Neugierig', 'Negative': 'Negativ',
+  'Move ears, wings and head together with the eyes (untick for the eyes only)': 'Ohren, Flügel und Kopf zusammen mit den Augen bewegen (abwählen = nur Augen)',
+  "Play the mood's sound": 'Sound der Stimmung abspielen',
+  'Blink': 'Blinzeln', 'fast': 'schnell', 'medium': 'mittel', 'normal': 'normal', 'slow': 'langsam', 'very slow': 'sehr langsam',
+  'Manual motion': 'Manuelle Bewegung', 'Head': 'Kopf', 'Left': 'Links', 'Center': 'Mitte', 'Right': 'Rechts',
+  "In the main image the servos follow the owl's own choreography; direct commands are refused there (": 'Im Hauptimage folgen die Servos der Eigenchoreografie der Eule; direkte Befehle werden dort abgelehnt (',
+  'Ears & wings': 'Ohren & Flügel', 'Left ear': 'Linkes Ohr', 'Right ear': 'Rechtes Ohr', 'Left wing': 'Linker Flügel', 'Right wing': 'Rechter Flügel',
+  'Places & navigation': 'Orte & Navigation',
+  'Name': 'Name', 'Pick on map': 'Auf Karte wählen', 'Add place': 'Ort hinzufügen', 'Start': 'Start', 'Stop': 'Stopp',
+  'Pick a location': 'Ort wählen', 'Cancel': 'Abbrechen', 'Use this location': 'Diesen Ort verwenden',
+  'Click the map (or drag the marker) to set the coordinate.': 'Karte anklicken (oder Marker ziehen), um die Koordinate zu setzen.',
+  'System': 'System', 'Power': 'Energie', 'Send to sleep': 'Schlafen schicken', 'Wake up': 'Aufwecken',
+  'Sleep is policy from the brain; knocks and faces wake the owl on their own.': 'Schlafen ist eine Vorgabe des Brains; Klopfen und Gesichter wecken die Eule von selbst.',
+  'XIAO firmware update': 'XIAO-Firmware-Update', 'Enter update mode': 'Update-Modus starten', 'Exit update mode': 'Update-Modus beenden',
+  'Waiting for telemetry.': 'Warte auf Telemetrie.',
+  '\u25c0 Left': '\u25c0 Links', 'Right \u25b6': 'Rechts \u25b6',
+  'Teach the owl a place (name + coordinates), then press Start \u2014 its head turns to point at that place, and keeps re-aiming as you walk. Say': 'Bring der Eule einen Ort bei (Name + Koordinaten) und drücke Start \u2014 ihr Kopf dreht sich zu dem Ort und richtet sich beim Gehen laufend neu aus. Sage',
+  '(or press Stop) to end.': '(oder Stopp drücken), um zu beenden.',
+  'Enter update mode to start the XIAO\'s isolated Wi-Fi access point. Then connect to RobotOwl-Update and open http://192.168.4.1/update to upload firmware.bin. Credentials are in the supervisor log. This does not upload firmware automatically. Tapping or walking will not enter or exit this mode.': 'Im Update-Modus startet der isolierte WLAN-Zugangspunkt des XIAO. Mit RobotOwl-Update verbinden und http://192.168.4.1/update öffnen, um firmware.bin hochzuladen. Zugangsdaten stehen im Supervisor-Log. Die Firmware wird nicht automatisch hochgeladen. Klopfen oder Gehen startet oder beendet diesen Modus nicht.',
+  // dynamic
+  'Starting up': 'Startet', 'Awake, nobody in view': 'Wach, niemand im Blick', 'Something moved: looking for a face': 'Etwas hat sich bewegt: suche ein Gesicht',
+  'Face found: following and engaging': 'Gesicht gefunden: folge und interagiere', 'Asleep: eyes closed, ears down': 'Schläft: Augen zu, Ohren unten',
+  'Head is pointing at a destination': 'Kopf zeigt auf ein Ziel', 'Firmware update mode: Wi-Fi access point is up': 'Update-Modus: WLAN-Zugangspunkt ist aktiv', 'Error state': 'Fehlerzustand',
+  'The brain is up, but the owl is not sending telemetry.': 'Das Brain läuft, aber die Eule sendet keine Telemetrie.',
+  'heard': 'gehört', 's ago': 's her', 'yes': 'ja', 'no': 'nein', 'locked': 'gesperrt', 'active': 'aktiv', 'off': 'aus',
+  'conf': 'Konf.', 'no face': 'kein Gesicht', 'calibrated': 'kalibriert', 'needs a slow full turn': 'braucht eine langsame Vollumdrehung',
+  'heading unusable': 'Richtung unbrauchbar', 'from flash': 'aus Flash', 'absent': 'fehlt', 'fix': 'Fix', 'no fix': 'kein Fix', 'TAP': 'KLOPFEN', 'quiet': 'ruhig',
+  'SERVO SAFETY LOCK: no servo motion, centering or probing. Eyes and sensors remain active.': 'SERVO-SPERRE: keine Servobewegung, Zentrierung oder Tests. Augen und Sensoren bleiben aktiv.',
+  'Servo motion enabled by firmware; the owl moves under its own choreography.': 'Servobewegung von der Firmware freigegeben; die Eule bewegt sich nach eigener Choreografie.',
+  'Update mode active. Upload firmware via the XIAO Wi-Fi page, or press Exit update mode.': 'Update-Modus aktiv. Firmware über die WLAN-Seite des XIAO hochladen oder „Update-Modus beenden“ drücken.',
+  'Update mode inactive (state:': 'Update-Modus inaktiv (Zustand:',
+  'Navigation is disabled in config.': 'Navigation ist in der Konfiguration deaktiviert.', 'Not navigating.': 'Navigiert nicht.', 'standby': 'bereit',
+  'Pointing at': 'Zeigt auf', 'bearing': 'Peilung', 'head': 'Kopf',
+  'No places yet — add one above.': 'Noch keine Orte — oben einen hinzufügen.', 'Remove': 'Entfernen',
+  'Enter a name and valid lat/lon.': 'Name und gültige Koordinaten eingeben.',
+  'Add a place first (or say "bring mich nach <name>").': 'Zuerst einen Ort anlegen (oder „bring mich nach <Name>“ sagen).',
+  'Could not start:': 'Konnte nicht starten:',
+  'Enter firmware update mode? Normal owl behavior will pause.': 'Update-Modus starten? Das normale Verhalten der Eule pausiert.',
+  'Update-mode request sent; check the mode display for confirmation.': 'Update-Anfrage gesendet; Bestätigung in der Modus-Anzeige prüfen.',
+  'Could not send update-mode request.': 'Update-Anfrage konnte nicht gesendet werden.',
+  'Expression': 'Ausdruck', 'ear': 'Ohr', 'wing': 'Flügel', 'left': 'linkes', 'right': 'rechtes',
+  'up': 'hoch', 'down': 'runter', 'center': 'Mitte',
+  'Going to sleep': 'Geht schlafen', 'Could not send sleep': 'Schlafbefehl fehlgeschlagen', 'Waking up': 'Wacht auf', 'Could not send wake': 'Weckbefehl fehlgeschlagen',
+  'Could not reach the Orange Pi.': 'Orange Pi nicht erreichbar.',
+};
+let lang = 'en';
+try { lang = localStorage.getItem('owl-lang') || ((navigator.language || '').slice(0, 2) === 'de' ? 'de' : 'en'); } catch (e) {}
+function tr(s) { return lang === 'de' && DE[s] !== undefined ? DE[s] : s; }
+function applyLang() {
+  document.documentElement.lang = lang;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode: n => n.parentNode.closest('script,style,svg') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (n.__en === undefined) n.__en = n.nodeValue;
+    const key = n.__en.trim().replace(/\s+/g, ' ');
+    if (DE[key] !== undefined) n.nodeValue = n.__en.match(/^\s*/)[0] + tr(key) + n.__en.match(/\s*$/)[0];
+  }
+  document.querySelectorAll('[aria-label]').forEach(e => {
+    if (e.__enAria === undefined) e.__enAria = e.getAttribute('aria-label');
+    e.setAttribute('aria-label', tr(e.__enAria));
+  });
+  $('#lang-btn').textContent = lang === 'de' ? 'EN' : 'DE';
+}
+const exprGroups = {{ expression_groups | tojson }};
 
 // What each firmware state means, and the colour the page takes on for it.
 const STATES = {
@@ -523,25 +590,22 @@ const STATES = {
   error:       ['#f43f5e', 'Error state'],
 };
 
-// Build expression buttons; those with a body gesture are marked.
+// Build the expression buttons, one row of buttons per group.
 const expWrap = $('#expressions');
-for (const e of exprs) {
-  const b = document.createElement('button');
-  b.textContent = e.replace(/_/g, ' ');
-  b.dataset.act = 'expression';
-  b.dataset.value = e;
-  if (exprGestures[e]) { b.classList.add('gest'); b.title = 'plays the ' + exprGestures[e] + ' gesture'; }
-  expWrap.appendChild(b);
-}
-
-// Build sound buttons.
-const sndWrap = $('#sounds');
-for (const s of sounds) {
-  const b = document.createElement('button');
-  b.textContent = soundLabels[s] || (s[0].toUpperCase() + s.slice(1));
-  b.dataset.act = 'sound';
-  b.dataset.value = s;
-  sndWrap.appendChild(b);
+for (const [label, names] of exprGroups) {
+  const h = document.createElement('h3');
+  h.textContent = label;
+  expWrap.appendChild(h);
+  const grid = document.createElement('div');
+  grid.className = 'emo';
+  for (const e of names) {
+    const b = document.createElement('button');
+    b.textContent = e.replace(/_/g, ' ');
+    b.dataset.act = 'expression';
+    b.dataset.value = e;
+    grid.appendChild(b);
+  }
+  expWrap.appendChild(grid);
 }
 
 // Servo gauges: ears and wings are 0..100 profile units, the head is in degrees.
@@ -595,39 +659,33 @@ document.querySelectorAll('button[data-act]').forEach(btn => {
     try {
       if (act === 'update-mode') {
         const active = btn.dataset.active === 'true';
-        if (active && !confirm('Enter firmware update mode? Normal owl behavior will pause.')) return;
+        if (active && !confirm(tr('Enter firmware update mode? Normal owl behavior will pause.'))) return;
         const r = await post('/api/update-mode', { active });
-        flash(r.ok ? 'Update-mode request sent; check the mode display for confirmation.' : 'Could not send update-mode request.');
-      } else if (act === 'react') {
-        await post('/api/react', { name: btn.dataset.name });
-        flash('Gesture: ' + btn.dataset.name);
+        flash(tr(r.ok ? 'Update-mode request sent; check the mode display for confirmation.' : 'Could not send update-mode request.'));
       } else if (act === 'blink') {
         await post('/api/blink', { speed: parseInt($('#blink-speed').value, 10) });
-        flash('Blink');
+        flash(tr('Blink'));
       } else if (act === 'expression') {
-        const r = await post('/api/expression', { value: btn.dataset.value });
-        flash('Expression: ' + btn.dataset.value + (r.gesture ? ' + ' + r.gesture + ' gesture' : ''));
-      } else if (act === 'sound') {
-        const r = await post('/api/sound', { value: btn.dataset.value });
-        flash('Sound "' + btn.dataset.value + '"' + (r.ok ? ' played' : ' (audio unavailable)'));
+        const r = await post('/api/expression', { value: btn.dataset.value, body: $('#with-body').checked, sound: $('#with-sound').checked });
+        flash(tr('Expression') + ': ' + btn.dataset.value + (r.body ? ' + body' : '') + (r.sound ? ' + ' + r.sound : ''));
       } else if (act === 'head') {
         await post('/api/head', { direction: btn.dataset.v });
-        flash('Head ' + btn.dataset.v);
+        flash(tr('Head') + ' ' + tr(btn.dataset.v));
       } else if (act === 'ear') {
         await post('/api/ear', { side: btn.dataset.side, direction: btn.dataset.v });
-        flash(btn.dataset.side + ' ear ' + btn.dataset.v);
+        flash(tr(btn.dataset.side) + ' ' + tr('ear') + ' ' + tr(btn.dataset.v));
       } else if (act === 'wing') {
         await post('/api/wing', { side: btn.dataset.side, direction: btn.dataset.v });
-        flash(btn.dataset.side + ' wing ' + btn.dataset.v);
+        flash(tr(btn.dataset.side) + ' ' + tr('wing') + ' ' + tr(btn.dataset.v));
       } else if (act === 'sleep') {
         const r = await post('/api/sleep', {});
-        flash(r.ok ? 'Going to sleep' : 'Could not send sleep');
+        flash(tr(r.ok ? 'Going to sleep' : 'Could not send sleep'));
       } else if (act === 'wake') {
         const r = await post('/api/wake', {});
-        flash(r.ok ? 'Waking up' : 'Could not send wake');
+        flash(tr(r.ok ? 'Waking up' : 'Could not send wake'));
       }
     } catch (e) {
-      flash('Could not reach the Orange Pi.');
+      flash(tr('Could not reach the Orange Pi.'));
     }
   });
 });
@@ -649,11 +707,11 @@ function renderHeard(t) {
   el.textContent = '';
   const q = document.createElement('q');
   q.textContent = lh.text;
-  el.appendChild(document.createTextNode('heard '));
+  el.appendChild(document.createTextNode(tr('heard') + ' '));
   el.appendChild(q);
   if (secs !== null) {
     const sp = document.createElement('span');
-    sp.textContent = secs + 's ago';
+    sp.textContent = secs + tr('s ago');
     el.appendChild(sp);
   }
   el.style.display = 'block';
@@ -668,22 +726,23 @@ async function poll() {
   try {
     const t = await (await fetch('/api/telemetry')).json();
     if (!t || !t.state) {
-      setLink(false, 'no telemetry');
-      $('#state').textContent = 'NO LINK';
+      setLink(false, tr('no telemetry'));
+      $('#state').textContent = tr('NO LINK');
       document.documentElement.style.setProperty('--state', '#f43f5e');
-      $('#state-desc').textContent = 'The brain is up, but the owl is not sending telemetry.';
+      $('#state-desc').textContent = tr('The brain is up, but the owl is not sending telemetry.');
       return;
     }
-    setLink(true, 'live');
+    setLink(true, tr('live'));
     const st = STATES[t.state] || ['#22d3ee', t.state];
+    const stDesc = tr(st[1]);
     document.documentElement.style.setProperty('--state', st[0]);
     $('#state').textContent = t.state.toUpperCase();
-    $('#state-desc').textContent = st[1];
+    $('#state-desc').textContent = stDesc;
 
     // chips
     $('#c-eye').textContent = (t.eye || '-').replace(/_/g, ' ');
     const faceOn = t.face && t.face.detected;
-    setCls($('#c-face'), faceOn ? 'ok' : '', faceOn ? 'yes' : 'no');
+    setCls($('#c-face'), faceOn ? 'ok' : '', faceOn ? tr('yes') : tr('no'));
     const hz = Number(t.loop_hz || 0);
     setCls($('#c-hz'), hz >= 20 ? 'ok' : (hz >= 10 ? 'warn' : 'bad'), hz.toFixed(0) + ' Hz');
     $('#c-up').textContent = fmtUp(t.uptime);
@@ -691,19 +750,19 @@ async function poll() {
 
     // servo safety
     const servoLocked = !t.servo_safety || t.servo_safety.locked !== false;
-    setCls($('#c-servo'), servoLocked ? 'warn' : 'ok', servoLocked ? 'locked' : 'active');
+    setCls($('#c-servo'), servoLocked ? 'warn' : 'ok', servoLocked ? tr('locked') : tr('active'));
     const sf = $('#safety');
     sf.className = 'safety ' + (servoLocked ? 'lock' : 'on');
-    sf.textContent = servoLocked ? 'LOCKED' : 'MOTION ON';
+    sf.textContent = tr(servoLocked ? 'LOCKED' : 'MOTION ON');
     $('#servo-safety').textContent = servoLocked
-      ? 'SERVO SAFETY LOCK: no servo motion, centering or probing. Eyes and sensors remain active.'
-      : 'Servo motion enabled by firmware; the owl moves under its own choreography.';
+      ? tr('SERVO SAFETY LOCK: no servo motion, centering or probing. Eyes and sensors remain active.')
+      : tr('Servo motion enabled by firmware; the owl moves under its own choreography.');
     document.querySelectorAll('[data-act="head"], [data-act="ear"], [data-act="wing"], [data-act="nav-start"]')
       .forEach(b => { b.disabled = servoLocked; });
-    document.querySelectorAll('[data-act="react"]').forEach(b => { b.disabled = servoLocked; });
+    { const wb = $('#with-body'); wb.disabled = servoLocked; if (servoLocked) wb.checked = false; }
     $('#update-status').textContent = t.state === 'update'
-      ? 'Update mode active. Upload firmware via the XIAO Wi-Fi page, or press Exit update mode.'
-      : 'Update mode inactive (state: ' + t.state + ').';
+      ? tr('Update mode active. Upload firmware via the XIAO Wi-Fi page, or press Exit update mode.')
+      : tr('Update mode inactive (state:') + ' ' + t.state + ').';
 
     // eye follows the gaze
     const f = t.face || {};
@@ -716,8 +775,8 @@ async function poll() {
     });
 
     // vision
-    $('#v-conf').innerHTML = faceOn ? (Number(f.confidence || 0) * 100).toFixed(0) + '<small>% conf</small>' : 'no face';
-    $('#v-det').textContent = faceOn ? 'yes' : 'no';
+    $('#v-conf').innerHTML = faceOn ? (Number(f.confidence || 0) * 100).toFixed(0) + '<small>% ' + tr('conf') + '</small>' : tr('no face');
+    $('#v-det').textContent = faceOn ? tr('yes') : tr('no');
     $('#v-gaze').textContent = faceOn ? gx.toFixed(2) + ' / ' + gy.toFixed(2) : '–';
     $('#v-total').textContent = f.total != null ? f.total : '–';
     $('#v-infer').textContent = f.infer_ms != null ? Number(f.infer_ms).toFixed(0) + ' ms' : '–';
@@ -730,28 +789,28 @@ async function poll() {
       const ok = t.imu.calibrated;
       $('#i-yaw').innerHTML = Number(t.imu.yaw).toFixed(0) + '<small>&deg; yaw</small>';
       $('#i-rp').textContent = Number(t.imu.roll).toFixed(0) + '° / ' + Number(t.imu.pitch).toFixed(0) + '°';
-      setCls($('#i-cal'), ok ? 'ok' : 'warn', ok ? 'calibrated' : 'needs a slow full turn');
-      $('#i-axes').textContent = (c.axes || 0) + '/3' + (c.heading_ok ? '' : ' · heading unusable') + (c.restored ? ' · from flash' : '');
+      setCls($('#i-cal'), ok ? 'ok' : 'warn', ok ? tr('calibrated') : tr('needs a slow full turn'));
+      $('#i-axes').textContent = (c.axes || 0) + '/3' + (c.heading_ok ? '' : ' · ' + tr('heading unusable')) + (c.restored ? ' · ' + tr('from flash') : '');
     } else {
-      $('#i-yaw').textContent = 'absent';
+      $('#i-yaw').textContent = tr('absent');
       $('#i-rp').textContent = $('#i-cal').textContent = $('#i-axes').textContent = '–';
     }
 
     // GPS
     if (t.gps) {
-      $('#g-fix').innerHTML = t.gps.valid ? 'fix' : 'no fix';
+      $('#g-fix').innerHTML = t.gps.valid ? tr('fix') : tr('no fix');
       $('#g-fix').style.color = t.gps.valid ? '#34d399' : '#fbbf24';
       $('#g-lat').textContent = t.gps.valid ? Number(t.gps.latitude).toFixed(5) : '–';
       $('#g-lon').textContent = t.gps.valid ? Number(t.gps.longitude).toFixed(5) : '–';
       $('#g-sat').textContent = t.gps.satellites || 0;
     } else {
-      $('#g-fix').textContent = 'absent';
+      $('#g-fix').textContent = tr('absent');
       $('#g-lat').textContent = $('#g-lon').textContent = $('#g-sat').textContent = '–';
     }
 
     // vibration
     const v = t.vibration || {};
-    $('#t-det').textContent = v.detected ? 'TAP' : 'quiet';
+    $('#t-det').textContent = v.detected ? tr('TAP') : tr('quiet');
     $('#t-det').style.color = v.detected ? '#fbbf24' : '';
     $('#t-count').textContent = v.count || 0;
     $('#t-pulses').textContent = v.pulses || 0;
@@ -760,9 +819,17 @@ async function poll() {
     renderHeard(t);
     if (window.owlNav) window.owlNav.renderNavStatus(t);
   } catch (e) {
-    setLink(false, 'offline');
+    setLink(false, tr('offline'));
   }
 }
+$('#lang-btn').addEventListener('click', () => {
+  lang = lang === 'de' ? 'en' : 'de';
+  try { localStorage.setItem('owl-lang', lang); } catch (e) {}
+  applyLang();
+  poll();
+  if (window.owlNav) window.owlNav.refreshPlaces();
+});
+applyLang();
 if (window.owlNav) window.owlNav.refreshPlaces();
 poll();
 setInterval(poll, 1000);

@@ -87,10 +87,13 @@ class TestListsAgree(unittest.TestCase):
         for name in expressions.SYSTEM:
             self.assertIn(name, expressions.ALL)
 
-    def test_web_ui_offers_exactly_the_selectable_set(self):
+    def test_web_ui_offers_exactly_the_selectable_moods(self):
         # web_ui used to keep its own hand-written copy. If someone reintroduces
-        # one, this fails.
-        self.assertEqual(EXPRESSIONS, list(expressions.SELECTABLE))
+        # one, this fails. State looks (blink frames, sleeping/searching/detecting) are
+        # selectable on the wire but not offered as moods.
+        from brain.web_ui import STATE_LOOKS
+        self.assertEqual(sorted(EXPRESSIONS),
+                         sorted(set(expressions.SELECTABLE) - set(STATE_LOOKS)))
 
     def test_web_ui_does_not_offer_system_faces(self):
         # UPDATE is the OTA spinner and ERROR the fault cross; neither is a mood

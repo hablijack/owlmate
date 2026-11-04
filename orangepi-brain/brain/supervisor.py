@@ -297,11 +297,12 @@ class Supervisor:
     # ------------------------------------------------------------------
     # Sound cues tied to behavior state transitions
     # ------------------------------------------------------------------
-    # Each behavior state maps to a distinct recorded owl-call (see
-    # assets/sounds/). If a recording is missing, Audio falls back to a
-    # synthesized tone of the same name, so cues still work.
+    # Each behavior state maps to a sound (see assets/sounds/ and audio.SOUND_ALIASES, which
+    # name the robot sample behind each of these words). If a recording is missing, Audio
+    # falls back to a synthesized tone of the same name, so cues still work.
     _STATE_SFX = {
-        "detecting": "detecting",
+        # no cue for "detecting": it is a transitional state that a face turns into
+        # "interacting" within a loop or two, so the two sounds played back to back.
         "interacting": "interacting",
         "sleeping": "sleeping",
         "waking": "waking",

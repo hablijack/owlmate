@@ -27,7 +27,7 @@ class TestAudioClock(unittest.TestCase):
         process.poll.return_value = None
         with patch('brain.audio.subprocess.Popen', return_value=process) as spawn:
             audio = self.make_audio(keep=True)
-            self.assertEqual(audio.capture_guard(), (0, 0.0))  # silence is not an owl call
+            self.assertEqual(audio.capture_guard(), (0, 0.0))  # silence is not a sound
             cmd = spawn.call_args[0][0]
             self.assertEqual(cmd, ['aplay', '-q', '-D', 'owl_playback', '-t', 'raw',
                                    '-f', 'S16_LE', '-r', '48000', '-c', '2', '/dev/zero'])
@@ -49,3 +49,26 @@ class TestAudioClock(unittest.TestCase):
             audio.close()
             process.kill.assert_called_once()
             self.assertEqual(process.wait.call_count, 2)
+
+
+class TestSoundMapping(unittest.TestCase):
+    def test_every_mood_has_an_entry_and_every_sound_a_file(self):
+        from pathlib import Path
+        from brain import audio, expressions
+        from brain.web_ui import EXPRESSION_GROUPS
+        for _, names in EXPRESSION_GROUPS:
+            for m in names:
+                self.assertIn(m, audio.MOOD_SOUNDS, m)
+        for m, snd in audio.MOOD_SOUNDS.items():
+            self.assertIn(m, expressions.ALL, m)
+            if snd is not None:
+                self.assertIn(snd, audio.SOUND_NAMES, snd)
+        d = Path(audio.__file__).resolve().parent.parent / "assets" / "sounds"
+        for n in audio.SOUND_NAMES:
+            self.assertTrue((d / (n + ".wav")).exists(), n)
+        for a, t in audio.SOUND_ALIASES.items():
+            self.assertIn(t, audio.SOUND_NAMES, a)
+
+    def test_detecting_has_no_state_cue(self):
+        from brain.supervisor import Supervisor
+        self.assertNotIn("detecting", Supervisor._STATE_SFX)

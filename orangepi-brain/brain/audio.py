@@ -4,7 +4,7 @@ Robot Owl OrangePi Brain - Audio
 Plays the owl's "voice" through the MAX98357A I2S amplifier on the OrangePi
 Zero 3W (see WIRING.md / specs/015). Each emotion has its own sound:
 
-  * If a recorded owl-call sample exists in assets/sounds/<name>.wav, that
+  * If a recorded sample exists in assets/sounds/<name>.wav, that
     real recording is played (resampled to the output rate and level-matched).
     This is what makes the owl sound like an *owl*.
   * If no sample is present (or the amp/I2S is unavailable), the module falls
@@ -16,13 +16,13 @@ the module degrades gracefully: it logs once and play() becomes a no-op.
 
 Two OrangePi-specific notes (vs the RPi brain):
   * The I2S card is fixed at 48 kHz by the owl_i2s kernel module, so aplay
-    (via the ALSA default plugin) resamples the 22050 Hz owl calls up to 48 kHz and
+    (via the ALSA default plugin) resamples the 22050 Hz sounds up to 48 kHz and
     upmixes mono to stereo. The amp reads (L+R)/2, so a mono source upmixed
     to both slots plays at full level -- no level loss.
   * The SAME I2S card also carries the microphone (ICS43434 on the RX path).
     On the installed vendor kernel, capture falls silent after a TX stream
     closes, even while RX remains enabled. Opt-in keep_playback_clock holds a
-    silent dmix TX stream open so short owl calls cannot stop the microphone.
+    silent dmix TX stream open so short sounds cannot stop the microphone.
     This is a measured workaround, not a claim about the exact hardware cause.
 """
 
@@ -45,18 +45,49 @@ logger = logging.getLogger(__name__)
 # rate (48 kHz on the OrangePi) on the way out.
 SAMPLE_RATE = 22050
 
-# Emotion -> recorded owl-call sample filename (in assets/sounds/). If the file
-# is missing, we fall back to the synthesized tone of the same name (see _synth).
-# Each emotion has its own distinct real recording.
-EMOTION_SOUNDS = {
-    "detecting":   "owl_detecting.wav",    # short, crisp "I see you"
-    "interacting": "owl_interacting.wav",  # friendly hoot
-    "happy":       "owl_happy.wav",        # bright little hoot
-    "sleeping":    "owl_sleeping.wav",     # low, soft, drowsy
-    "waking":      "owl_waking.wav",       # loud rising "I'm up"
-    "alert":       "owl_alert.wav",        # sharp, urgent
-    "beep":        "beep.wav",             # neutral UI blip (synthesized if absent)
+# The robot voice: one recorded sample per name in assets/sounds/<name>.wav (converted from the
+# owner's MP3 set by tools/convert_sounds.py). If a file is missing, we fall back to a synthesized
+# tone of the same name (see _synth).
+SOUND_NAMES = (
+    "alarm", "beautiful", "crazy", "drill", "gobble", "grunt", "hello", "info", "marvel",
+    "no", "ohno", "power_sound", "sad", "servo", "whew", "wow", "yes",
+)
+
+# Older names (config, state cues, speech) that now play a robot sound. The owl hoots they used to
+# name were replaced on 2026-11-04.
+SOUND_ALIASES = {
+    "detecting":   "info",         # short blip: "something noticed"
+    "interacting": "yes",        # greeting
+    "happy":       "info",
+    "sleeping":    "whew",         # a settling sigh
+    "waking":      "power_sound",  # powering up
+    "alert":       "alarm",
 }
+
+# Which sound goes with which mood (the web UI plays it with the mood; the trigger mapping reuses
+# it). None = silent. Chosen by the sample names -- listen and swap freely. `crazy` is unused.
+MOOD_SOUNDS = {
+    "neutral": None,
+    "happy": "info",
+    "glee": "beautiful",
+    "squint": "info",
+    "sad_down": "sad",
+    "focused": "yes",
+    "sleepy": "whew",
+    "unimpressed": "gobble",
+    "skeptic": "drill",
+    "suspicious": "gobble",
+    "surprised": "wow",
+    "awe": "marvel",
+    "annoyed": "grunt",
+    "angry": "no",
+    "furious": "alarm",
+    "scared": "ohno",
+}
+
+# sound name -> sample filename; "beep" is the neutral UI blip (synthesized if absent).
+EMOTION_SOUNDS = {name: name + ".wav" for name in SOUND_NAMES}
+EMOTION_SOUNDS["beep"] = "beep.wav"
 
 
 class Audio:
@@ -89,7 +120,7 @@ class Audio:
                 self._ready = True
                 n = len(self._samples)
                 if n:
-                    logger.info("Audio: %d recorded owl-call sample(s) loaded from %s", n, self.sounds_dir)
+                    logger.info("Audio: %d recorded sample(s) loaded from %s", n, self.sounds_dir)
                 else:
                     logger.info("Audio: no recorded samples found in %s - using synthesized tones", self.sounds_dir)
                 logger.info("Audio enabled (I2S amp), device=%s, volume=%.2f",
@@ -141,13 +172,16 @@ class Audio:
             if src_rate != SAMPLE_RATE:
                 pcm = self._resample(pcm, src_rate, SAMPLE_RATE)
             samples[emo] = pcm
+        for alias, target in SOUND_ALIASES.items():
+            if target in samples:
+                samples[alias] = samples[target]
         return samples
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     def play(self, sfx: str) -> bool:
-        """Play a named sound. Prefers a recorded owl-call sample; falls back
+        """Play a named sound. Prefers a recorded sample; falls back
         to a synthesized tone if none is loaded. Returns False if unavailable."""
         if not self._ready:
             self._note("audio unavailable - ignoring play(%r)" % sfx)
@@ -155,7 +189,7 @@ class Audio:
         if sfx == "stop":
             # (No persistent player to stop; each play() is a short one-shot.)
             return True
-        # 1) Real owl-call recording, if we have one for this emotion.
+        # 1) Real recording, if we have one for this emotion.
         data = self._samples.get(sfx)
         if data is None:
             # 2) Otherwise synthesize a tone (also covers 'beep'/'chirp'/'sad').

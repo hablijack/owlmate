@@ -100,7 +100,7 @@ display:
 #                      link must not leave the head stuck pointing)
 #   aim_sign         - +1 or -1. The ONE thing to confirm on hardware: if the
 #                      head points the WRONG way, flip this (see plan §10/#1).
-#   sound_start/stop - owl-calls cued on entering / leaving navigation
+#   sound_start/stop - sounds cued on entering / leaving navigation
 navigation:
   enabled: false
   locations_file: ""
@@ -226,8 +226,8 @@ speech:
     # negative -> annoyed, curious -> skeptic), so `expression` only shows where the firmware
     # ignores the gesture (asleep, locked image).
     happy:    { expression: happy,     sound: happy, gesture: happy }
-    negative: { expression: sad_down,  sound: alert, gesture: negative, own_eyes: true }
-    question: { expression: surprised, sound: alert, gesture: curious }
+    negative: { expression: sad_down,  sound: sad,   gesture: negative, own_eyes: true }
+    question: { expression: surprised, sound: info,  gesture: curious }
 
 # Emotion classification (optional, OrangePi-only): hand the transcript to a
 # small language model (ringorsolya/Emotion_RoBERTa_german6_v7, run through
@@ -246,7 +246,7 @@ speech:
 #   labels       - model output label -> owl eye expression. Labels NOT in this
 #                  map are ignored (the keyword clusters remain the fallback),
 #                  so a typo or model drift degrades to "no emotion reaction".
-#   sounds       - optional: model output label -> owl-call played alongside
+#   sounds       - optional: model output label -> sound played alongside
 #                  the expression.
 emotion:
   enabled: false
@@ -257,7 +257,7 @@ emotion:
     Freude:       happy
     Wut:          angry
     Trauer:       sad_down
-    Angst:        worried
+    Angst:        scared
     Ueberraschung: surprised
     Verachtung:   unimpressed
   sounds: {}

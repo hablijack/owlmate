@@ -177,7 +177,7 @@ taking the IMU calibration with it. Flash the pieces separately:
 ### Orange Pi brain (`orangepi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (265 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (271 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
@@ -817,20 +817,20 @@ Deliberately **two colours only**, black on white (`COLOR_BG`/`COLOR_INK` in
 gradients, specular highlights and grey lids turned to mush — that detail was removed on purpose,
 don't reintroduce it.
 
-**All 21 moods come from one parametric routine**, `Eyes::drawBlob()`, driven by a row of the
+**All 18 moods come from one parametric routine**, `Eyes::drawBlob()`, driven by a row of the
 `SHAPES[]` table in `lib/Eyes/Eyes.cpp`. To retune a mood, edit numbers in that table — do not add
 a bespoke drawing function. The base form is a superellipse (`roundness/10` is the exponent; 2.0 is
 a plain ellipse, ~2.6 gives the reference sheet's soft-squared blob) plus four modifiers:
 
 | field | effect | used by |
 |---|---|---|
-| `topSag` | pushes the top edge down in the middle | annoyed, skeptic, bored, unimpressed |
+| `topSag` | pushes the top edge down in the middle | annoyed, skeptic, unimpressed |
 | `botRise` | pushes the bottom edge up in the middle → crescent | happy, glee, squint, focused |
 | `slantIn` | drops the top edge toward the **inner** corner | angry, furious |
-| `slantOut` | drops the top edge toward the **outer** corner | worried, sad_down |
+| `slantOut` | drops the top edge toward the **outer** corner | sad_down |
 | `yOff`, `asymH` | vertical shift; shorten the right eye only (deliberately lopsided) | blink high/low, skeptic |
 
-The slant convention is emotional-standard: **angry lowers the inner brow, worried/sad lowers the
+The slant convention is emotional-standard: **angry lowers the inner brow, sad lowers the
 outer one**, and `drawBlob()` mirrors it per eye via its `mirrored` argument so the two eyes lean
 toward each other rather than the same way.
 

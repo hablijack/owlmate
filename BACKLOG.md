@@ -281,7 +281,7 @@ Tool note: opening the owl's port (reset) sometimes leaves it silent; a read-onl
   Web UI: `http://owlmate:8080` (or the IP above).
 - XIAO firmware 1.3.0 is deployed in both OTA slots, verified before boot;
   bootloader/partition table/OTA metadata/NVS were preserved byte-for-byte.
-  Full 8 MB backup is retained on the board and the Mac. Current native suite: 265 tests.
+  Full 8 MB backup is retained on the board and the Mac. Current native suite: 271 tests.
   The closed-owl safety lock is active after cold boot; IMU calibration restores,
   face inference runs and live serial blink/expression/sleep/wake/heartbeat/OTA
   entry/exit pass. All 16 servo targets, probes and active nav are rejected.
@@ -848,18 +848,25 @@ Decided with the owner on the live owl; the full reasoning is in `specs/004-eye-
 Eye-shape changes are numbers in `SHAPES[]` and need a with-the-owner flash (two-phase flasher);
 preview them first with `esp32-s3-sense/tools/preview_eyes.py`. Order:
 
-1. [ ] **Remove** `sad_up`, `bored`, `worried` (NAMES[]/SHAPES[]/enum, then
+1. [~] **Removed in the sources 2026-11-03, NOT flashed yet** `sad_up`, `bored`, `worried` (NAMES[]/SHAPES[]/enum, then
    `orangepi-brain/tools/gen_expressions.py`; fix every place that still names them, e.g.
    config reactions and docs quoting the mood count).
-2. [ ] **Reshape** `surprised` (much larger, near screen-filling), `skeptic` (larger eye larger),
+2. [~] **Reshape (BUILT 2026-11-03, NOT flashed yet -- needs the owner)** `surprised` (much larger, near screen-filling), `skeptic` (larger eye larger),
    `scared` (smaller eyes, pinched pupils), `unimpressed` (eyes lower), `angry` (angrier), `glee`
-   (closed arches ^ ^), `furious` (very narrow slanted slits + slight tremble).
-3. [ ] **New drawings:** comic "zZz" for `sleepy`; crosshair for SEARCHING (BOOT and NAVIGATING),
+   (wide-open round eyes with a hollow lower lid -- closed arches turned out to be `happy`'s shape -- so it reads as beaming), `furious` (very narrow slanted slits + a +-2 px tremble every 120 ms, `lib/Eyes`). Pending: flash, then judge live.
+3. [~] **BUILT 2026-11-03, NOT flashed yet -- new drawings:** comic "zZz" for `sleepy`; crosshair for SEARCHING (BOOT and NAVIGATING),
    replacing the suspicious look there.
-4. [ ] **Body pose per mood** (ears, wings, head tilt) as a table next to the moods, replacing the four
+4. [~] **BUILT 2026-11-03 (table in `src/motion.cpp`, `OwlPose`/`triggerPose` in `OwlChoreo`, native tests incl. a mutation check; flash pending) -- Body pose per mood** (ears, wings, head tilt) as a table next to the moods, replacing the four
    fixed gestures (`OwlChoreo`): sad_down ears down; focused ears up; unimpressed ears down; sleepy
    ears down; angry ears up + wings raised; scared ears down + wings open; skeptic one ear up (side of
    the larger eye), one down. Check the measured servo limits first (`servo_profiles.h`).
+4a. [x] **`furious` flaps its wings three times** at the start of its pose (down to 20 and back up, 560 ms per stroke,
+   `OwlPose.flaps`, `lib/ServoMotion/OwlChoreo`; native test incl. a mutation check). BUILT, FLASHED and approved by the owner 2026-11-04 -- the servos
+   are rated ~300 units/s, so ~270 ms per stroke is the fastest that is still a full stroke.
+4b. [~] **Sounds replaced 2026-11-04** (owner found the owl hoots annoying): 17 robot sounds from the owner's
+   `tiny-desk-companion/voice` repo, one per mood in `MOOD_SOUNDS` (`brain/audio.py`), played by the web UI's
+   Expressions panel (checkbox "with sound"). The mapping was made from file names, **not by ear** -- audition
+   and swap in `MOOD_SOUNDS`. Provenance/licence of the MP3s is unknown (`assets/sounds/SOURCES.md`).
 5. [ ] **Then** map moods to triggers (keyword clusters, states, vibration, ...) -- the owner's second step.
 
 ### Step 6 — Software backlog (no owl required)  `[ ]`
@@ -1087,7 +1094,7 @@ wrong; run the lot only after mechanical work.
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
 | detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
-| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 265 tests pass |
+| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 271 tests pass |
 | firmware/Orange Pi drift | `cd orangepi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
@@ -2200,7 +2207,7 @@ the page loads and each button visibly drives the owl (blink/expression/head).
   saccade head tracking and face-detect scan; vibration fix (self-motion mask + double knock, see
   `specs/007`); status OLED on the Orange Pi (portrait, `owl-i2c2` overlay, `specs/012`); redesigned web UI
   ("Mission Control"); speech: ASR 4-14 s -> ~0.6 s, complete utterances, non-speech tags filtered,
-  `sad_down` for "nein". Orange Pi suite: 265 tests; `tools/check_docs.py` clean.
+  `sad_down` for "nein". Orange Pi suite: 271 tests; `tools/check_docs.py` clean.
   **Still open from this period:** the speech items under *Speech recognition* above; mechanics (ear/wing
   amplitudes, `HEAD_TRACK_FOV_DEG` 16.5 is estimated, not measured; `IMU_HEADING_OFFSET_DEG` mounting term
   unmeasured); servo type documentation conflict (S18JST 1.8 g vs 3.7 g); a one-off `invalid_json` seen at

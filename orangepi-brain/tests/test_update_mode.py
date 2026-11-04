@@ -36,16 +36,31 @@ class TestUpdateMode(unittest.TestCase):
             self.assertFalse(call_web_view(ui, 'api_update_mode', body)['ok'])
         serial.set_update_mode.assert_not_called()
 
-    def test_expression_plays_gesture_unless_eyes_only(self):
+    def test_expression_plays_its_body_unless_eyes_only(self):
         serial = Mock()
         ui = WebUI(serial, Mock())
-        self.assertEqual(call_web_view(ui, 'api_expression', {'value': 'happy'})['gesture'], 'happy')
-        serial.react.assert_called_once_with('happy')
+        self.assertTrue(call_web_view(ui, 'api_expression', {'value': 'angry'})['body'])
+        serial.react.assert_called_once_with('angry')
+        serial.set_expression.assert_called_once_with('angry')   # eyes also where the body cannot move
         serial.reset_mock()
-        result = call_web_view(ui, 'api_expression', {'value': 'happy', 'gesture': False})
-        self.assertIsNone(result['gesture'])
+        result = call_web_view(ui, 'api_expression', {'value': 'angry', 'body': False})
+        self.assertFalse(result['body'])
         serial.react.assert_not_called()
-        serial.set_expression.assert_called_once_with('happy')
+        serial.set_expression.assert_called_once_with('angry')
+        serial.reset_mock()
+        # a state look (not a mood) has no body to play
+        self.assertFalse(call_web_view(ui, 'api_expression', {'value': 'sleeping'})['body'])
+        serial.react.assert_not_called()
+
+    def test_expression_plays_its_sound_unless_unticked(self):
+        serial, supervisor = Mock(), Mock()
+        ui = WebUI(serial, supervisor)
+        self.assertEqual(call_web_view(ui, 'api_expression', {'value': 'scared'})['sound'], 'ohno')
+        supervisor.play_sound.assert_called_once_with('ohno')
+        supervisor.reset_mock()
+        self.assertIsNone(call_web_view(ui, 'api_expression', {'value': 'scared', 'sound': False})['sound'])
+        self.assertIsNone(call_web_view(ui, 'api_expression', {'value': 'neutral'})['sound'])   # silent mood
+        supervisor.play_sound.assert_not_called()
 
     def test_vibration_cannot_control_ota(self):
         # Source guard, not a substitute for the hardware walking acceptance test.

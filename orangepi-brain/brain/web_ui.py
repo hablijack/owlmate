@@ -17,7 +17,7 @@ import threading
 
 from flask import Flask, jsonify, render_template_string, request
 
-from brain import expressions
+from brain import audio, expressions
 from brain.serial_handler import SerialHandler, Telemetry
 from brain.supervisor import Supervisor
 
@@ -73,23 +73,20 @@ def _ear_wing_angle(direction: str, up: float, down: float) -> float:
 # tools/gen_expressions.py. This used to be a hand-maintained list here and had
 # drifted from the firmware by three names; the firmware silently renders an
 # unknown name as "neutral", so drift looks like an eye that refuses to change.
-EXPRESSIONS = list(expressions.SELECTABLE)
-
-# Sound effects the OrangePi can play through the MAX98357A amp (see brain/audio.py).
-# The owl-call voices (detecting/interacting/happy/sleeping/waking/alert) play a
-# real recording when present, else a synthesized tone of the same name.
-SOUNDS = ["detecting", "interacting", "happy", "sleeping", "waking", "alert", "beep"]
-
-# Friendly labels for the sound buttons (value -> display text).
-SOUND_LABELS = {
-    "detecting": "Hoot (spotted)",
-    "interacting": "Hoot (talking)",
-    "happy": "Hoot (happy)",
-    "sleeping": "Hoot (sleepy)",
-    "waking": "Hoot (waking)",
-    "alert": "Hoot (alert)",
-    "beep": "Beep",
-}
+#
+# Not everything selectable is a mood: the blink frames and the three state looks
+# (sleeping, searching, detecting) are what the firmware shows by itself for a lid
+# animation or a state, so they are not offered. Every mood is placed in exactly one
+# group below, in the order it is shown; a test fails when a name is missing or unknown,
+# so adding a mood to the firmware forces a decision about where it belongs.
+STATE_LOOKS = ("blink_high", "blink_low", "sleeping", "searching", "detecting")
+EXPRESSION_GROUPS = (
+    ("Calm",     ("neutral", "focused", "sleepy", "unimpressed")),
+    ("Joy",      ("happy", "glee", "squint")),
+    ("Curious",  ("surprised", "awe", "skeptic", "suspicious")),
+    ("Negative", ("sad_down", "annoyed", "angry", "furious", "scared")),
+)
+EXPRESSIONS = [name for _, names in EXPRESSION_GROUPS for name in names]
 
 # ============================================================================
 # The page
@@ -140,14 +137,8 @@ TEMPLATE = _load_template()
 # Two Telemetry attributes whose PYTHON name is not their WIRE name. The page has
 # read `eye` and `uptime` since it existed; a plain asdict() emits
 # `eye_expression` and `uptime_ms` and would silently blank both displays.
-# Expressions that come with a body gesture. The web UI's expression buttons play the whole
-# emotion (ears, wings, head AND eyes), not just the eyes; anything not listed is eyes only.
-EXPRESSION_GESTURES = {
-    "happy": "happy", "glee": "happy",
-    "surprised": "startle", "scared": "startle", "awe": "startle",
-    "annoyed": "negative", "angry": "negative", "furious": "negative",
-    "skeptic": "curious", "suspicious": "curious", "focused": "curious",
-}
+# Body language the firmware can play with `react`: the four speech gestures plus every mood of
+# the expression palette (each mood has its own pose or gesture, see src/motion.cpp).
 GESTURES = ("startle", "happy", "negative", "curious")
 
 _PAYLOAD_RENAMES = (("eye_expression", "eye"), ("uptime_ms", "uptime"))
@@ -215,9 +206,7 @@ class WebUI:
 
         @app.route("/")
         def index():
-            return render_template_string(TEMPLATE, expressions=EXPRESSIONS, sounds=SOUNDS,
-                                           sound_labels=SOUND_LABELS,
-                                           expression_gestures=EXPRESSION_GESTURES)
+            return render_template_string(TEMPLATE, expression_groups=EXPRESSION_GROUPS,)
 
         @app.route("/api/telemetry")
         def api_telemetry():
@@ -250,7 +239,7 @@ class WebUI:
         @app.route("/api/react", methods=["POST"])
         def api_react():
             name = str((request.get_json(silent=True) or {}).get("name", ""))
-            if name not in GESTURES:
+            if name not in GESTURES and name not in EXPRESSIONS:
                 return jsonify({"ok": False, "error": "unknown gesture"}), 400
             return jsonify({"ok": self.serial.react(name)})
 
@@ -258,14 +247,18 @@ class WebUI:
         def api_expression():
             body = request.get_json(silent=True) or {}
             value = body.get("value", "neutral")
-            # Play the emotion's body gesture first, then the clicked expression: the firmware sets
-            # its own eyes with a gesture, and the expression sent last is the one the owl shows.
-            # {"gesture": false} sends the eyes only (judging a mood's shape without any motion).
-            gesture = EXPRESSION_GESTURES.get(value) if body.get("gesture", True) else None
-            if gesture:
-                self.serial.react(gesture)
+            # A mood is its eyes AND its body (ears, wings, head tilt): `react` plays both. The
+            # expression goes out again afterwards, so the eyes also change where the body cannot
+            # move (asleep, locked image). {"body": false} sends the eyes only.
+            with_body = bool(body.get("body", True)) and value in EXPRESSIONS
+            if with_body:
+                self.serial.react(value)
             ok = self.serial.set_expression(value)
-            return jsonify({"ok": ok, "gesture": gesture})
+            # The mood's own sound, unless the page unticked it (or the mood is silent).
+            sound = audio.MOOD_SOUNDS.get(value) if body.get("sound", True) else None
+            if sound:
+                self.supervisor.play_sound(sound)
+            return jsonify({"ok": ok, "body": with_body, "sound": sound})
 
         @app.route("/api/head", methods=["POST"])
         def api_head():

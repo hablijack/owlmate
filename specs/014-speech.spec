@@ -8,7 +8,7 @@ Depends on: 001, 012, 013
 ## Intent
 
 The owl hears a short utterance, transcribes it offline on the Orange Pi, and reacts
-with an eye expression and an owl-call. It is a reaction engine, not a
+with an eye expression and a sound. It is a reaction engine, not a
 conversation: there is no dialogue state, no intent model, no reply. German.
 
 Absorbed from `SPEECH_RECOGNITION_PLAN.md` (deleted 2026-08-27), which was the
@@ -43,7 +43,7 @@ more accurate on real German speech or place names. See SPEC-015.
 
 **A three-part gate, not always-on transcription** (R-014.3). ASR runs only when
 the owl is awake *and* a face is in frame *and* the mic energy passes an RMS VAD
-threshold. Reacting to the television, or to the owl's own hoot coming back
+threshold. Reacting to the television, or to the the owl's own sound coming back
 through the mic, is the failure mode this exists to prevent. `REACTIVE_STATES`
 is `{idle, detecting, interacting}` — `SLEEPING` and `UPDATE` are excluded
 deliberately (maintenance must not be interrupted; USB remains connected).
@@ -268,7 +268,7 @@ spoken sentence ~5 s after another).
 * **"Substring keyword matching is fine."** Not in German. "wie" inside
   "völlig", "was" inside "irgendwas" — the owl reacts to words nobody said.
 * **"The owl should react to whatever it hears."** It then reacts to the
-  television, and to its own owl-call returning through the mic. Hence the
+  television, and to its own sound returning through the mic. Hence the
   awake + face + energy gate.
 * **"Phase" is an unambiguous word in this repo.** The speech feature's
   implementation phases (1–4: VAD → ASR → reactions → auto-sleep) are cited in

@@ -225,12 +225,37 @@ class TestTemplateIsPackaged(unittest.TestCase):
         self.assertGreater(len(TEMPLATE), 10000)
 
     def test_jinja_placeholders_survived_the_move(self):
-        # The view passes expressions/sounds/sound_labels; if the {{ }} markers
-        # were mangled the buttons would silently render empty.
+        # The view passes expression_groups; if the {{ }} marker were mangled the
+        # buttons would silently render empty.
         from brain.web_ui import TEMPLATE
-        for var in ("expressions", "sounds", "sound_labels"):
-            self.assertRegex(TEMPLATE, r"\{\{\s*" + var,
-                             f"missing Jinja placeholder for {var}")
+        self.assertRegex(TEMPLATE, r"\{\{\s*expression_groups")
+
+    def test_language_switch_present_and_voice_block_gone(self):
+        from brain.web_ui import TEMPLATE
+        self.assertIn('id="lang-btn"', TEMPLATE)
+        self.assertNotIn("Voice &amp; sounds", TEMPLATE)
+        self.assertNotIn('id="sounds"', TEMPLATE)
+
+    def test_every_static_heading_has_a_german_translation(self):
+        # A heading missing from DE would stay English after the switch, silently.
+        import re
+        from brain.web_ui import TEMPLATE
+        de = TEMPLATE[TEMPLATE.index("const DE = {"):TEMPLATE.index("let lang =")]
+        for h in re.findall(r'<h[23][^>]*>(?:<span>\d+</span>)?([^<]+)', TEMPLATE):
+            h = h.replace("&amp;", "&").strip()
+            if h:
+                self.assertIn("'" + h + "'", de, f"no German text for heading {h!r}")
+
+    def test_expression_groups_cover_every_mood_exactly_once(self):
+        # Adding a mood to the firmware must force a decision where the UI shows it.
+        from brain import expressions
+        from brain.web_ui import EXPRESSION_GROUPS, EXPRESSIONS, STATE_LOOKS
+        shown = [n for _, names in EXPRESSION_GROUPS for n in names]
+        self.assertEqual(len(shown), len(set(shown)), "a mood is listed in two groups")
+        moods = set(expressions.SELECTABLE) - set(STATE_LOOKS)
+        self.assertEqual(set(shown), moods)
+        self.assertEqual(EXPRESSIONS, shown)
+        self.assertTrue(set(STATE_LOOKS) <= set(expressions.ALL))
 
     def test_missing_template_raises_a_diagnosable_error(self):
         """A packaging miss must be readable in an OrangePi log.

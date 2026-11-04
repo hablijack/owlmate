@@ -785,7 +785,7 @@ class Speech:
             name = self._match_place(raw_name)
             if not name:
                 logger.info("Speech: nav trigger %r but no place matches %r", trigger, raw_name)
-                self.supervisor.play_sound("alert")
+                self.supervisor.play_sound("ohno")   # unknown place
                 self._last_reaction = time.time()
                 return
             self.supervisor.nav_start(name)
