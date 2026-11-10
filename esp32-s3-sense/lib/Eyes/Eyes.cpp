@@ -26,6 +26,7 @@ Eyes::Eyes(GC9D01& left, GC9D01& right)
       _blinkProgress(0),
       _blinkSpeed(3),
       _blinking(false),
+      _closedShown(false),
       _lastBlink(0),
       _blinkStart(0),
       _nextBlinkTime(millis() + BLINK_GAP_MIN_MS),
@@ -73,6 +74,7 @@ void Eyes::blink(uint8_t speed) {
     // stays closed (the "dip" of the blink). Lower = snappier blink.
     _blinkSpeed = constrain(speed, 1, 5);
     _blinking = true;
+    _closedShown = false;
     _blinkProgress = 0;
     _blinkStart = millis();
 }
@@ -97,8 +99,20 @@ void Eyes::render() {
     //
     // Alles darunter (currentOpenness, der Sprungtest) rechnet unveraendert
     // mit _blinkProgress weiter; nur das Fortschalten aendert sich.
+    //
+    // GESCHLOSSEN ist das Auge aber nur EINEN Schritt lang (25 ms). Jedes Bild,
+    // das laenger braucht - ein Lid-Bild schiebt viele Zeilen ueber den Bus -,
+    // springt von "fast zu" direkt auf "wieder auf", und der Lidschlag wirkt
+    // wie ein Zucken. Am Geraet bemerkt 2026-11-10: "nicht jeder Klick schafft
+    // ein volles Blinzeln", automatisches Blinzeln praktisch unsichtbar. Darum:
+    // war der geschlossene Moment noch nicht auf dem Display, haelt die
+    // Zeitbasis dort an, bis er gezeichnet wurde. Das Oeffnen bekommt danach
+    // seine volle Dauer.
     if (_blinking) {
         const uint32_t half = (uint32_t)_blinkSpeed * BLINK_TICK_MS;
+        if (!_closedShown && now - _blinkStart >= half + BLINK_TICK_MS) {
+            _blinkStart = now - half;
+        }
         const uint32_t elapsed = now - _blinkStart;
         if (elapsed > 2 * half) {
             _blinking = false;
@@ -164,6 +178,7 @@ void Eyes::render() {
 
     renderEye(_left, irisCX, irisCY, false);
     renderEye(_right, irisCX, irisCY, true);
+    if (_blinking && currentOpenness() < 0.06f) _closedShown = true;
 
     _dirty = false;
     _lastExpr = _expr;
@@ -260,7 +275,7 @@ void Eyes::renderEye(GC9D01& lcd, int cx, int cy, bool mirrored) {
     lcd.fillScreen(COLOR_BG);
 
     if (_sleeping) {
-        drawClosed(lcd);
+        drawClosed(lcd);   // Schlaf: Wimpernstrich in Panelmitte, unabhaengig vom Blick
         lcd.flush();
         return;
     }
@@ -270,7 +285,7 @@ void Eyes::renderEye(GC9D01& lcd, int cx, int cy, bool mirrored) {
     // The spinner and the error cross are status indicators, not eyes -- they
     // must not be clipped by a blink.
     if (_expr != EyeExpression::UPDATE && _expr != EyeExpression::ERROR) {
-        drawLids(lcd, currentOpenness());
+        drawLids(lcd, currentOpenness(), cx, cy);
     }
 
     // Everything above only wrote to the in-memory framebuffer. Without this
@@ -328,24 +343,42 @@ void Eyes::drawBlob(GC9D01& lcd, const EyeShape& s, int cx, int cy, bool mirrore
 
 // A single bold bar: a closed eye, and what a blink bottoms out on. Reads far
 // better at this size than a blank white disc.
-void Eyes::drawClosed(GC9D01& lcd) {
-    lcd.fillRect(EYE_CX - LASH_HALF_W, EYE_CY - LASH_HALF_H,
+void Eyes::drawClosed(GC9D01& lcd, int cx, int cy) {
+    lcd.fillRect(cx - LASH_HALF_W, cy - LASH_HALF_H,
                  LASH_HALF_W * 2, LASH_HALF_H * 2, COLOR_INK);
 }
 
 // Lids are background-coloured bars closing in from the top and bottom, so a
 // blink simply eats into whatever shape is underneath.
-void Eyes::drawLids(GC9D01& lcd, float openness) {
+//
+// Sie schliessen um die SICHTBARE Form, nicht um das ganze Panel. Bis
+// 2026-11-10 war die Lidhoehe EYE_R (65 px) * openness - das neutrale Auge ist
+// aber nur 40 px hoch (halfH), also beruehrten die Lider es erst unter ~60 %
+// Offenheit: mehr als die Haelfte jedes Lidschlags war unsichtbar. Jetzt ist
+// die Lidoeffnung halfH (+ Rand) * openness, zentriert auf der Form - inklusive
+// yOff und vertikalem Blick, die das Auge aus der Panelmitte schieben.
+void Eyes::drawLids(GC9D01& lcd, float openness, int cx, int cy) {
     if (openness >= 0.999f) return;
 
-    const int half = (int)(EYE_R * openness);
-    const int top = EYE_CY - half;
-    const int bot = EYE_CY + half;
+    // Halbe Hoehe des Sichtbaren: Fadenkreuz (SEARCHING) ragt 56 px, sonst die
+    // Tabellenform. +2 Rand, damit bei openness 1 nichts angeschnitten wird.
+    int extent;
+    int yc = cy;
+    if (_expr == EyeExpression::SEARCHING) {
+        extent = 58;
+    } else {
+        const EyeShape& s = shapeOf(_expr);
+        extent = (int)s.halfH + 2;
+        yc = cy + s.yOff;
+    }
+    const int half = (int)(extent * openness);
+    const int top = yc - half;
+    const int bot = yc + half;
 
     if (top > 0) lcd.fillRect(0, 0, LCD_WIDTH, top, COLOR_BG);
     if (bot < LCD_HEIGHT) lcd.fillRect(0, bot, LCD_WIDTH, LCD_HEIGHT - bot, COLOR_BG);
 
-    if (openness < 0.06f) drawClosed(lcd);
+    if (openness < 0.06f) drawClosed(lcd, cx, yc);
 }
 
 void Eyes::drawSpinner(GC9D01& lcd) {

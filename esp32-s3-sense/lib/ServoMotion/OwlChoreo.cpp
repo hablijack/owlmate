@@ -14,7 +14,7 @@ OwlChoreo::OwlChoreo(const ChoreoConfig& cfg, Rng rng)
     : _cfg(cfg), _rng(rng), _init(false), _saccadeLockUntil(0), _mode(OM_REST), _last(0), _modeSince(0),
       _headTarget(0), _nextTwitch(0), _twitchUntil(0), _twitchEar(0), _nextGlance(0),
       _glanceUntil(0), _glanceTarget(0), _stuckSince(0), _trackOffUntil(0),
-      _nextRuffle(0), _ruffleStart(0), _gxFilt(0), _gesture(OG_NONE), _pose{0, 0, 0, 0, 0}, _poseUntil(0), _poseStart(0), _gestureStart(0), _gestureReadyAt(0), _gestureSide(1.0f), _headOffset(0.0f) {}
+      _nextRuffle(0), _ruffleStart(0), _gxFilt(0), _gesture(OG_NONE), _pose{0, 0, 0, 0, 0}, _poseUntil(0), _poseStart(0), _gestureStart(0), _gestureReadyAt(0), _gestureSide(1.0f), _headOffset(0.0f), _manual{0, 0, 0, 0, 0}, _manualUntil{0, 0, 0, 0, 0} {}
 
 static const uint32_t GESTURE_COOLDOWN_MS = 4000;
 static const uint32_t STARTLE_MS = 1300;
@@ -33,6 +33,14 @@ static uint32_t gestureLength(OwlGesture g) {
 }
 
 static const uint32_t POSE_HOLD_MS = 3500;
+// Lang genug, um am Mechanismus hinzusehen; kurz genug, dass die Eule nicht haengen bleibt.
+static const uint32_t MANUAL_HOLD_MS = 10000;
+
+void OwlChoreo::manual(OwlPart part, float value, uint32_t now) {
+    if (part >= OP_COUNT) return;
+    _manual[part] = value;
+    _manualUntil[part] = now + MANUAL_HOLD_MS;
+}
 // Ein Fluegelschlag der Pose: runter auf FLAP_LOW und zurueck in 560 ms. Die Servos schaffen laut
 // Profil ~300 Einheiten/s, also ~270 ms pro Hub von 80 Einheiten - schneller wuerde der Hub verschluckt.
 static const uint32_t FLAP_PERIOD_MS = 560;
@@ -220,4 +228,18 @@ void OwlChoreo::update(uint32_t now, OwlMode mode, bool face, float gx, ChoreoOu
     out.wingL = clampf(out.wingL, 0.0f, 100.0f);
     out.wingR = clampf(out.wingR, 0.0f, 100.0f);
     out.head = out.headValid ? clampf(_headTarget + _headOffset, -_cfg.trackLimitDeg, _cfg.trackLimitDeg) : _headTarget;
+
+    // Manuell zuletzt: gewinnt gegen Modus, Geste und Pose. Ablauf wird auch im REST
+    // fortgeschrieben, damit ein im Schlaf abgelaufener Befehl nicht beim Aufwachen auftaucht.
+    float* const slot[OP_COUNT] = {&out.earL, &out.earR, &out.wingL, &out.wingR, &out.head};
+    for (int p = 0; p < OP_COUNT; p++) {
+        if (_manualUntil[p] == 0) continue;
+        if (now >= _manualUntil[p]) { _manualUntil[p] = 0; continue; }
+        if (mode == OM_REST) continue;
+        if (p == OP_HEAD) {
+            if (out.headValid) out.head = clampf(_manual[p], -_cfg.trackLimitDeg, _cfg.trackLimitDeg);
+        } else {
+            *slot[p] = clampf(_manual[p], 0.0f, 100.0f);
+        }
+    }
 }

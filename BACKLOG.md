@@ -255,7 +255,8 @@ the owl's power must be cut once. Deploy with `tools/flash_servo_locked.py` (two
 new name and flash against it (done twice on 2026-10-31/11-01).
 **Still to watch/tune:** idle ear twitches/glances, ear and wing amplitudes, `HEAD_TRACK_FOV_DEG`
 (16.5, estimated, not measured), servos hold their pulse (possible hum when idle), the web UI's
-direct `servo` controls are refused in this image (`servo_autonomous`), `servos` telemetry reports
+direct `servo` controls were refused in this image (`servo_autonomous`) until 2026-11-10 and are now
+a 10 s manual hold inside the choreography (SPEC-016), `servos` telemetry reports
 profile units (ears/wings 0..100, head degrees). Reactions (concept agreed with the owner 2026-11-01, built, **not yet flashed**): a knock = `startle`
 (ears up, one wing flap, wide eyes), speech clusters play `happy` / `negative` / `curious` through
 the new `react` command (`OwlChoreo` gestures, `speech.reactions[*].gesture`, web UI "Gestures").
@@ -842,6 +843,55 @@ would restart the owl.
 
 Needs Step 3 done (a trustworthy heading) and a sky-view GPS fix.
 
+**GPS has never had a fix, and at the window it sees NOTHING (2026-11-10).**
+Telemetry now carries GPS diagnostics without a fix (`gps.in_view`, `tracked`,
+`snr_max`, `nmea`, ...; SPEC-010), shown as a hint line in the web UI. Deployed
+the same day (SHA256 `a4802e8b…0b38`, both slots, copy
+`/opt/robot-owl/firmware-safe/firmware-gpsdiag.bin`, backup
+`/var/backups/robot-owl/xiao-before-gpsdiag-20261110.bin`; the stub transport
+aborted the backup read, `--no-stub` worked). First capture, owl standing at a
+window, 25 s after boot: `nmea` rising ~2.3/s (RMC+GGA every second plus GSV every
+5 s — so the module is alive and the PMTK314 was accepted), but every GSV cycle
+reports **0 satellites in view**. Not "too weak": no signal at all. Open, in
+this order:
+1. [x] **Outdoors, 2026-11-10 12:01–12:27, overcast:** first sat after <1 min,
+   first fix after ~10.5 min (cold start), 3–5 sats used and a position
+   wandering 130–510 m at first; from ~12:20 7–9 used, HDOP 1.2, position
+   within ~10 m for 6 min. So the GPS works and the window glass was the
+   indoor blocker. Log: `owlmate:~/gpstest/gpslog-draussen-20261110.csv`.
+   **But `snr_max` never left 26–30 dB-Hz** (open sky is normally 40–45), not
+   even after moving the owl away from the house — more sky gave more
+   satellites, not stronger ones. ~15 dB is lost at the owl itself. Owner
+   confirms the module sits antenna-up under plastic only, so orientation is
+   ruled out; clouds/rain do not explain 15 dB at L1. Suspect: noise from the
+   surrounding electronics. Not measured yet.
+2. [x] Orientation checked by the owner: antenna up, plastic housing only.
+2b. [ ] Noise A/B outdoors: 3 min baseline, 3 min with camera/face detection
+   off (needs a test switch in the firmware), 3 min with the Orange Pi's WLAN
+   off (on a timer that re-enables it). Whichever raises `snr_max` is the
+   culprit.
+3. [x] CR1220 is fitted (owner, 2026-11-10). So the 10.5 min first fix was a
+   genuine cold start: the module had never had sky before, nothing to retain.
+   With the cell, the next start should be warm/hot (datasheet: hot 1 s, warm
+   33 s typ.) and EASY orbit prediction works. **Check that on the retest** —
+   a long fix again despite the cell would point at the cell/VBACKUP.
+4. [ ] **Retest in sunshine** (owner, planned). Datasheet target: up to 45 dB
+   C/N in open sky; cold TTFF 35 s typ./60 s max at C/N > 40 dB. Order:
+   baseline `snr_max`, then GPS on its own clean 3.3 V (LDO or battery) —
+   Adafruit: "you want a nice and quiet power supply", and here it shares 3.3 V
+   with both LCDs + backlight, PCA9685 and IMU — then the 2b noise A/Bs. The
+   module has no external-antenna option; its interference canceller only
+   handles up to 12 narrowband CW tones, not broadband noise.
+Then the blink fix (SPEC-004 Falsified) went on top, same day: SHA256
+`b3f791b2…53a1`, copy `firmware-blink.bin`, backup
+`xiao-before-blink-20261110.bin` (the gpsdiag backup was refused because 74
+NVS bytes in 0xb026–0xb45d had changed — the IMU calibration, as expected).
+[ ] Owner to judge on the owl whether auto-blink and the web UI blink now read
+as full blinks (web UI default is now "slow", speed 4 = 200 ms).
+Not yet compared: `loop_max_ms` showed 7 of 48 frames at 108–114 ms (rest
+20–33 ms); there is no baseline from the previous image to say whether that is
+new.
+
 `navigation.aim_sign` in `orangepi-brain/config.yaml` has **never** been verified
 against hardware. Start a navigation to a saved place; if the head turns the
 wrong way, flip the sign. That is the one value the geodesy cannot derive on its
@@ -1104,7 +1154,7 @@ wrong; run the lot only after mechanical work.
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
 | detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
-| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 297 tests pass |
+| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 301 tests pass |
 | firmware/Orange Pi drift | `cd orangepi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS

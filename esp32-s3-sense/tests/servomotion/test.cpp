@@ -302,6 +302,43 @@ int main() {
         c.update(tt + 200, OM_NAV, false, 0, o);
         assert(!o.headValid && o.head == 0.0f);
     }
+    {   // manual: one part held for 10 s over mode/gesture/pose; never in REST, head never in NAV
+        OwlChoreo c(CFG, rng); ChoreoOut o;
+        uint32_t tt = 300000;
+        c.update(tt, OM_IDLE, false, 0, o);
+        c.manual(OP_EAR_L, 100.0f, tt);
+        c.manual(OP_HEAD, 40.0f, tt);
+        c.update(tt + 100, OM_IDLE, false, 0, o);
+        assert(c.manualActive(OP_EAR_L) && o.earL == 100.0f && std::fabs(o.earR - 50.0f) < 0.01f);   // only that part
+        assert(o.head == 40.0f);                                   // head absolute, positive = left
+        c.triggerPose({0, 0, 100, 100, 15}, tt + 200);             // a pose does not win against a manual part
+        c.update(tt + 300, OM_IDLE, false, 0, o);
+        assert(o.earL == 100.0f && o.earR == 0.0f && o.wingL == 100.0f && o.head == 40.0f);
+        c.update(tt + 9900, OM_ENGAGED, true, 0.8f, o);            // still held while engaged and tracking
+        assert(o.earL == 100.0f && o.head == 40.0f);
+        c.update(tt + 10100, OM_IDLE, false, 0, o);                // expired: the choreography takes over again
+        assert(!c.manualActive(OP_EAR_L) && !c.manualActive(OP_HEAD) && o.earL != 100.0f);
+        c.manual(OP_HEAD, 500.0f, tt + 11000);                     // clamped to the tracking limit
+        c.manual(OP_WING_R, -20.0f, tt + 11000);                   // and 0..100
+        c.update(tt + 11100, OM_IDLE, false, 0, o);
+        assert(o.head == CFG.trackLimitDeg && o.wingR == 0.0f);
+        OwlChoreo r(CFG, rng);
+        r.update(tt, OM_REST, false, 0, o);
+        r.manual(OP_EAR_L, 100.0f, tt);
+        r.update(tt + 100, OM_REST, false, 0, o);
+        assert(o.earL == 5.0f);                                    // asleep: no manual motion
+        r.update(tt + 10100, OM_REST, false, 0, o);                // expires while asleep ...
+        r.update(tt + 10200, OM_IDLE, false, 0, o);
+        assert(!r.manualActive(OP_EAR_L) && o.earL != 100.0f);     // ... and does not appear on waking
+        OwlChoreo n(CFG, rng);
+        n.update(tt, OM_NAV, false, 0, o);
+        n.manual(OP_HEAD, 40.0f, tt);
+        n.manual(OP_EAR_R, 100.0f, tt);
+        n.update(tt + 100, OM_NAV, false, 0, o);
+        assert(!o.headValid && o.head != 40.0f && o.earR == 100.0f);   // navigation keeps the head
+        n.manual(OP_COUNT, 1.0f, tt);                              // out of range: ignored
+        assert(!n.manualActive(OP_COUNT));
+    }
     {   // poses: a held body posture per mood; replaces a running gesture, no cooldown, never in REST, head only if valid
         OwlChoreo c(CFG, rng); ChoreoOut o;
         uint32_t tt = 200000;

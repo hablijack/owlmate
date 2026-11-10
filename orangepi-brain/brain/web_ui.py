@@ -39,24 +39,28 @@ CH_HEAD = 10
 CH_LEFT_WING = 9
 CH_RIGHT_WING = 8
 
-# Absolute head servo angles for the left/right buttons (degrees, -45..45).
-# The head only pans left/right (it does not tilt up/down), so there are no
-# up/down angles or buttons for it.
-HEAD_LEFT = -40
-HEAD_RIGHT = 40
+# Targets for the "Manual motion" buttons, in the firmware's SERVO PROFILE UNITS
+# (include/servo_profiles.h), not raw angles: the main image turns a `servo`
+# command into a 10 s manual hold inside the choreography (motion::manual), which
+# runs through the same calibration limits and ramps as everything else.
+#   head: degrees, positive = the owl's LEFT; clamped to HEAD_TRACK_LIMIT_DEG (55)
+#   ears/wings: 0..100 (ears 0 = low, 100 = fully up; wings 100 = fully open)
+# Until 2026-11-10 these were +-35..40 "angles" and the firmware refused them
+# all (servo_autonomous) -- the buttons did nothing in the main image.
+HEAD_LEFT = 40
+HEAD_RIGHT = -40
+CENTER = 0          # the head's centre
 
-# Ears and wings pivot on a single axis, so each has an "up" and "down" button
-# (and center). Angles are absolute and clamped to +-45 by the firmware.
-EAR_UP = -35
-EAR_DOWN = 35
-WING_UP = -40
-WING_DOWN = 40
-CENTER = 0
+EAR_UP = 100
+EAR_DOWN = 0
+WING_UP = 100
+WING_DOWN = 0
+PART_CENTER = 50    # ears/wings: halfway
 
 
 def _ear_wing_angle(direction: str, up: float, down: float) -> float:
-    """Map a UI direction to an absolute servo angle for a single-axis part
-    (ear or wing). 'center' returns 0; unknown directions default to center.
+    """Map a UI direction to a profile-unit target for a single-axis part
+    (ear or wing). 'center' returns PART_CENTER; unknown directions default to it.
 
     Defined BELOW the angle constants it reads, not above them: it referenced
     CENTER 38 lines before that name existed, which only worked because the
@@ -66,7 +70,7 @@ def _ear_wing_angle(direction: str, up: float, down: float) -> float:
         return up
     if direction == "down":
         return down
-    return CENTER
+    return PART_CENTER
 
 # Expressions offered in the UI. GENERATED from NAMES[] in
 # esp32-s3-sense/lib/Eyes/Eyes.cpp -- see brain/expressions.py and

@@ -89,6 +89,33 @@ bool react(const char* name, bool force) {
 #endif
 }
 
+bool manual(uint8_t channel, float value) {
+#if SERVO_MOTION_ENABLED
+    if (servos.locked() || !servos.ready()) return false;
+    switch (behavior::current()) {
+        case State::BOOT: case State::SLEEPING: case State::UPDATE: case State::ERROR: return false;
+        default: break;
+    }
+    OwlPart part;
+    switch (channel) {
+        case CH_LEFT_EAR: part = OP_EAR_L; break;
+        case CH_RIGHT_EAR: part = OP_EAR_R; break;
+        case CH_LEFT_WING: part = OP_WING_L; break;
+        case CH_RIGHT_WING: part = OP_WING_R; break;
+        case CH_HEAD:
+            if (behavior::current() == State::NAVIGATING) return false;   // der Kopf gehoert der Navigation
+            part = OP_HEAD;
+            break;
+        default: return false;
+    }
+    choreo.manual(part, value, millis());
+    return true;
+#else
+    // Ohne Bewegungs-Image der alte Weg; im gesperrten Image lehnt der Treiber ab.
+    return servos.setAngle(channel, value);
+#endif
+}
+
 void update() {
 #if SERVO_MOTION_ENABLED
     if (servos.locked() || !servos.ready()) return;

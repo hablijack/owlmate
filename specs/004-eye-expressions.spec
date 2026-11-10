@@ -82,6 +82,11 @@ blink eats into whatever shape is underneath. Auto-blink gap is a random
 `lib/Eyes/Eyes.cpp`) — irregular on purpose, because a regular blink reads as a
 machine idling. This spec said "0.7–2.5 s" until 2026-08-30; that was the
 original cadence, widened by `f79c96a` because it read as nervous.
+The lids close around the **visible shape** (`halfH` + 2 px, centred on the
+shape incl. `yOff` and vertical gaze), not around the panel radius, and the
+fully closed moment is **guaranteed to reach the display once** per blink: if a
+slow frame would skip it, `render()` holds the blink's time base there until it
+has been drawn. See Falsified.
 
 **INTERACTING is two beats, not one held face** — a ~1 s `HAPPY` burst on entry
 (`INTERACT_GREET_MS`), then `AWE` for as long as the owl keeps tracking.
@@ -227,6 +232,15 @@ the BACKLOG's *Emotion rework* item:
 * **`Eyes::markDirty()` was public API nobody called.** Documented in
   `AGENTS.md` as the way to force a redraw "when state changes by some other
   route"; no such route existed. Removed 2026-08-27.
+* **"The blink is time-based, so it looks the same at any frame rate."** It
+  had the right duration and was still barely visible (owner, 2026-11-10: no
+  auto-blink seen; "not every click gives a full blink"). Two reasons, both
+  arithmetic from the code: the lids closed over `EYE_R` (65 px) while the
+  neutral eye is 40 px high, so they touched it only below ~60 % openness —
+  more than half of every blink drew nothing visible; and "fully closed" lasted
+  exactly one `BLINK_TICK_MS` (25 ms), so any frame slower than that jumped from
+  nearly-closed straight to reopening. Fixed in `lib/Eyes` the same day; the
+  visual result is the owner's to judge, there is no measurement of it.
 
 ## Acceptance
 

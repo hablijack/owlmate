@@ -228,8 +228,13 @@
       <dl class="kv" style="margin-top:10px">
         <dt>latitude</dt><dd id="g-lat">&ndash;</dd>
         <dt>longitude</dt><dd id="g-lon">&ndash;</dd>
-        <dt>satellites</dt><dd id="g-sat">&ndash;</dd>
+        <dt>satellites used / in view</dt><dd id="g-sat">&ndash;</dd>
+        <dt>with signal</dt><dd id="g-trk">&ndash;</dd>
+        <dt>best signal</dt><dd id="g-snr">&ndash;</dd>
+        <dt>HDOP</dt><dd id="g-hdop">&ndash;</dd>
+        <dt>NMEA sentences (bad)</dt><dd id="g-nmea">&ndash;</dd>
       </dl>
+      <div id="g-hint" style="margin-top:8px; font-size:12px; opacity:.8"></div>
     </div>
     <div class="panel">
       <h3>Touch (vibration)</h3>
@@ -264,8 +269,8 @@
       <select id="blink-speed" aria-label="blink speed">
         <option value="1">fast</option>
         <option value="2">medium</option>
-        <option value="3" selected>normal</option>
-        <option value="4">slow</option>
+        <option value="3">normal</option>
+        <option value="4" selected>slow</option>
         <option value="5">very slow</option>
       </select>
     </div>
@@ -281,7 +286,7 @@
         <button data-act="head" data-v="center">Center</button>
         <button data-act="head" data-v="right">Right &#9654;</button>
       </div>
-      <p class="hint" style="margin:10px 0 0">In the main image the servos follow the owl's own choreography; direct commands are refused there (<code>servo_autonomous</code>).</p>
+      <p class="hint" style="margin:10px 0 0">Each button holds that part for 10 s, then the owl's own choreography takes over again. Within the calibrated limits only; not while asleep, and the head not while navigating.</p>
     </div>
     <div class="panel">
       <h3>Ears &amp; wings</h3>
@@ -510,6 +515,12 @@ const DE = {
   'detected': 'erkannt', 'gaze x / y': 'Blick x / y', 'faces seen': 'Gesichter gesehen', 'inference': 'Inferenz',
   'roll / pitch': 'Roll / Nick', 'compass': 'Kompass', 'mag axes': 'Mag-Achsen',
   'latitude': 'Breitengrad', 'longitude': 'Längengrad', 'satellites': 'Satelliten',
+  'satellites used / in view': 'Satelliten genutzt / in Sicht', 'with signal': 'mit Signal',
+  'best signal': 'bestes Signal', 'NMEA sentences (bad)': 'NMEA-Sätze (fehlerhaft)',
+  'No data from the GPS module: it answers on the bus but sends no NMEA sentences.': 'Keine Daten vom GPS-Modul: es antwortet am Bus, sendet aber keine NMEA-Sätze.',
+  'No satellites in view yet. Allow for a cold start (up to ~1 min); it needs a clear view of the sky.': 'Noch keine Satelliten in Sicht. Kaltstart abwarten (bis ~1 min), freie Sicht zum Himmel nötig.',
+  'Satellites too weak or too few with a signal (a fix needs ≥ 4, from ~25 dB-Hz). Clear sky, antenna facing up; coated window glass attenuates heavily.': 'Satelliten zu schwach oder zu wenige mit Signal (Fix braucht ≥ 4, ab ~25 dB-Hz). Freier Himmel, Antenne nach oben; Wärmeschutzglas dämpft stark.',
+  'Enough signal, computing a fix – a cold start can take a few minutes.': 'Genug Signal, Fix wird berechnet – Kaltstart kann einige Minuten dauern.',
   'taps': 'Klopfer', 'edges since boot': 'Flanken seit Start',
   'LOCKED': 'GESPERRT', 'MOTION ON': 'BEWEGUNG AN',
   'Servo safety not confirmed; motion controls locked.': 'Servo-Sicherheit nicht bestätigt; Bewegungssteuerung gesperrt.',
@@ -518,7 +529,7 @@ const DE = {
   "Play the mood's sound": 'Sound der Stimmung abspielen',
   'Blink': 'Blinzeln', 'fast': 'schnell', 'medium': 'mittel', 'normal': 'normal', 'slow': 'langsam', 'very slow': 'sehr langsam',
   'Manual motion': 'Manuelle Bewegung', 'Head': 'Kopf', 'Left': 'Links', 'Center': 'Mitte', 'Right': 'Rechts',
-  "In the main image the servos follow the owl's own choreography; direct commands are refused there (": 'Im Hauptimage folgen die Servos der Eigenchoreografie der Eule; direkte Befehle werden dort abgelehnt (',
+  "Each button holds that part for 10 s, then the owl's own choreography takes over again. Within the calibrated limits only; not while asleep, and the head not while navigating.": 'Jeder Knopf hält das Teil 10 s, danach übernimmt wieder die eigene Choreografie der Eule. Nur innerhalb der Kalibriergrenzen; nicht im Schlaf, der Kopf nicht während der Navigation.',
   'Ears & wings': 'Ohren & Flügel', 'Left ear': 'Linkes Ohr', 'Right ear': 'Rechtes Ohr', 'Left wing': 'Linker Flügel', 'Right wing': 'Rechter Flügel',
   'Places & navigation': 'Orte & Navigation',
   'Name': 'Name', 'Pick on map': 'Auf Karte wählen', 'Add place': 'Ort hinzufügen', 'Start': 'Start', 'Stop': 'Stopp',
@@ -645,6 +656,8 @@ function post(path, body) {
 }
 
 let toastTimer = null;
+// GPS diagnosis: when the NMEA counter last moved (a stuck counter = no data).
+let gpsNmeaLast = null, gpsNmeaMoved = 0;
 function flash(text) {
   const el = $('#toast');
   el.textContent = text;
@@ -802,10 +815,29 @@ async function poll() {
       $('#g-fix').style.color = t.gps.valid ? '#34d399' : '#fbbf24';
       $('#g-lat').textContent = t.gps.valid ? Number(t.gps.latitude).toFixed(5) : '–';
       $('#g-lon').textContent = t.gps.valid ? Number(t.gps.longitude).toFixed(5) : '–';
-      $('#g-sat').textContent = t.gps.satellites || 0;
+      const g = t.gps;
+      $('#g-sat').textContent = (g.satellites || 0) + ' / ' + (g.in_view || 0);
+      $('#g-trk').textContent = g.tracked || 0;
+      $('#g-snr').textContent = g.snr_max ? g.snr_max + ' dB-Hz' : '–';
+      $('#g-hdop').textContent = g.valid ? Number(g.hdop).toFixed(1) : '–';
+      $('#g-nmea').textContent = (g.nmea || 0) + ' (' + (g.nmea_bad || 0) + ')';
+      // Diagnosis without a fix. NMEA must be RISING, not merely non-zero:
+      // remember when the counter last moved.
+      const now = Date.now();
+      if (g.nmea !== gpsNmeaLast) { gpsNmeaLast = g.nmea; gpsNmeaMoved = now; }
+      let hint = '';
+      if (!g.valid) {
+        if (!g.nmea || now - gpsNmeaMoved > 5000) hint = 'No data from the GPS module: it answers on the bus but sends no NMEA sentences.';
+        else if (!g.in_view) hint = 'No satellites in view yet. Allow for a cold start (up to ~1 min); it needs a clear view of the sky.';
+        else if ((g.tracked || 0) < 4 || (g.snr_max || 0) < 25) hint = 'Satellites too weak or too few with a signal (a fix needs ≥ 4, from ~25 dB-Hz). Clear sky, antenna facing up; coated window glass attenuates heavily.';
+        else hint = 'Enough signal, computing a fix – a cold start can take a few minutes.';
+      }
+      $('#g-hint').textContent = hint ? tr(hint) : '';
     } else {
       $('#g-fix').textContent = tr('absent');
       $('#g-lat').textContent = $('#g-lon').textContent = $('#g-sat').textContent = '–';
+      $('#g-trk').textContent = $('#g-snr').textContent = $('#g-hdop').textContent = $('#g-nmea').textContent = '–';
+      $('#g-hint').textContent = '';
     }
 
     // vibration

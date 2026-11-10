@@ -449,6 +449,16 @@
 #define IMU_MAX_READ_FAILS 5
 #define IMU_FAIL_BACKOFF_MS 5000
 #define ADDR_GPS 0x10
+// PA1010D-Puffer abholen: alle 200 ms bis zu GPS_READ_BUDGET (96) Zeichen, also
+// hoechstens drei 32-Byte-Transfers, ~480 Byte/s Kapazitaet. Die GPS sendet
+// RMC+GGA jede Sekunde (~150 B) und GSV jede 5. Sekunde (~500 B im Schub, siehe
+// PMTK314 in Sensors.cpp) - im Mittel ~250 B/s. Die Positionsrate bleibt 1 Hz;
+// der Takt hier bestimmt nur, in wie kleinen Stuecken der Bus belegt wird.
+// Vorher: 128 Zeichen im Telemetrietakt (2 Hz) - fuer GSV zu wenig.
+#define GPS_POLL_INTERVAL_MS 200
+// GSV kommt alle 5 s; ein System, dessen letzter vollstaendiger Zyklus aelter
+// ist, zaehlt in gps.in_view nicht mehr mit.
+#define GPS_GSV_STALE_MS 15000
 #define ADDR_PCA9685 0x40
 
 // ============================================================================

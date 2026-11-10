@@ -2,6 +2,7 @@
 #include "imu_config.h"
 #include <Adafruit_GPS.h>
 #include "i2c_lock.h"
+#include <GpsDiag.h>
 #include <Preferences.h>
 
 // --- Vibration: Flankenzaehler im Interrupt --------------------------------
@@ -135,7 +136,11 @@ bool Sensors::begin() {
     // PA1010D GPS in native I2C mode
     if (_gpsReady) {
         GPS.begin(ADDR_GPS);
-        GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
+        // RMC+GGA jede Sekunde, GSV (Satelliten in Sicht + SNR) bei jedem 5.
+        // Fix. Ohne GSV ist "kein Fix" nicht zu diagnostizieren - GGA meldet
+        // nur Satelliten IM Fix (SPEC-010). Pruefsumme nativ getestet
+        // (tests/gpsdiag), Feld 6 = GSV-Teiler.
+        GPS.sendCommand("$PMTK314,0,1,0,1,0,5,0,0,0,0,0,0,0,0,0,0,0,0,0*2D");
         GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);
     }
 
@@ -227,10 +232,17 @@ ImuData Sensors::getImu() {
     return data;
 }
 
-GpsData Sensors::getGps() {
-    GpsData data{};
+// Diagnose-Stand des GPS, von updateGps() fortgeschrieben (nur Core 1).
+static GsvTracker gsv(GPS_GSV_STALE_MS);
+static uint32_t gpsLastPoll = 0;
+static uint32_t nmeaOk = 0;
+static uint32_t nmeaBad = 0;
 
-    if (!_gpsReady) return data;
+void Sensors::updateGps() {
+    if (!_gpsReady) return;
+    const uint32_t now = millis();
+    if (now - gpsLastPoll < GPS_POLL_INTERVAL_MS) return;
+    gpsLastPoll = now;
 
     // Pump the I2C GPS reader and parse whatever complete sentences arrive.
     //
@@ -241,9 +253,9 @@ GpsData Sensors::getGps() {
     // 512-iteration bound merely turned that into ~512 I2C transfers per call,
     // which cost ~700 ms per telemetry tick.
     //
-    // GPS.read() serves bytes from a 32-byte buffer. Die PA1010D sendet RMC+GGA
-    // mit 1 Hz (~150 Byte/s), die Telemetrie laeuft mit 2 Hz, also reichen
-    // 128 Byte je Aufruf (~256 Byte/s) mit Reserve.
+    // GPS.read() serves bytes from a 32-byte buffer. Budget und Takt: siehe
+    // GPS_POLL_INTERVAL_MS in config.h (seit 2026-11-10 hier statt im
+    // Telemetrietakt, weil GSV mehr Daten bringt als 128 Byte je 500 ms).
     //
     // WIDERLEGT 2026-08-31, und der Satz stand vorher genau hier: "read()
     // beruehrt den Bus nur, wenn der Puffer leer laeuft, also kostet dieses
@@ -265,7 +277,7 @@ GpsData Sensors::getGps() {
     // - der Durchsatz aendert sich also nicht. Ein direkt nach einem Nachfuellen
     // zurueckgegebenes 0 ist normal (read() liefert dann kein Zeichen), darum 3
     // und nicht 1.
-    static const int GPS_READ_BUDGET = 128;
+    static const int GPS_READ_BUDGET = 96;
     static const int GPS_DRY_READS = 3;
     int dry = 0;
     for (int i = 0; i < GPS_READ_BUDGET; i++) {
@@ -275,7 +287,15 @@ GpsData Sensors::getGps() {
             c = GPS.read();
         }
         if (GPS.newNMEAreceived()) {
-            GPS.parse(GPS.lastNMEA());   // parse() clears the flag
+            char *line = GPS.lastNMEA();   // loescht das Empfangs-Flag
+            GsvSentence g;
+            if (!nmeaChecksumOk(line)) {
+                nmeaBad++;
+            } else if (nmeaOk++, parseGsv(line, g)) {
+                gsv.feed(g, now);          // GSV wertet die Bibliothek nicht aus
+            } else {
+                GPS.parse(line);
+            }
         }
         if (c == 0) {
             if (++dry >= GPS_DRY_READS) break;
@@ -283,12 +303,26 @@ GpsData Sensors::getGps() {
             dry = 0;
         }
     }
+}
+
+GpsData Sensors::getGps() {
+    GpsData data{};
+    if (!_gpsReady) return data;
+
+    const uint32_t now = millis();
+    data.fixQuality = GPS.fixquality;
+    data.satellites = GPS.satellites;
+    data.hdop = GPS.HDOP;
+    data.inView = gsv.inView(now);
+    data.tracked = gsv.tracked(now);
+    data.snrMax = gsv.maxSnr(now);
+    data.nmeaOk = nmeaOk;
+    data.nmeaBad = nmeaBad;
 
     if (GPS.fix) {
         data.latitude = GPS.latitudeDegrees;
         data.longitude = GPS.longitudeDegrees;
         data.altitude = GPS.altitude;
-        data.satellites = GPS.satellites;
         data.valid = true;
     }
 

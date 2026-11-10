@@ -219,6 +219,11 @@ void loop() {
     // mit I2C_TIMEOUT_MS belastet.
     sensors.updateImu();
 
+    // GPS-Puffer abholen, ebenfalls hier statt im Telemetrietakt: in kleinen
+    // Stuecken (GPS_POLL_INTERVAL_MS), damit kein Telemetrieframe die Schleife
+    // und den gemeinsamen I2C-Bus mit einem grossen Lesestoss belegt.
+    sensors.updateGps();
+
     // Parse incoming commands
     protocol::poll();
 

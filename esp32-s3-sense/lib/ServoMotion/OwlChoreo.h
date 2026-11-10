@@ -32,6 +32,11 @@
 // eine Geste (nie im REST, Kopf nur mit headValid), ersetzt aber eine laufende Geste/Pose sofort und
 // kennt keinen Cooldown: sie wird von Hand ausgewaehlt (Weboberflaeche), nicht von Sensoren ausgeloest.
 // Nur NEGATIVE und CURIOUS bewegen den Kopf, als Versatz auf das Ziel von Tracking/Blick (nie in NAV).
+// Manuell (manual()): EIN Teil auf einen festen Wert, MANUAL_HOLD_MS lang, ueber allem anderen
+// (Modus, Geste, Pose) - die Knoepfe "Manuelle Bewegung" der Weboberflaeche. Nie im REST, der Kopf
+// nie in NAV; der Kopf ABSOLUT (nicht als Versatz), begrenzt auf trackLimitDeg. Danach uebernimmt
+// die Choreografie wieder. Seit 2026-11-10; davor lehnte die Firmware solche Befehle ab
+// (servo_autonomous), und die Knoepfe taten im Hauptimage nichts.
 //
 // Kopfverfolgung als Sakkade: Das Kamerabild dreht sich mit dem Kopf, also ist gaze_x ein
 // Regelfehler. Ueberschreitet er das Totband, setzt der Kopf EIN neues Ziel (sign * FOV *
@@ -47,6 +52,7 @@
 
 enum OwlMode { OM_REST, OM_IDLE, OM_ALERT, OM_ENGAGED, OM_NAV };
 enum OwlGesture { OG_NONE, OG_STARTLE, OG_HAPPY, OG_NEGATIVE, OG_CURIOUS };
+enum OwlPart { OP_EAR_L, OP_EAR_R, OP_WING_L, OP_WING_R, OP_HEAD, OP_COUNT };
 
 // Eine feste Koerperhaltung. Ohren/Fluegel 0..100, Kopf in Grad als Versatz auf das Ziel von
 // Tracking/Blick (positiv = links).
@@ -85,6 +91,9 @@ public:
     // Haelt `p` fuer POSE_HOLD_MS; ersetzt jede laufende Geste/Pose. Immer angenommen.
     void triggerPose(const OwlPose& p, uint32_t nowMs);
     bool poseActive() const { return _poseUntil != 0; }
+    // Haelt einen Teil MANUAL_HOLD_MS auf `value` (Ohren/Fluegel 0..100, Kopf Grad, positiv = links).
+    void manual(OwlPart part, float value, uint32_t nowMs);
+    bool manualActive(OwlPart part) const { return part < OP_COUNT && _manualUntil[part] != 0; }
     OwlGesture gesture() const { return _gesture; }
     bool trackingSuspended(uint32_t nowMs) const { return nowMs < _trackOffUntil; }
 
@@ -109,4 +118,6 @@ private:
     uint32_t _poseUntil, _poseStart;
     uint32_t _gestureStart, _gestureReadyAt;
     float _gestureSide, _headOffset;
+    float _manual[OP_COUNT];
+    uint32_t _manualUntil[OP_COUNT];
 };

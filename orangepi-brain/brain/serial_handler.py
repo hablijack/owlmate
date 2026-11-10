@@ -122,12 +122,22 @@ class IMUData:
 
 @dataclass(frozen=True)
 class GPSData:
-    """PA1010D fix. Everything is zero until `valid` goes true."""
+    """PA1010D. Position is zero until `valid` goes true; the diagnostics below
+    are reported WITHOUT a fix too, because "no fix" alone cannot tell "no data
+    from the module" from "sees no satellites" from "sees too few/too weak".
+    """
     valid: bool = False
     latitude: float = 0.0
     longitude: float = 0.0
     altitude: float = 0.0
-    satellites: int = 0
+    satellites: int = 0          # used in the fix (GGA); 0 without one
+    fix_quality: int = 0         # GGA: 0 none, 1 GPS, 2 DGPS
+    hdop: float = 0.0            # meaningful only with a fix
+    in_view: int = 0             # GSV: satellites in view, all constellations
+    tracked: int = 0             # GSV: of those, with a signal (SNR reported)
+    snr_max: int = 0             # GSV: best SNR, dB-Hz; 0 = nothing tracked
+    nmea: int = 0                # sentences with a good checksum since boot
+    nmea_bad: int = 0            # sentences with a bad checksum since boot
 
 
 @dataclass(frozen=True)
@@ -291,6 +301,13 @@ _GPS_FIELDS = (
     ("longitude", "longitude", float),
     ("altitude", "altitude", float),
     ("satellites", "satellites", int),
+    ("fixq", "fix_quality", int),
+    ("hdop", "hdop", float),
+    ("in_view", "in_view", int),
+    ("tracked", "tracked", int),
+    ("snr_max", "snr_max", int),
+    ("nmea", "nmea", int),
+    ("nmea_bad", "nmea_bad", int),
 )
 _VIBRATION_FIELDS = (
     ("detected", "detected", bool),
@@ -424,7 +441,9 @@ class SerialHandler:
         return self.send_command({"type": "expression", "value": expression})
 
     def set_servo(self, channel: int, angle: float) -> bool:
-        """Set servo angle (channel 0-4, angle -45 to 45)"""
+        """Servo target in the firmware's profile units (head: degrees, positive =
+        left; ears/wings 0..100). In the main image this is a 10 s manual hold
+        inside the choreography, not a raw write; see motion::manual()."""
         return self.send_command({
             "type": "servo",
             "channel": channel,

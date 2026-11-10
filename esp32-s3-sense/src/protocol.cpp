@@ -154,15 +154,18 @@ void handleCommand(const char* json) {
     } else if (strcmp(type, "servo") == 0) {
         uint8_t ch = doc["channel"];
         float angle = doc["angle"];
-        // Im Bewegungs-Image gehoeren die Ziele der Choreografie (lib/OwlChoreo): ein
-        // direkter Servo-Befehl wuerde im naechsten loop() ueberschrieben.
-        const bool ok = !SERVO_MOTION_ENABLED && servos.setAngle(ch, angle);
+        // Im Bewegungs-Image gehoeren die Ziele der Choreografie (lib/OwlChoreo). Ein
+        // direkter Servo-Befehl wird deshalb dort zu einer 10-s-Uebersteuerung in der
+        // Choreografie, in PROFILEINHEITEN: Ohren/Fluegel 0..100, Kopf Grad, positiv =
+        // links. Welches Image was tut, entscheidet motion::manual() - hier kein Schalter.
+        // Bis 2026-11-10 wurde der Befehl im Bewegungs-Image abgelehnt (servo_autonomous).
+        const bool ok = motion::manual(ch, angle);
 
         JsonDocument resp;
         resp["type"] = "servo_ack";
         resp["ok"] = ok;
         if (servos.locked()) resp["error"] = "servo_locked";
-        else if (!ok) resp["error"] = "servo_autonomous";
+        else if (!ok) resp["error"] = "servo_refused";
         resp["channel"] = ch;
         resp["angle"] = angle;
         sendJson(resp);
@@ -311,6 +314,14 @@ void sendTelemetry() {
         doc["gps"]["longitude"] = gps.longitude;
         doc["gps"]["altitude"] = gps.altitude;
         doc["gps"]["satellites"] = gps.satellites;
+        // Diagnose, auch ohne Fix (siehe GpsData in Sensors.h, SPEC-010).
+        doc["gps"]["fixq"] = gps.fixQuality;
+        doc["gps"]["hdop"] = roundf(gps.hdop * 10.0f) / 10.0f;
+        doc["gps"]["in_view"] = gps.inView;
+        doc["gps"]["tracked"] = gps.tracked;
+        doc["gps"]["snr_max"] = gps.snrMax;
+        doc["gps"]["nmea"] = gps.nmeaOk;
+        doc["gps"]["nmea_bad"] = gps.nmeaBad;
     }
 
     // Vibration

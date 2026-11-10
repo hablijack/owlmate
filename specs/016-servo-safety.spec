@@ -203,8 +203,17 @@ greeting: ears up + two wing beats to the calibrated maximum; rare full-travel r
 tracking integrates `gaze_x` (the camera turns with the head, so it is an error signal).
 The **sign is not derived** (an image mirror is invisible to the vflip test, see
 `EYE_GAZE_SIGN_X`); a wrong sign is positive feedback, so a stuck-at-limit guard disables
-tracking for 30 s and centres the head after ~3 s. The supervisor's direct `servo` command is
-refused in this image (`servo_autonomous`): the choreography owns the targets.
+tracking for 30 s and centres the head after ~3 s. The supervisor's direct `servo` command
+does not write the servo in this image: since 2026-11-10 it becomes a **manual hold inside the
+choreography** (`OwlChoreo::manual`, via `motion::manual`) — one part held at the commanded value
+for 10 s, in profile units (ears/wings 0..100, head degrees, positive = left), winning over mode,
+gesture and pose, then the choreography resumes. Same path as every other target, so the profile
+limits and ramps of `ServoMotion` apply; the head is additionally clamped to
+`HEAD_TRACK_LIMIT_DEG`. Never in REST (sleep/boot/error/OTA), the head never in NAV; a hold that
+expires while asleep does not reappear on waking (native test, mutations verified). Before that
+date the command was refused (`servo_autonomous`) and the web UI's "Manual motion" buttons did
+nothing in the main image. The decision lives in `motion::manual()`, not in `protocol.cpp`,
+which must not carry a runtime motion switch (`test_servo_motion.py`).
 
 
 ## Verified facts

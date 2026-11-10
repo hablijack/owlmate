@@ -59,12 +59,12 @@ private:
     void renderEye(GC9D01& lcd, int cx, int cy, bool mirrored);
     void drawShape(GC9D01& lcd, int cx, int cy, bool mirrored);
     void drawBlob(GC9D01& lcd, const EyeShape& s, int cx, int cy, bool mirrored);
-    void drawLids(GC9D01& lcd, float openness);
+    void drawLids(GC9D01& lcd, float openness, int cx, int cy);
     void drawSpinner(GC9D01& lcd);
     void drawErrorX(GC9D01& lcd);
     void drawCrosshair(GC9D01& lcd, int cx, int cy);
     void drawZzz(GC9D01& lcd, int cx, int cy);
-    void drawClosed(GC9D01& lcd);
+    void drawClosed(GC9D01& lcd, int cx = EYE_CX, int cy = EYE_CY);
     float currentOpenness() const;
 
     GC9D01& _left;
@@ -77,6 +77,10 @@ private:
     uint8_t _blinkProgress;
     uint8_t _blinkSpeed;
     bool _blinking;
+    // Der geschlossene Moment eines Lidschlags ist einmal auf dem Display
+    // gewesen. Ohne das ueberspringt jedes Bild, das laenger als ein
+    // BLINK_TICK_MS braucht, ihn regelmaessig (siehe render()).
+    bool _closedShown;
     uint32_t _lastBlink;
     uint32_t _blinkStart;   // Beginn des laufenden Lidschlags (ms)
     uint32_t _nextBlinkTime;

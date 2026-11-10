@@ -35,8 +35,18 @@ struct GpsData {
     float latitude;
     float longitude;
     float altitude; // meters
-    uint8_t satellites;
+    uint8_t satellites;  // im Fix verwendet (GGA) - ohne Fix 0, daher die Felder unten
     bool valid;
+    // Diagnose, auch OHNE Fix gemeldet (SPEC-010). Trennt "kommt nichts an"
+    // (nmeaOk steht) von "sieht nichts" (inView 0) von "sieht zu schwach"
+    // (snrMax klein, tracked < 4).
+    uint8_t fixQuality;  // GGA: 0 kein Fix, 1 GPS, 2 DGPS
+    float hdop;          // GGA, nur mit Fix aussagekraeftig
+    uint8_t inView;      // GSV: Satelliten in Sicht, Summe aller Systeme
+    uint8_t tracked;     // GSV: davon mit Signal (SNR gemeldet)
+    uint8_t snrMax;      // GSV: bestes SNR in dB-Hz, 0 = keiner verfolgt
+    uint32_t nmeaOk;     // Saetze mit gueltiger Pruefsumme seit Boot
+    uint32_t nmeaBad;    // Saetze mit falscher Pruefsumme seit Boot
 };
 
 // Vibration state
@@ -61,6 +71,11 @@ public:
     // Getter, den die Telemetrie ruft. Das war schon damals der falsche Ort.
     void updateImu();
     ImuData getImu();
+    // GPS ebenso: updateGps() holt den I2C-Puffer des PA1010D ab und parst,
+    // getGps() liest nur ab. Einmal pro Runde aufrufen; begrenzt sich selbst
+    // auf GPS_POLL_INTERVAL_MS. Bis 2026-11-10 las getGps() im Telemetrietakt
+    // und war damit kein reiner Getter.
+    void updateGps();
     GpsData getGps();
     // Vibration in zwei Haelften: updateVibration() holt die Flanken ab und
     // fuehrt die Zustandslogik, getVibration() liest nur den Stand aus.

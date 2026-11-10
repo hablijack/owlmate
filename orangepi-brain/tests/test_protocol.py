@@ -18,6 +18,7 @@ import dataclasses
 import json
 import logging
 import unittest
+from pathlib import Path
 
 from stubs import install_stub_modules
 
@@ -44,6 +45,8 @@ FULL_FRAME = {
     "gps": {
         "valid": True, "latitude": 49.5, "longitude": 10.75,
         "altitude": 312.5, "satellites": 9,
+        "fixq": 1, "hdop": 0.9, "in_view": 14, "tracked": 11, "snr_max": 43,
+        "nmea": 812, "nmea_bad": 2,
     },
     "vibration": {"detected": True, "count": 4, "pulses": 3252},
     "update": {
@@ -126,6 +129,28 @@ class TestParseTelemetrySections(unittest.TestCase):
         self.assertAlmostEqual(t.gps.longitude, 10.75)
         self.assertAlmostEqual(t.gps.altitude, 312.5)
         self.assertEqual(t.gps.satellites, 9)
+        self.assertEqual(t.gps.fix_quality, 1)
+        self.assertAlmostEqual(t.gps.hdop, 0.9)
+        self.assertEqual((t.gps.in_view, t.gps.tracked, t.gps.snr_max), (14, 11, 43))
+        self.assertEqual((t.gps.nmea, t.gps.nmea_bad), (812, 2))
+
+    def test_gps_diagnostics_without_fix(self):
+        # The point of the diagnostics: a module that sees satellites but has
+        # no fix yet must be distinguishable from one that sends nothing.
+        t = parse(frame(gps={"valid": False, "satellites": 0, "fixq": 0,
+                             "in_view": 7, "tracked": 2, "snr_max": 21, "nmea": 40}))
+        self.assertFalse(t.gps.valid)
+        self.assertEqual((t.gps.in_view, t.gps.tracked, t.gps.snr_max, t.gps.nmea), (7, 2, 21, 40))
+
+    def test_every_gps_field_the_firmware_sends_is_parsed(self):
+        # R-010.5, for the gps object: read the keys straight out of
+        # sendTelemetry() so a field added on one side only fails here.
+        import re
+        from brain.serial_handler import _GPS_FIELDS
+        source = (Path(__file__).resolve().parents[2] / 'esp32-s3-sense/src/protocol.cpp').read_text()
+        sent = set(re.findall(r'doc\["gps"\]\["(\w+)"\]', source))
+        self.assertGreaterEqual(len(sent), 12)
+        self.assertEqual(sent, {wire for wire, _, _ in _GPS_FIELDS})
 
     def test_vibration(self):
         t = parse(FULL_FRAME)

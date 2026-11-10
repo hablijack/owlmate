@@ -39,7 +39,8 @@ times over during hardware debugging.
      "tx_dropped":…,"fw":…,
      "heap":{"free","min","largest","psram_free","psram_largest"},
      "imu":{"pitch","roll","yaw","calibrated","cal":{"sys","gyro","accel","mag","restored"}},
-     "gps":{"valid","latitude","longitude","altitude","satellites"},
+     "gps":{"valid","latitude","longitude","altitude","satellites",
+            "fixq","hdop","in_view","tracked","snr_max","nmea","nmea_bad"},
      "vibration":{"detected","count","pulses"},
      "navigation":{"active","angle"},        // only while NAVIGATING
      "update":{"ssid","password","ip","url"}, // only while in UPDATE
@@ -52,6 +53,23 @@ times over during hardware debugging.
 **A sub-object is omitted when its device is absent.** `imu` and `gps` appear
 only when the boot-time probe found them, which makes telemetry a presence
 indicator for free — no separate health field needed.
+
+**`gps` carries its own diagnosis, with or without a fix** (added 2026-11-10).
+`satellites` comes from GGA and counts satellites *used in the fix*, so without
+a fix it is always 0 — which made "the module sends nothing", "it sees no
+satellites" and "it sees three weak ones" one and the same "no fix" in the web
+UI. So the firmware now also sends `fixq` (GGA fix quality), `hdop`, and from the
+GSV sentences — which Adafruit_GPS does not parse; `lib/GpsDiag` does, natively
+tested in `esp32-s3-sense/tests/gpsdiag` — `in_view` (all constellations),
+`tracked` (with an SNR) and `snr_max` (dB-Hz), plus `nmea`/`nmea_bad`, the
+sentence counters by checksum. A rising `nmea` is the only proof the module is
+talking at all; `in_view` is summed only over complete GSV cycles no older than
+`GPS_GSV_STALE_MS`, so a lost sentence never reports a too-small number. GSV is
+requested every 5th fix (PMTK314) and the module's I2C buffer is drained by
+`Sensors::updateGps()` every `GPS_POLL_INTERVAL_MS` from `loop()`, no longer in
+the telemetry tick — `getGps()` is now a pure getter like `getImu()`.
+`test_protocol.py` reads the `gps` keys straight out of `protocol.cpp` and
+fails if `_GPS_FIELDS` misses one.
 
 **Commands** (Orange Pi → ESP32): `sleep`, `wake`, `expression`, `servo`, `gaze`,
 `nav`, `blink`, `react`, `heartbeat`, `update_mode`. `react` (`name`: a mood of the
