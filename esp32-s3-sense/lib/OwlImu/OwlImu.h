@@ -71,6 +71,9 @@ struct OwlImuConfig {
     uint16_t sampleIntervalMs = 20;
     float filterAlpha = 0.15f;
     float magMinSpanUt = 25.0f;
+    // Spanne, die ALLE DREI Achsen erreichen muessen, bevor ein Lauf gespeicherte
+    // Offsets ersetzt (MagCalRule.h).
+    float magReplaceSpanUt = 60.0f;
     uint8_t maxReadFails = 5;
     uint16_t failBackoffMs = 5000;
 };
@@ -136,8 +139,9 @@ public:
     // beim BNO055 hat genau ihre Vermischung den calibrated-Fehler erzeugt
     // (SPEC-006 Falsified).
     void setHardIron(float x, float y, float z);
-    // Die in diesem Lauf eingedrehten Offsets, nur wenn sie es wert sind
-    // (>= 2 Achsen). false = noch nichts zu speichern.
+    // Die in diesem Lauf eingedrehten Offsets, nur wenn sie die gespeicherten
+    // schlagen (magLiveOffsetsWin: ohne gespeicherte >= 2 Achsen, mit
+    // gespeicherten alle 3 voll). false = nichts zu speichern.
     bool getHardIron(float& x, float& y, float& z) const;
     // Beobachtete Spanne pro Achse in uT, fuer die Anzeige am Bench.
     void magSpan(float& x, float& y, float& z) const;
@@ -149,6 +153,8 @@ private:
     // Offsets und Achsenabdeckung aus den in DIESEM Lauf beobachteten
     // Min/Max-Werten. Rueckgabe: Anzahl Achsen mit genug Spanne (0..3).
     uint8_t liveAxes(float off[3]) const;
+    // Duerfen die Live-Offsets die aktuellen ersetzen? Siehe MagCalRule.h.
+    bool liveWins() const;
 
     OwlImuConfig _cfg;
     TwoWire* _wire = nullptr;

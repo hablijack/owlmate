@@ -513,7 +513,7 @@ faults:
   counter is the trustworthy signal, and it read a correct `0` at rest in the
   same session.
 
-### Step 3 — IMU replaced with an LSM303AGR: mount it, then calibrate  `[~]` PART SWAPPED + FIRMWARE PORTED 2026-09-01
+### Step 3 — IMU replaced with an LSM303AGR: mount it, then calibrate  `[~]` MOUNTED, REMAP FIXED 2026-11-10; HEADING ACCURACY UNPROVEN
 
 **The BNO055 is out and an Adafruit LSM303AGR is in.** The old blocker is gone:
 that chip ACKed its address and then held SCL low indefinitely (measured over
@@ -542,38 +542,52 @@ boot.
 
 **What is actually left, and it needs the owl:**
 
-1. **Axis remap — DONE 2026-09-01**, measured with the board hand-held in its
-   mounted position: `IMU_REMAP_X = −2, Y = −1, Z = −3`. Level reads
-   `roll −1.4° / pitch +5.3°` and a beak-up tilt shows up as pitch, not roll.
-   **Worth knowing: "upside down like the BNO055" was not enough.** Both boards
-   are upside down and agree on Z, but this one's in-plane rotation differs by 90°
-   and swaps X with Y — copying the old P7 placement would have passed a level
-   check with a perfect 0/0 while putting every tilt on the wrong axis. Deriving
-   it needs **two** poses, level plus a beak-up tilt.
-2. **Mount the board for real, then repeat step 1.** It was hand-held, which is
-   plenty for choosing among 24 discrete orientations but not a substitute for the
-   real fitting. *If it turns out genuinely skewed rather than axis-aligned, three
-   constants cannot express it and `lib/OwlImu` needs a rotation matrix instead.*
-2b. **Settle the `roll` sign.** One observation contradicts the convention
-   (`+roll` = right side down) and cannot be reconciled — the three poses together
-   describe a left-handed triad, which is impossible. owl X and owl Z are each
-   pinned by an unambiguous pose so the third axis is forced; the sideways
-   observation is the odd one out. Needs an unambiguous side reference. **Do not
-   flip `IMU_REMAP_Y`** to resolve it: that makes the map improper and mirrors the
-   compass heading. Impact today is only the displayed `roll`, which nothing
-   consumes.
-3. **Calibrate**: `tools/kalibrieren.py`, one slow full turn (20–30 s). No
-   ordering constraint any more — the old "figure-8 before the static poses" rule
-   was a BNO055 counter artefact and is gone. `cal.axes` reaching **2** of 3 is
-   the success condition, not a partial one: a level turn sweeps only the two
-   horizontal axes.
-4. **Re-derive `IMU_HEADING_OFFSET_DEG`.** It currently holds **4.594** — the
-   magnetic declination **only**. The BNO055's 70.8° mounting term was measured
-   against that chip's own remapped axes on a different breakout and does not
-   carry over. Until this is done `imu.yaw` is off by the mounting rotation and
-   **navigation will aim wrong while looking perfectly healthy**. Aim the beak at
-   a known *true* bearing and set the constant to
-   `(true bearing − reported yaw + 4.594) mod 360`.
+1. **Axis remap — DONE, corrected 2026-11-10** on the assembled owl:
+   `IMU_REMAP_X = −2, Y = +1, Z = −3`. The 2026-09-01 value `Y = −1` was derived
+   from right-handedness and was wrong: right side down read −50/−68° roll and the
+   compass was **mirrored** (four bearings, true + reported constant at ~372.5°).
+   With `Y = +1`: right side down +44..+50°, compass no longer mirrored.
+2. **Mount the board for real — DONE**; the owl is fully assembled.
+2b. **Settle the `roll` sign — DONE**, it was the `Y` axis above.
+3. **Calibrate — DONE 2026-11-10**, by tumbling in free air (3 axes after ~20 s).
+   A level turn alone leaves z uncalibrated (40° heading jump at 48° roll); the
+   firmware now re-saves when more axes are covered. **Re-do it by tumbling**,
+   away from the laptop and metal, whenever the heading looks off.
+4. **`IMU_HEADING_OFFSET_DEG` — set 2026-11-10 to 356.6, accuracy NOT proven.**
+   Derived from four hand-aligned iPhone bearings (constant +11.4° removed,
+   residuals ±6°). The control afterwards: 163° read 163.6 ✓, but 206° read
+   **177** with the same restored offsets and **163** after a fresh full tumble
+   (−29° / −43°). Either the min/max offsets are off by ~10 µT (the horizontal
+   field here is only ~20 µT, so that is ~30° in some directions and ~0 in
+   others — fits "163 right, 206 wrong"), or the iPhone held next to the owl is
+   itself deflected by the servo magnets. **Next time: do not use a phone
+   compass beside the owl.** Aim the beak at a landmark whose true bearing is
+   computed from a map, and take 4+ bearings in one sitting with ONE calibration.
+   The owl now runs on the NVS restored from `xiao-before-heading-20261110.bin`
+   (the calibration that read 163.6 at 163°); the bad one is kept as
+   `/var/backups/robot-owl/nvs-bad-20261110.bin`. The owner has had enough of
+   calibrating for one day — it is slow, tiring and error-prone by hand.
+4b. **Tilted heading after the good calibration**: repeat the 60° roll / 67° pitch
+   check (it was +14° / −21° after a poorer calibration). Matters on the shoulder.
+4c. **DONE 2026-11-10: a partial run no longer replaces stored offsets.** Carrying
+   the owl from 163° to 244° put 3 axes over 25 µT, the half-done min/max replaced
+   the good calibration and was saved (+39°). Now restored offsets are replaced
+   only when all three axes reach `MAG_CAL_REPLACE_SPAN_UT` (60 µT) —
+   `lib/OwlImu/MagCalRule.h`, native test `tests/magcal`.
+4d. *Firmware idea, to make this less of an ordeal:* min/max is the crudest
+   hard-iron method and one magnetic outlier spoils a whole run. A least-squares
+   sphere fit over the collected points (and a quality figure in telemetry: the
+   residual, or how far |m − offset| strays from the expected ~49 µT) would both
+   tolerate outliers and say whether a calibration is any good *without* a
+   compass bearing. That last part is what the owner needs: no more guessing.
+4e. **Mains power as a suspect (owner, 2026-11-10).** Every measurement that day
+   ran on the 5 V charger. A cable that stays put while the owl turns is an
+   external field that the min/max mistakes for the earth's, and a varying
+   charging current changes it over time — either would explain "163 right, 206
+   wrong". **Cheapest test first, no calibration needed:** owl still, read
+   `imu.yaw`, unplug the charger, read again, plug back in. A jump of more than
+   ~2° convicts the supply. Then calibrate and take the bearings **on battery,
+   charger and cable out of reach**, all in one sitting.
 5. **Untested failure path**: the mute-sensor backoff (`specs/006` Acceptance 6)
    has never been exercised — it needs someone to pull SDA on a running owl and
    confirm `loop_hz` does not collapse.
@@ -905,15 +919,15 @@ Decided with the owner on the live owl; the full reasoning is in `specs/004-eye-
 Eye-shape changes are numbers in `SHAPES[]` and need a with-the-owner flash (two-phase flasher);
 preview them first with `esp32-s3-sense/tools/preview_eyes.py`. Order:
 
-1. [~] **Removed in the sources 2026-11-03, NOT flashed yet** `sad_up`, `bored`, `worried` (NAMES[]/SHAPES[]/enum, then
+1. [x] **Removed 2026-11-03, on the owl** (at the latest with the 2026-11-10 images, built from a tree that contains it) `sad_up`, `bored`, `worried` (NAMES[]/SHAPES[]/enum, then
    `orangepi-brain/tools/gen_expressions.py`; fix every place that still names them, e.g.
    config reactions and docs quoting the mood count).
-2. [~] **Reshape (BUILT 2026-11-03, NOT flashed yet -- needs the owner)** `surprised` (much larger, near screen-filling), `skeptic` (larger eye larger),
+2. [~] **Reshape (BUILT 2026-11-03, on the owl since 2026-11-10 at the latest -- still to be judged live by the owner)** `surprised` (much larger, near screen-filling), `skeptic` (larger eye larger),
    `scared` (smaller eyes, pinched pupils), `unimpressed` (eyes lower), `angry` (angrier), `glee`
-   (wide-open round eyes with a hollow lower lid -- closed arches turned out to be `happy`'s shape -- so it reads as beaming), `furious` (very narrow slanted slits + a +-2 px tremble every 120 ms, `lib/Eyes`). Pending: flash, then judge live.
-3. [~] **BUILT 2026-11-03, NOT flashed yet -- new drawings:** comic "zZz" for `sleepy`; crosshair for SEARCHING (BOOT and NAVIGATING),
+   (wide-open round eyes with a hollow lower lid -- closed arches turned out to be `happy`'s shape -- so it reads as beaming), `furious` (very narrow slanted slits + a +-2 px tremble every 120 ms, `lib/Eyes`). Pending: judge live.
+3. [~] **BUILT 2026-11-03, on the owl since 2026-11-10 at the latest, to be judged live -- new drawings:** comic "zZz" for `sleepy`; crosshair for SEARCHING (BOOT and NAVIGATING),
    replacing the suspicious look there.
-4. [~] **BUILT 2026-11-03 (table in `src/motion.cpp`, `OwlPose`/`triggerPose` in `OwlChoreo`, native tests incl. a mutation check; flash pending) -- Body pose per mood** (ears, wings, head tilt) as a table next to the moods, replacing the four
+4. [~] **BUILT 2026-11-03 (table in `src/motion.cpp`, `OwlPose`/`triggerPose` in `OwlChoreo`, native tests incl. a mutation check; on the owl since 2026-11-10 at the latest, to be judged live) -- Body pose per mood** (ears, wings, head tilt) as a table next to the moods, replacing the four
    fixed gestures (`OwlChoreo`): sad_down ears down; focused ears up; unimpressed ears down; sleepy
    ears down; angry ears up + wings raised; scared ears down + wings open; skeptic one ear up (side of
    the larger eye), one down. Check the measured servo limits first (`servo_profiles.h`).
@@ -1154,7 +1168,7 @@ wrong; run the lot only after mechanical work.
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
 | detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
-| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 301 tests pass |
+| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 303 tests pass |
 | firmware/Orange Pi drift | `cd orangepi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS
@@ -2276,7 +2290,7 @@ the page loads and each button visibly drives the owl (blink/expression/head).
   `sad_down` for "nein". Orange Pi suite: 287 at the time; `tools/check_docs.py` clean.
   **Still open from this period:** the speech items under *Speech recognition* above; mechanics (ear/wing
   amplitudes, `HEAD_TRACK_FOV_DEG` 16.5 is estimated, not measured; `IMU_HEADING_OFFSET_DEG` mounting term
-  unmeasured); servo type documentation conflict (S18JST 1.8 g vs 3.7 g); a one-off `invalid_json` seen at
+  unmeasured — measured 2026-11-10, Step 3); servo type documentation conflict (S18JST 1.8 g vs 3.7 g); a one-off `invalid_json` seen at
   brain start; the mobile layout of the web UI is unchecked; `VIBRATION_SELF_MOTION_TAIL_MS` may need tuning
   if self-wakes reappear (note the timestamp when it happens).
 

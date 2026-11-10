@@ -22,6 +22,7 @@ static inline OwlImuConfig owlImuConfigFromHeader() {
     c.sampleIntervalMs = IMU_SAMPLE_INTERVAL_MS;
     c.filterAlpha = IMU_FILTER_ALPHA;
     c.magMinSpanUt = MAG_CAL_MIN_SPAN_UT;
+    c.magReplaceSpanUt = MAG_CAL_REPLACE_SPAN_UT;
     c.maxReadFails = IMU_MAX_READ_FAILS;
     c.failBackoffMs = IMU_FAIL_BACKOFF_MS;
     return c;

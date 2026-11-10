@@ -320,7 +320,7 @@ orangepi-brain/                    # Orange Pi Zero 3W (A733) brain (Python)
 │   └── 99-robot-owl-gpio.rules    # /dev/gpiochip* to group gpio (mute switch)
 ├── tools/
 │   └── gen_expressions.py         # GENERATES brain/expressions.py from the firmware's NAMES[]
-├── tests/                         # 301 tests; run on a plain Mac, no Orange Pi or audio stack needed
+├── tests/                         # 303 tests; run on a plain Mac, no Orange Pi or audio stack needed
 │   ├── run_tests.py               # unittest discovery
 │   ├── stubs.py                   # fakes third-party modules ONLY when not importable
 │   ├── test_protocol.py           # the ESP32<->Orange Pi wire contract (51 of them)
@@ -580,7 +580,7 @@ python main.py [config.yaml]   # Default config path
 |---|---|---|
 | **GC9D01 LCD Driver** | ✅ Complete | Custom SPI driver, PSRAM framebuffers, software chip-select, 16 MHz. Both panels verified working on one shared bus |
 | **Eye Renderer** | ✅ Complete | 23 expressions (21 selectable) from ONE parametric routine driven by the `SHAPES[]` table — retune a mood by editing numbers, never by adding a draw function. Auto-blink, gaze, eyelids. Two colours only, black on white (see `AGENTS.md` and `specs/004-eye-expressions.spec`) |
-| **LSM303AGR IMU** | ⚠️ Ported, unmeasured | Driver, software fusion and hard-iron calibration are in and validated on hardware (`\|a\|` = 9.77 m/s², both `WHO_AM_I` correct). **Not yet mounted, so the axis remap and the heading offset's mounting term are both unmeasured** — `imu.yaw` is not trustworthy until then (`specs/006` Open) |
+| **LSM303AGR IMU** | ⚠️ Mounted, heading unproven | Mounted in the assembled owl, axis remap corrected 2026-11-10 (roll/pitch and compass no longer mirrored). Heading offset set from hand-aligned phone bearings, but a control bearing was off by ~30° — accuracy unproven (`specs/006` Open). Calibrate by **tumbling**, not by a level turn |
 | **PA1010D GPS** | ✅ Complete | Native I2C (Adafruit_GPS), RMC+GGA NMEA parsing |
 | **SW420 Vibration** | ✅ Complete | **Edge-counting ISR**, evaluated once per main loop (~60 Hz). Explicitly *not* a level read and *not* debounced: the sensor emits ~1 kHz pulse bursts, and reading it as a stable level is what pinned the owl in DETECTING forever. `vibration.pulses` reports raw edges since boot so a dead sensor is distinguishable from a quiet one. See `specs/007-vibration-and-ota.spec` |
 | **PCA9685 Servo Ctrl** | 🔒 Safety-locked | Firmware 1.3.0 blocks all output writes; plug mapping recorded; safe travel/start positions still require verification (SPEC-016) |
@@ -593,7 +593,7 @@ python main.py [config.yaml]   # Default config path
 | **Web UI (Orange Pi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and magnetometer calibration state, and a map place-picker for navigation. Page lives in `brain/templates/index.html`; the `/api/telemetry` payload is derived from the parsed telemetry dataclass, so it cannot fall behind the firmware (the SoftAP password is the one field deliberately withheld) |
 | **I2S Audio (Orange Pi)** | ✅ Hardware verified | `owl` card registers on boot; audible WAV and real mic verified. Opt-in `audio.keep_playback_clock` prevents capture becoming silent after playback stops; continuity check passes. See `specs/015-orangepi-audio.spec` for measurements and permissions. |
 | **Speech (Orange Pi)** | ✅ Accepted live 2026-11-04 (on the shoulder) | German. The owl is called **Hubert** and listens only after its name. Mic → Vosk streaming ASR (~0.2 s after speech, offline) → name gate → navigation triggers → sentence-to-mood classifier (fine-tuned MiniLM, int8 ONNX, ~10 ms) → eyes + body pose + sound. whisper.cpp remains as `speech.engine: whisper`; real playback/tail blocks microphone processing and invalidates stale audio/ASR results. Ambient/TV rejection still needs acceptance. Disabled by default. See `specs/014-speech.spec` |
-| **Orange Pi test suite** | ✅ 301 tests | Runs on a plain dev machine with no Orange Pi, mic, PortAudio, Vosk, whisper.cpp, onnxruntime, Flask or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔Orange Pi wire contract (51, `test_protocol.py`) and firmware-vs-Orange Pi drift guards (11, `test_expressions.py`) |
+| **Orange Pi test suite** | ✅ 303 tests | Runs on a plain dev machine with no Orange Pi, mic, PortAudio, Vosk, whisper.cpp, onnxruntime, Flask or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔Orange Pi wire contract (51, `test_protocol.py`) and firmware-vs-Orange Pi drift guards (11, `test_expressions.py`) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
 
 ---

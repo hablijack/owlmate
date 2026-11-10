@@ -66,7 +66,7 @@ static void i2cBusRecover() {
 bool Sensors::begin() {
     _imuReady = false;
     _gpsReady = false;
-    _calSaved = false;
+    _calSavedAxes = 0;
 
     // Initialize I2C bus (LSM303AGR + PA1010D GPS + PCA9685 share D0/D1)
     Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
@@ -183,14 +183,28 @@ void Sensors::updateImu() {
     //    und der Zweig dann bei jedem Boot feuerte. Hier gibt es dieses Problem
     //    nicht: getHardIron() liefert nur etwas, wenn die Spanne in DIESEM Lauf
     //    wirklich beobachtet wurde.
-    if (_calSaved) return;
+    //
+    // GEAENDERT 2026-11-10: nicht mehr nur EINMAL, sondern erneut, sobald MEHR
+    // Achsen erfasst sind (2, dann 3). Eine waagerechte Drehung bestimmt nur die
+    // beiden waagerechten Offsets; fuer z liefert sie den Mittelpunkt aus
+    // Stoerfeld PLUS senkrechtem Erdfeld (~45 uT hier). Aufrecht faellt das nicht
+    // auf, gekippt schon: gemessen 40 Grad Kurssprung bei 48 Grad roll. Mit dem
+    // alten "einmal pro Boot" landete die bessere 3-Achsen-Kalibrierung nach
+    // einem Kippen nie im Flash.
+    //
+    // Und WAS als besser gilt, entscheidet getHardIron() nach MagCalRule.h: mit
+    // restaurierten Offsets erst eine Drehung mit allen drei Achsen ueber
+    // MAG_CAL_REPLACE_SPAN_UT. Sonst ueberschrieb schon das Umstellen der Eule
+    // die gute Kalibrierung im Flash (gemessen 2026-11-10, 39 Grad daneben).
     float x, y, z;
     if (!owlImu.getHardIron(x, y, z)) return;
+    const uint8_t axes = owlImu.read().magAxes;
+    if (axes <= _calSavedAxes) return;   // Wachposten: nur bei echtem Fortschritt ins Flash
 
     float off[3] = {x, y, z};
     if (imuPrefs.begin(IMU_NVS_NS, /*readOnly=*/false)) {
         if (imuPrefs.putBytes(IMU_NVS_KEY, off, sizeof(off)) == sizeof(off)) {
-            _calSaved = true;
+            _calSavedAxes = axes;
             Serial.print(F("IMU: Kalibrierung gespeichert: "));
             Serial.print(x, 1); Serial.print(' ');
             Serial.print(y, 1); Serial.print(' ');

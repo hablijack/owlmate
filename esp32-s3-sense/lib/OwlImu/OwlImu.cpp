@@ -1,4 +1,5 @@
 #include "OwlImu.h"
+#include "MagCalRule.h"
 
 #include <Adafruit_LIS2MDL.h>
 #include <Adafruit_LSM303_Accel.h>
@@ -199,8 +200,9 @@ bool OwlImu::update() {
 }
 
 // Die gerade gueltigen Offsets. Eine frische Drehung in DIESEM Lauf schlaegt
-// die aus dem Flash: wer neu kalibriert, will das Ergebnis auch sofort sehen,
-// und alte Offsets stillschweigend weiterzubenutzen ist der teurere Fehler.
+// die aus dem Flash - aber seit 2026-11-10 nur noch eine VOLLSTAENDIGE
+// (MagCalRule.h). Vorher reichte jedes Herumtragen, um eine gute Kalibrierung
+// durch eine halbe zu ersetzen.
 uint8_t OwlImu::liveAxes(float off[3]) const {
     uint8_t n = 0;
     for (int i = 0; i < 3; i++) {
@@ -211,13 +213,21 @@ uint8_t OwlImu::liveAxes(float off[3]) const {
     return n;
 }
 
+bool OwlImu::liveWins() const {
+    if (!_magSeen) return false;
+    float span[3];
+    for (int i = 0; i < 3; i++) span[i] = _magMax[i] - _magMin[i];
+    return magLiveOffsetsWin(span, _haveOffsets, _cfg.magMinSpanUt, _cfg.magReplaceSpanUt);
+}
+
 void OwlImu::fuse() {
     float liveOff[3];
     const uint8_t axes = _magSeen ? liveAxes(liveOff) : 0;
 
     const float* off = _hard;
-    if (axes >= 2) off = liveOff;
-    const bool haveOffsets = (axes >= 2) || _haveOffsets;
+    const bool live = liveWins();
+    if (live) off = liveOff;
+    const bool haveOffsets = live || _haveOffsets;
 
     // Lotrichtung. Ein ruhender Beschleunigungssensor zeigt nach OBEN.
     const float amag = vnorm(_fa);
@@ -288,9 +298,9 @@ void OwlImu::setHardIron(float x, float y, float z) {
 }
 
 bool OwlImu::getHardIron(float& x, float& y, float& z) const {
-    if (!_magSeen) return false;
+    if (!liveWins()) return false;
     float off[3];
-    if (liveAxes(off) < 2) return false;
+    liveAxes(off);
     x = off[0]; y = off[1]; z = off[2];
     return true;
 }

@@ -177,7 +177,7 @@ taking the IMU calibration with it. Flash the pieces separately:
 ### Orange Pi brain (`orangepi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (301 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (303 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
@@ -429,39 +429,46 @@ board moves — a level owl should read roll and pitch near 0. Like the BNO055's
 this can only express the 24 axis-aligned orientations, so a board fitted at an odd angle needs a
 real rotation matrix in `lib/OwlImu` instead.
 
-**`IMU_REMAP_*` was measured on hardware 2026-09-01** with the board held in its mounted position:
-`X = −2, Y = −1, Z = −3`, i.e. `owl X = −sensor y`, `owl Y = −sensor x`, `owl Z = −sensor z`. Level
-then reads `roll −1.4° / pitch +5.3°`, and a beak-up tilt shows up as pitch, not roll.
+**`IMU_REMAP_*` is `X = −2, Y = +1, Z = −3`**, i.e. `owl X = −sensor y`, `owl Y = +sensor x`,
+`owl Z = −sensor z`. X and Z were measured 2026-09-01 (board hand-held) and re-confirmed 2026-11-10 on
+the assembled owl; **Y was corrected from −1 to +1 on 2026-11-10.** Level reads roll/pitch within a
+few degrees of 0, beak up is `+pitch`, right side down is `+roll`.
 
-**Two poses are required to derive it, and "upside down like the BNO055" is NOT enough — that was
-measured false.** Gravity pins which axis is vertical and its sign, and nothing more; all four
-in-plane rotations give roll ≈ pitch ≈ 0 on a level owl, so the level pose cannot separate them. The
-BNO055 sat bottom-PCB-up as placement P7 (`X→−X, Y→Y, Z→−Z`); this board is *also* upside down and
-**agrees on Z**, but its in-plane rotation differs by 90° and **swaps X with Y**. Copying P7 across
-would have passed the obvious level check with a perfect 0/0 while putting every tilt on the wrong
-axis. So: level pose for the vertical axis, then a beak-up tilt — the axis that barely moves is
-left–right, the one that gains most is fore-aft — and right-handedness supplies the third.
+**Do NOT derive the third axis from right-handedness — that was measured false.** The 2026-09-01
+derivation did exactly that (X and Z from two poses, Y "forced" by handedness) and shipped `Y = −1`.
+On the assembled owl that gave the wrong roll sign **and a mirrored compass**: four true bearings
+70/161/251/340 read 303/214/121/31 — every pair summing to the same ~372°, the signature of a
+mirror, not an offset. The axes as the driver delivers them are evidently **not** a right-handed
+triad, so the determinant rule is the wrong tool. Measure all three axes: level pose for Z, beak-up
+tilt for X, a clearly-instructed sideways tilt for Y — **and confirm with at least two compass
+bearings ~90° apart**, because a mirrored heading passes any single-bearing check.
 
-**Never flip a single `IMU_REMAP_*` sign to "fix" a reading.** The three constants must stay a proper
-rotation (determinant +1). The compass is computed with a cross product, so an improper (mirrored)
-frame returns a *mirrored heading* that still reads like a plausible bearing. If a sign looks wrong,
-re-derive the whole triad from two poses. There is currently one unresolved observation against the
-**roll sign** on exactly this point — see `specs/006` Open; it affects only the displayed `roll` (which
-nothing consumes), not `imu.yaw`.
+**Two poses are not enough, and "upside down like the BNO055" is not either.** Gravity pins which
+axis is vertical and its sign, and nothing more; all four in-plane rotations give roll ≈ pitch ≈ 0 on a
+level owl. The BNO055 sat bottom-PCB-up as placement P7 (`X→−X, Y→Y, Z→−Z`); this board is *also*
+upside down and **agrees on Z**, but its in-plane rotation differs by 90° and **swaps X with Y**.
+Copying P7 across would have passed the obvious level check with a perfect 0/0 while putting every
+tilt on the wrong axis.
 
-The remap was taken with the board **hand-held** in position, which is fine for a discrete choice
-among 24 orientations but should be repeated once the board is actually fitted.
+**`IMU_HEADING_OFFSET_DEG` is 356.6 — declination (+4.594°) plus a mounting term of about −8°,
+derived 2026-11-10 from four hand-aligned iPhone bearings, and NOT yet proven:** a later control
+bearing was off by ~30° (`specs/006` Open). Do not read the decimal as precision, and do not trust a
+phone compass held beside the owl as the reference — the servos carry magnets. The declination is
+required, not cosmetic — the magnetometer measures a *magnetic* heading while `geo.bearing_deg()`
+computes a *true geographic* bearing, so both sides must share one north reference
+(`true = magnetic + declination`). The BNO055's 75.4 belonged to a different chip in a different
+position and does not carry over. Re-check the declination if the owl changes region, and
+re-measure the whole constant if the board moves.
 
-**`IMU_HEADING_OFFSET_DEG` is 4.594 — the declination term ONLY.** The BNO055's 75.4 was 70.8° of
-mounting rotation plus **+4.594° of magnetic declination**, and the mounting term was measured against
-*that* chip's remapped X axis on a different breakout in a different position, so **it does not carry
-over**. Reusing 75.4 would give a heading wrong by ~70° that still reads like a plausible bearing.
-The declination does carry over and is required, not cosmetic — the magnetometer measures a *magnetic*
-heading while `geo.bearing_deg()` computes a *true geographic* bearing, so both sides must share one
-north reference (`true = magnetic + declination`). Until the mounting term is re-measured (aim the
-beak at a known true bearing, see `specs/006` Acceptance 5), **`imu.yaw` is off by the mounting
-rotation** and navigation will aim wrong even though nothing looks broken. Re-check the declination if
-the owl changes region.
+**A level turn does not calibrate the vertical axis, and a heading measured after only a level turn
+is wrong when the owl tilts.** A yaw rotation sweeps only the two horizontal magnetometer axes, so
+the z offset it leaves is the midpoint of interference *plus* the ~45 µT vertical earth field:
+measured 2026-11-10, a 40° heading jump at 48° roll. The firmware therefore re-saves the offsets
+whenever more axes are covered (2, then 3), not just once per boot. For a usable compass on a
+shoulder, calibrate by **tumbling** the owl in free air, away from metal, the laptop **and the
+phone in your hand**. With offsets already in flash, a run only replaces them once all three axes
+have reached `MAG_CAL_REPLACE_SPAN_UT` (`lib/OwlImu/MagCalRule.h`) — before that rule, merely
+carrying the owl to a new bearing overwrote a good calibration with a half-done one.
 
 ### The vibration sensor is a pulse source, not a level
 

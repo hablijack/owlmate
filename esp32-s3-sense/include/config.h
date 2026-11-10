@@ -365,40 +365,40 @@
 //   sideways:   roll swung to -62 deg while pitch stayed ~1  -- axes cleanly
 //               separated
 //
-// ONE LOOSE END, AND IT IS A NAMING ONE, NOT A FRAME ONE. In that third pose the
-// owl was reported as tipping onto its RIGHT side, which by the convention above
-// should give POSITIVE roll; the measurement was negative. Those three
-// observations cannot all be true: taken together they describe a LEFT-handed
-// triad, and no rigid body has one. owl Z and owl X are each pinned by an
-// unambiguous pose, so right-handedness FORCES owl Y = U x F = -sensor x, which
-// is what stands above. The sideways observation is the odd one out - most likely
-// the board rotated in the hand holding it (undetectable from a single vector),
-// or "its right side" was read as the observer's right.
+// IMU_REMAP_Y IS +1, AND THE SENSOR'S RAW FRAME IS LEFT-HANDED - measured
+// 2026-11-10 on the fully assembled owl, which overturned what stood here before.
+// Until then Y was -1, "forced by right-handedness", and a sideways pose that
+// came out with the wrong roll sign was written off as a naming slip.
+// Re-tested with an unambiguous instruction ("stand behind the owl, looking
+// where the beak looks, tip it toward your RIGHT hand"): roll -50 deg, twice
+// the wrong sign. And the compass, which the old note claimed was "unaffected
+// either way", was MIRRORED: four iPhone bearings (true north) against the owl's
+// yaw,
+//      true   70  161  251  340
+//      yaw  303.3 213.5 120.6 30.8   (true + yaw = 373 / 375 / 372 / 371)
+// - the owl's heading fell by 90 deg each time the beak turned 90 deg
+// clockwise. A constant SUM is the signature of a mirror, not of a bad
+// calibration. Pitch (beak up -> +49.5) and the level pose (Z up) were right, so
+// owl Y alone was reversed, for accel AND magnetometer (same remap, same chip).
 //
-// DELIBERATELY NOT "FIXED" BY FLIPPING IMU_REMAP_Y: that would make the map
-// improper (det -1). The compass is a cross product, so a mirrored frame would
-// return a MIRRORED HEADING that still looks like a plausible bearing - the exact
-// failure class this whole subsystem is built to avoid. The heading depends only
-// on owl X, owl Z and handedness, all three established, so yaw is unaffected
-// either way; only the sign of the reported roll is in question, and nothing
-// consumes roll. Re-test per specs/006 Acceptance 2 when the board is fixed in
-// place.
+// So the assumption under the old rule "never flip one sign, it makes the map
+// improper" - that the axes the drivers deliver are right-handed - is false for
+// this board/driver combination. The goal of that rule stands (no mirrored
+// heading); the measurement is what serves it, not the determinant. If this
+// is ever re-derived: pin X with a beak-up tilt, Z with the level pose, and Y
+// with a clearly-instructed sideways tilt AND a two-bearing compass check -
+// do NOT derive Y from handedness.
 //
-// Re-measure with `-e imuaxis` if the sensor is ever remounted; a level owl must
-// read roll and pitch near 0. These three constants can only express the 24
-// axis-aligned orientations -- a board glued in at an odd angle needs a real
-// rotation matrix instead.
+// Re-measure if the sensor is ever remounted; a level owl must read roll and
+// pitch near 0. These three constants can only express the 24 axis-aligned
+// orientations (here: 48, mirror included) -- a board glued in at an odd angle
+// needs a real rotation matrix instead.
 #define IMU_REMAP_X -2
-#define IMU_REMAP_Y -1
+#define IMU_REMAP_Y 1
 #define IMU_REMAP_Z -3
 
 // Added to the computed compass heading so that yaw is the direction the BEAK
-// points, which is what navigation treats it as.
-//
-// THE MOUNTING TERM IS NOT YET MEASURED FOR THIS SENSOR. The BNO055's value was
-// 75.4 = 70.8 deg of mounting rotation + 4.594 deg of declination. The 70.8 was
-// measured against the BNO055's own remapped X axis on a different breakout in a
-// different position, so it does NOT carry over. Only the declination does:
+// points, which is what navigation treats it as. Two terms:
 //
 //  * Magnetic declination, +4.594 deg EAST at this location (WMM, via the
 //    British Geological Survey service). REQUIRED, not cosmetic: the compass
@@ -407,13 +407,30 @@
 //    (true = magnetic + declination). Drifts ~0.1 deg/year and is location
 //    dependent, so re-check it if the owl changes region:
 //    https://geomag.bgs.ac.uk/data_service/models_compass/wmm_calc.html
+//  * Mounting rotation, about -8 deg - MEASURED 2026-11-10 on the assembled
+//    owl, asleep (head centred). Two rounds:
+//      1. after a LEVEL turn only (z offset undetermined): four bearings gave
+//         a mirrored heading, which is what exposed the IMU_REMAP_Y sign above.
+//         The 7.96 derived from that run is superseded.
+//      2. after a full 3-axis calibration in free air, with Y = +1: true
+//         160/250/340/70 read 165.1/261.1/356.7/82.5, i.e. a constant error of
+//         +11.4 deg, residuals -6.3/-0.2/+5.3/+1.1. So 7.96 - 11.4 = -3.44,
+//         stored as 356.6 (= 4.594 declination + about -8.0 mounting).
+//    ACCURACY: UNPROVEN. A control bearing the same day was ~30 deg off
+//    (SPEC-006 Open); the +-5 below is what the four points suggested. The owl was aligned BY EYE against an
+//    iPhone compass (TRUE north) held next to it; the owner rates the
+//    alignment itself as good to "a few degrees". The four bearings are spread
+//    around the circle so that such errors average out of the constant term;
+//    the residuals are of exactly that size. Do not read the decimal as
+//    precision - it is the mean of four hand-aligned readings.
 //
-// TO MEASURE THE MOUNTING TERM: stand the owl level, complete a magnetometer
-// calibration turn (see tools/kalibrieren.py) so the heading is valid at all,
-// aim the beak at a known TRUE bearing, and set this to
-// (true bearing - reported yaw + 4.594) mod 360. `pio run -e imuaxis` prints
-// the reported yaw live.
-#define IMU_HEADING_OFFSET_DEG 4.594f
+// The BNO055's 75.4 (70.8 mounting + 4.594) belonged to a different chip in a
+// different position and does NOT carry over.
+//
+// TO RE-MEASURE: owl level and asleep, calibration turn, aim the beak at known
+// TRUE bearings (at least two, 90 deg apart - one cannot detect a mirror), and
+// set this to (true bearing - reported yaw + current value) mod 360.
+#define IMU_HEADING_OFFSET_DEG 356.6f
 
 // --- Sampling and fusion tuning --------------------------------------------
 // How often OwlImu::update() actually touches the bus. It is called once per
@@ -439,6 +456,14 @@
 // 3 axes and only tumbling the owl scores 3, and why two is the bar for a
 // usable heading.
 #define MAG_CAL_MIN_SPAN_UT 25.0f
+
+// Span ALL THREE axes must reach before offsets from THIS run replace the ones
+// restored from flash. Without it, carrying the owl a quarter turn and lifting
+// it (measured 2026-11-10) put 3 axes over 25 uT, a half-done min/max replaced
+// the good calibration, and the heading was 39 deg off. A full tumble can reach
+// ~98 uT per axis (2 x 49 uT earth field); a level turn gives the horizontal
+// axes ~40 uT and the vertical one almost nothing. See lib/OwlImu/MagCalRule.h.
+#define MAG_CAL_REPLACE_SPAN_UT 60.0f
 
 // Consecutive implausible reads before the IMU is declared dead, and how long
 // to wait before probing WHO_AM_I again.

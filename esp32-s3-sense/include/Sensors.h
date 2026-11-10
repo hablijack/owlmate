@@ -102,7 +102,7 @@ public:
 
 private:
     bool _imuReady;
-    bool _calSaved;      // hard-iron offsets have been written to NVS this run
+    uint8_t _calSavedAxes; // so viele Magnetometerachsen hatte die zuletzt ins NVS geschriebene Kalibrierung (dieser Lauf)
     bool _gpsReady;
 
     // Vibration debounce state

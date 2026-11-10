@@ -124,13 +124,30 @@ I2C access costs the full `I2C_TIMEOUT_MS` (250 ms), so polling a dead sensor at
 5–500 µT), because Adafruit's BusIO returns a zero-filled buffer on NACK and
 `getEvent()` reports success anyway.
 
-**`IMU_HEADING_OFFSET_DEG` is 4.594 — declination only.** The BNO055's 75.4 was
-70.8° of mounting rotation plus 4.594° of declination; the mounting term was
-measured against *that* chip's remapped X axis on a different breakout in a
-different position and does **not** carry over. Declination does: it is required,
+**`IMU_HEADING_OFFSET_DEG` is 356.6 — declination plus mounting.** It is
++4.594° of magnetic declination plus a mounting rotation of about −8°, measured
+2026-11-10 on the assembled owl (see Verified facts) — but a later control
+bearing disagreed by ~30°, so its accuracy is unproven (Open). The declination is required,
 not optional, because the compass computes a *magnetic* heading while
 `geo.bearing_deg()` computes a *true geographic* bearing and both sides must share
-one north reference (`true = magnetic + declination`).
+one north reference (`true = magnetic + declination`). The BNO055's 75.4 was
+measured against *that* chip's remapped X axis in a different position and does
+not carry over.
+
+**Offsets are re-saved when the turn covers more axes, not once per boot.**
+Changed 2026-11-10. A level turn determines only the two horizontal offsets; the
+z value it leaves is the midpoint of interference plus the vertical earth field
+(~45 µT here), which is invisible while the owl stands upright and costs a 40°
+heading jump at 48° roll (measured). With "save once" the better 3-axis offsets
+of a later tumble in the same run never reached flash. `Sensors` now remembers how
+many axes the last saved set had and writes again only when that number grows,
+so flash still sees at most three writes per boot. **And with offsets restored
+from flash, a run replaces them only once all three axes have reached
+`MAG_CAL_REPLACE_SPAN_UT`** (`lib/OwlImu/MagCalRule.h`, natively tested): before
+that, carrying the owl a quarter turn and lifting it replaced a good calibration
+with a half-done one and saved it — measured, +39°. *Known gap:* the save happens
+the moment the third axis crosses its span threshold, so the stored z can be less
+complete than the live offsets that keep improving in RAM.
 
 ## Verified facts
 
@@ -161,7 +178,8 @@ Measured 2026-09-01 on hardware, `pio run -e i2ctest` and `-e imuaxis`:
 
   Right-handedness then forces `owl Y = U × F = −sensor x`. So
   **`IMU_REMAP_X = −2, IMU_REMAP_Y = −1, IMU_REMAP_Z = −3`** (determinant +1, a
-  proper rotation).
+  proper rotation). **Superseded 2026-11-10: Y is `+sensor x`** — the handedness
+  step was wrong (see Falsified).
 * **Verified after applying it**: level → `roll −1.4°, pitch +5.3°` (**R-006.2**);
   beak-up → `pitch +35°` with roll steady at −6.5°, i.e. pitch does not leak into
   roll; a sideways tip → roll swung to −62° with pitch steady at ~1°, i.e. the two
@@ -183,6 +201,22 @@ Measured 2026-09-01 on hardware, `pio run -e i2ctest` and `-e imuaxis`:
   `(−4.77, +5.91, −6.15)` — a compound angle. That was the board's own resting
   position, not the mount, and is only recorded here to explain why the remap
   could not be derived before it was held in place.
+
+* **Assembled owl, 2026-11-10** (asleep, head centred; owl aligned by eye
+  against an iPhone compass on TRUE north, which the owner rates as good to a few
+  degrees). With the shipped `Y = −1`: right side down read roll **−50°/−68°**,
+  and four bearings 70/161/251/340 read 303.3/213.5/120.6/30.8 — sums constant at
+  ~372.5°, i.e. a mirrored heading. After `IMU_REMAP_Y = +1`: right side down
+  reads **+44..+50°**, and after a 3-axis calibration in free air the bearings
+  160/250/340/70 read 165.1/261.1/356.7/82.5 — a constant +11.4° (absorbed into
+  `IMU_HEADING_OFFSET_DEG`) with residuals −6.3/−0.2/+5.3/+1.1, the size of the
+  hand-alignment error.
+* **Control bearings, 2026-11-10, same day.** With 356.6 and the offsets
+  restored from flash: 163° → **163.6** ✓. Moving the owl to 244° (under the old
+  replacement rule) produced **283** — a partial run had replaced the offsets.
+  After a thorough tumble under the new rule (all three axes ≥ 60 µT, saved):
+  206° → **163**. Restoring the earlier NVS from backup: 206° → **177**. Two
+  calibrations disagree with that one bearing by 29° and 43°; not resolved.
 
 ## Falsified
 
@@ -224,6 +258,20 @@ and two of them shaped the replacement design directly.
   roll ≈ pitch ≈ 0 on a level owl, so the level pose cannot separate them — the
   error only appears once the owl tilts. That is why the procedure now requires a
   second, tilted pose.
+* **"Two poses plus right-handedness fix the third axis."** Measured false
+  2026-11-10, and the error was the one the rule was meant to prevent. X and Z
+  were pinned by poses, Y was *derived* from handedness as `−sensor x`, and the
+  assembled owl then read the wrong roll sign **and a mirrored compass** (four
+  bearings whose true+reported sums were all ~372.5°). `Y = +sensor x` fixes
+  both. The driver's axes are evidently not a right-handed triad, so a
+  determinant check cannot validate the map. The 2026-09-01 "Open" entry that
+  blamed the sideways observation on a rotating hand was wrong — the sideways
+  pose was right and the handedness argument was not. *Measure all three axes,
+  and check the compass at two bearings ~90° apart: a single bearing cannot
+  tell a mirror from an offset.*
+* **"A heading that is right on a level owl is right."** A level calibration
+  turn leaves z uncalibrated; 48° of roll then moved the heading by 40°. Tumble
+  the owl for the calibration.
 * **"`I2C_TIMEOUT_MS` = 250 exists for the BNO055, so it can go."** The
   *measurement* behind it was made on the BNO055, but the value protects against
   any mute slave on the bus — and the PA1010D GPS is regularly one. What changed
@@ -235,50 +283,43 @@ and two of them shaped the replacement design directly.
 2. **Two** poses, not one. Owl standing level: one raw axis reads ~±9.81 and the
    other two ~0, which gives the vertical axis and its sign. Then tip the owl
    beak-up ~30°: the axis that barely moves is the owl's left–right axis, and the
-   one that gains the most is fore-aft. Right-handedness supplies the third.
+   one that gains the most is fore-aft. Then tip it onto its right side: that is
+   `+roll` and pins Y. **Do not take Y from right-handedness** (Falsified).
    Re-flash; roll and pitch must read ~0 when level, and a beak-up tilt must show
-   up as **pitch**, not roll (**R-006.2**). *Done 2026-09-01 with the board held
-   in place; redo it once the board is actually fixed in the head.*
+   up as **pitch**, not roll (**R-006.2**). *Done 2026-11-10 on the assembled
+   owl, Y corrected.*
 3. Run `tools/kalibrieren.py` and turn the owl slowly through a full circle —
    `cal.axes` reaches 2, and the firmware logs the offsets it saved (**R-006.4**).
 4. Reboot: the log shows offsets restored, `cal.restored: true`, and
    `calibrated: true` in essentially every frame without any turning
    (**R-006.3**).
-5. Aim the beak at a known **true** bearing and set `IMU_HEADING_OFFSET_DEG` to
-   `(true bearing − reported yaw + 4.594) mod 360`; re-flash; `imu.yaw` then
-   matches within ~10° (**R-006.1**).
+5. Aim the beak at **at least two** known **true** bearings ~90° apart (four
+   around the circle is better) and set `IMU_HEADING_OFFSET_DEG` to
+   `(current value + mean(true bearing − reported yaw)) mod 360`; re-flash;
+   `imu.yaw` then matches within ~10° (**R-006.1**). If `true + reported` is
+   constant instead of `true − reported`, the frame is mirrored — fix the remap
+   first. *Attempted 2026-11-10; one control bearing off by ~30° (Open).*
 6. Unplug the magnetometer's SDA while running: telemetry drops the `imu` object
    and `loop_hz` does **not** collapse (the backoff works).
 
 ## Open
 
-* **The sign convention for `roll` has one observation against it, unresolved.**
-  In the sideways pose the owl was reported as tipping onto its **right**, which
-  by this spec's convention (`+roll` = lying on the right side) should give
-  *positive* roll; the measurement was **−62°**. All three poses cannot be
-  simultaneously true: together they describe a **left-handed** triad, and no
-  rigid body has one. owl Z and owl X are each pinned by an unambiguous pose, so
-  right-handedness forces `owl Y = −sensor x`, and that is what ships. The
-  sideways observation is the odd one out — most plausibly the board rotated
-  inside the hand holding it (undetectable from a single gravity vector), or "its
-  right side" was read as the observer's right.
-  **This was deliberately not "fixed" by flipping `IMU_REMAP_Y`**: that makes the
-  map improper (det −1), and since the compass is a cross product a mirrored frame
-  returns a *mirrored heading* that still looks like a plausible bearing. Impact
-  is limited to the sign of the displayed `roll` — nothing consumes it, and
-  `imu.yaw` depends only on owl X, owl Z and handedness, all three established.
-  Settle it with an unambiguous side reference once the board is fixed in place.
-* **The remap was measured with the board HAND-HELD in position**, not mounted.
-  Good enough for a discrete choice among 24 orientations (±10–15° of slop is
-  irrelevant there), but repeat Acceptance 2 after the real fitting. If the board
-  ends up genuinely skewed rather than axis-aligned, three constants cannot
-  express it and a rotation matrix is needed — a `lib/OwlImu` change, not a config
-  change.
-* **The mounting term of `IMU_HEADING_OFFSET_DEG` has never been measured for
-  this sensor** — the constant currently carries declination only, so `imu.yaw`
-  is off by the mounting rotation until Acceptance 5 is done.
-* **No calibration has been performed on this sensor yet**, so `calibrated` is
-  false and navigation will correctly refuse to aim.
+* **Heading accuracy is unproven** (Verified facts, control bearings). Suspects:
+  min/max offsets off by ~10 µT (one outlier spoils a run; the horizontal field
+  is only ~20 µT here), or the reference itself — a phone compass held beside an
+  owl full of servo magnets. Next attempt: a map-derived landmark bearing instead
+  of the phone, and a calibration quality figure from the firmware (BACKLOG
+  Step 3, 4d).
+* **The tilted heading after a full 3-axis calibration is not yet verified.**
+  After an earlier, poorer tumble the heading still moved +14° at 60° roll and
+  −21° at 67° pitch. Repeat with the 2026-11-10 free-air calibration; if it stays
+  that large, the stored z offset is the suspect (saved at the moment the third
+  axis crossed its threshold — see Decisions).
+* **Min/max hard-iron calibration has no defence against a disturbance during
+  the turn.** One pass near a laptop or a steel table skews an extreme for the
+  rest of the run. The first tilt calibration on 2026-11-10 was visibly spoiled
+  that way (constant error 26.5°, sinusoidal component 18°).
+* **The mute-sensor backoff (Acceptance 6) has never been exercised.**
 * Head-opening work must come **before** mounting and calibrating this sensor —
   it lives in the same head as the camera (see `BACKLOG.md`).
 * Declination drifts ~0.1°/year and is location dependent. Re-check if the owl
