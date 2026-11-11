@@ -102,7 +102,9 @@ public:
 
 private:
     bool _imuReady;
-    uint8_t _calSavedAxes; // so viele Magnetometerachsen hatte die zuletzt ins NVS geschriebene Kalibrierung (dieser Lauf)
+    bool _calSaved;          // in diesem Lauf schon einmal gespeichert
+    float _calSavedSpan[3];  // Spannen zum Zeitpunkt des letzten Speicherns (MagCalRule.h)
+    uint32_t _calSavedAt;    // millis() des letzten Speicherns
     bool _gpsReady;
 
     // Vibration debounce state

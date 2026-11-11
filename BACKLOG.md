@@ -513,7 +513,15 @@ faults:
   counter is the trustworthy signal, and it read a correct `0` at rest in the
   same session.
 
-### Step 3 — IMU replaced with an LSM303AGR: mount it, then calibrate  `[~]` MOUNTED, REMAP FIXED 2026-11-10; HEADING ACCURACY UNPROVEN
+### Step 3 — IMU replaced with an LSM303AGR: mount it, then calibrate  `[x]` CLOSED 2026-11-11 — heading ±15–25°, accepted
+
+**Closed by owner decision on 2026-11-11: "Wir machen hier nichts weiter."** The
+owl is calibrated, the calibration survives reboots, and the heading is
+accurate to about ±15–25° (RMS 14°, worst 25° over eight bearings). That is
+accepted as the result. Items 4b, 4d, 4e and 5 below are **not pursued**; they
+stay listed only so the reasoning is not lost. Do not reopen this step or ask
+the owner for another calibration round without a new, concrete reason.
+
 
 **The BNO055 is out and an Adafruit LSM303AGR is in.** The old blocker is gone:
 that chip ACKed its address and then held SCL low indefinitely (measured over
@@ -553,42 +561,38 @@ boot.
    A level turn alone leaves z uncalibrated (40° heading jump at 48° roll); the
    firmware now re-saves when more axes are covered. **Re-do it by tumbling**,
    away from the laptop and metal, whenever the heading looks off.
-4. **`IMU_HEADING_OFFSET_DEG` — set 2026-11-10 to 356.6, accuracy NOT proven.**
-   Derived from four hand-aligned iPhone bearings (constant +11.4° removed,
-   residuals ±6°). The control afterwards: 163° read 163.6 ✓, but 206° read
-   **177** with the same restored offsets and **163** after a fresh full tumble
-   (−29° / −43°). Either the min/max offsets are off by ~10 µT (the horizontal
-   field here is only ~20 µT, so that is ~30° in some directions and ~0 in
-   others — fits "163 right, 206 wrong"), or the iPhone held next to the owl is
-   itself deflected by the servo magnets. **Next time: do not use a phone
-   compass beside the owl.** Aim the beak at a landmark whose true bearing is
-   computed from a map, and take 4+ bearings in one sitting with ONE calibration.
-   The owl now runs on the NVS restored from `xiao-before-heading-20261110.bin`
-   (the calibration that read 163.6 at 163°); the bad one is kept as
-   `/var/backups/robot-owl/nvs-bad-20261110.bin`. The owner has had enough of
-   calibrating for one day — it is slow, tiring and error-prone by hand.
-4b. **Tilted heading after the good calibration**: repeat the 60° roll / 67° pitch
+4. **`IMU_HEADING_OFFSET_DEG` = 356.6 — measured, accuracy about ±20°.**
+   2026-11-11, on battery, with a table-edge reference (iPhone read the edge with
+   the owl away, owl turned in 90° steps by eye): two calibrations gave constants
+   of +11° and −11° and a 10° once-per-turn error each — table in `specs/006`
+   Verified facts. The offset averages right and was left alone; the spread
+   comes from the min/max calibration, not from the reference. Good enough for
+   a head that points "roughly that way"; better needs 4d, not more tumbling.
+   2026-11-10's ±30–40° misses were (a) a partial run replacing the offsets (4c)
+   and (b) only a mid-tumble state ever reaching flash (4f).
+4b. *Not pursued (step closed).* **Tilted heading after the good calibration**: repeat the 60° roll / 67° pitch
    check (it was +14° / −21° after a poorer calibration). Matters on the shoulder.
 4c. **DONE 2026-11-10: a partial run no longer replaces stored offsets.** Carrying
    the owl from 163° to 244° put 3 axes over 25 µT, the half-done min/max replaced
    the good calibration and was saved (+39°). Now restored offsets are replaced
    only when all three axes reach `MAG_CAL_REPLACE_SPAN_UT` (60 µT) —
    `lib/OwlImu/MagCalRule.h`, native test `tests/magcal`.
-4d. *Firmware idea, to make this less of an ordeal:* min/max is the crudest
+4d. *Not pursued (step closed); the lever if ±20° ever proves too coarse:* min/max is the crudest
    hard-iron method and one magnetic outlier spoils a whole run. A least-squares
    sphere fit over the collected points (and a quality figure in telemetry: the
    residual, or how far |m − offset| strays from the expected ~49 µT) would both
    tolerate outliers and say whether a calibration is any good *without* a
    compass bearing. That last part is what the owner needs: no more guessing.
-4e. **Mains power as a suspect (owner, 2026-11-10).** Every measurement that day
-   ran on the 5 V charger. A cable that stays put while the owl turns is an
-   external field that the min/max mistakes for the earth's, and a varying
-   charging current changes it over time — either would explain "163 right, 206
-   wrong". **Cheapest test first, no calibration needed:** owl still, read
-   `imu.yaw`, unplug the charger, read again, plug back in. A jump of more than
-   ~2° convicts the supply. Then calibrate and take the bearings **on battery,
-   charger and cable out of reach**, all in one sitting.
-5. **Untested failure path**: the mute-sensor backoff (`specs/006` Acceptance 6)
+4e. *Closed.* **Mains power as a suspect — no visible effect.** 2026-11-11 on battery gave
+   the same ~10° once-per-turn error as 2026-11-10 on the charger. The
+   plug-in/unplug test with the owl still was not run; do it in passing if a
+   charger is ever at hand.
+4f. **DONE 2026-11-11: the stored calibration is the finished one.** Saving only
+   when the axis count rose wrote a mid-tumble state; after a reboot the owl had
+   no heading at all. Now `magShouldResave()` writes while the spans keep
+   growing (`MAG_CAL_RESAVE_GROWTH_UT`, `MAG_CAL_RESAVE_MS`). Verified: live 165°
+   → 168° after a reboot at a 166° edge.
+5. *Not pursued (step closed).* **Untested failure path**: the mute-sensor backoff (`specs/006` Acceptance 6)
    has never been exercised — it needs someone to pull SDA on a running owl and
    confirm `loop_hz` does not collapse.
 
@@ -855,7 +859,7 @@ would restart the owl.
 
 ### Step 5 — Verify navigation on hardware  `[ ]`
 
-Needs Step 3 done (a trustworthy heading) and a sky-view GPS fix.
+Needs Step 3 (closed 2026-11-11: heading ±15–25°, accepted) and a sky-view GPS fix.
 
 **GPS has never had a fix, and at the window it sees NOTHING (2026-11-10).**
 Telemetry now carries GPS diagnostics without a fix (`gps.in_view`, `tracked`,

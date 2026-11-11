@@ -134,20 +134,24 @@ one north reference (`true = magnetic + declination`). The BNO055's 75.4 was
 measured against *that* chip's remapped X axis in a different position and does
 not carry over.
 
-**Offsets are re-saved when the turn covers more axes, not once per boot.**
-Changed 2026-11-10. A level turn determines only the two horizontal offsets; the
+**Offsets are re-saved while the run keeps improving them, not once per boot.**
+Changed 2026-11-10, again 2026-11-11. A level turn determines only the two horizontal offsets; the
 z value it leaves is the midpoint of interference plus the vertical earth field
 (~45 µT here), which is invisible while the owl stands upright and costs a 40°
 heading jump at 48° roll (measured). With "save once" the better 3-axis offsets
-of a later tumble in the same run never reached flash. `Sensors` now remembers how
-many axes the last saved set had and writes again only when that number grows,
-so flash still sees at most three writes per boot. **And with offsets restored
+of a later tumble in the same run never reached flash. The first fix (re-save
+when the axis *count* grows) saved the state at the moment the third axis
+crossed its threshold — mid-tumble. Measured 2026-11-11: the live offsets at the
+end of a tumble gave four bearings within ±16°; after a reboot the stored ones
+gave **no heading at all** (horizontal field < 5 µT after subtracting them).
+Midpoints at a 60 µT span can sit up to (98−60)/2 = 19 µT from the final ones.
+Now `magShouldResave()` writes whenever an axis span has grown by
+`MAG_CAL_RESAVE_GROWTH_UT` since the last save, at most every
+`MAG_CAL_RESAVE_MS` (a tumble produced 4 writes). **And with offsets restored
 from flash, a run replaces them only once all three axes have reached
 `MAG_CAL_REPLACE_SPAN_UT`** (`lib/OwlImu/MagCalRule.h`, natively tested): before
 that, carrying the owl a quarter turn and lifting it replaced a good calibration
-with a half-done one and saved it — measured, +39°. *Known gap:* the save happens
-the moment the third axis crosses its span threshold, so the stored z can be less
-complete than the live offsets that keep improving in RAM.
+with a half-done one and saved it — measured, +39°.
 
 ## Verified facts
 
@@ -217,6 +221,26 @@ Measured 2026-09-01 on hardware, `pio run -e i2ctest` and `-e imuaxis`:
   After a thorough tumble under the new rule (all three axes ≥ 60 µT, saved):
   206° → **163**. Restoring the earlier NVS from backup: 206° → **177**. Two
   calibrations disagree with that one bearing by 29° and 43°; not resolved.
+
+* **Battery only, table-edge reference, 2026-11-11.** The edge bearing was read
+  with the iPhone on a wooden table **with the owl away**, then the owl was set
+  along the edge and turned in 90° steps by eye. Two calibrations (tumbles of
+  16 s and ~35 s), same reference:
+
+  | edge | 166 | 256 | 346 | 76 | constant | once-per-turn |
+  |---|---|---|---|---|---|---|
+  | tumble 1, live offsets | 161.4 | 271.5 | 1.5 | 94.5 | +11.2° | 10.2° |
+  | tumble 2, stored, after reboot | 167.7 | 247.4 | 331.0 | 55.2 | −10.7° | 10.3° |
+
+  Residuals after the fit ±4–6°, the size of turning by eye. The stored
+  calibration reproduced its live reading across a reboot (165 → 168). The
+  constant **flips sign between two runs** and averages ~0, so
+  `IMU_HEADING_OFFSET_DEG` was left alone: what varies is the min/max result,
+  ~3.5 µT of horizontal offset error per run (≈10° once-per-turn in a ~20 µT
+  horizontal field). **Battery vs mains made no visible difference.**
+  Then, same stored calibration, four bearings chosen at random and set by the
+  owner with the iPhone: 40/200/115/290 read 35.5/209.7/140.0/276.6 (−4.5,
+  +9.7, **+25.0**, −13.4). All eight together: RMS 14°, worst 25°.
 
 ## Falsified
 
@@ -304,12 +328,14 @@ and two of them shaped the replacement design directly.
 
 ## Open
 
-* **Heading accuracy is unproven** (Verified facts, control bearings). Suspects:
-  min/max offsets off by ~10 µT (one outlier spoils a run; the horizontal field
-  is only ~20 µT here), or the reference itself — a phone compass held beside an
-  owl full of servo magnets. Next attempt: a map-derived landmark bearing instead
-  of the phone, and a calibration quality figure from the firmware (BACKLOG
-  Step 3, 4d).
+* **Heading accuracy is about ±15–25°, ACCEPTED by the owner on 2026-11-11** —
+  calibration work is closed. Kept here as the known limit, not as a task.
+  It comes from the min/max calibration:
+  Two runs on 2026-11-11 left constants of +11° and −11° plus a 10°
+  once-per-turn error each (Verified facts). That is a few µT of offset error per
+  run in a ~20 µT horizontal field; more careful tumbling by hand is not the
+  lever. A least-squares sphere fit over the collected points, with a quality
+  figure in telemetry, is (BACKLOG Step 3, 4d).
 * **The tilted heading after a full 3-axis calibration is not yet verified.**
   After an earlier, poorer tumble the heading still moved +14° at 60° roll and
   −21° at 67° pitch. Repeat with the 2026-11-10 free-air calibration; if it stays

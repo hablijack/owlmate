@@ -34,6 +34,16 @@ int main() {
     CHECK(!magLiveOffsetsWin(none, false, MIN, REPLACE));
     CHECK(!magLiveOffsetsWin(none, true, MIN, REPLACE));
 
+    // --- re-save while the run keeps growing --------------------------------
+    const float saved[3] = {60.0f, 62.0f, 60.0f};
+    const float grown[3] = {60.5f, 75.0f, 60.0f};
+    const float barely[3] = {61.9f, 63.9f, 61.9f};
+    CHECK(magShouldResave(grown, saved, false, 0, 2.0f, 2000));      // first save of the run
+    CHECK(magShouldResave(grown, saved, true, 2000, 2.0f, 2000));    // the 2026-11-11 case
+    CHECK(!magShouldResave(grown, saved, true, 1999, 2.0f, 2000));   // rate limit
+    CHECK(!magShouldResave(barely, saved, true, 60000, 2.0f, 2000)); // no real growth
+    CHECK(!magShouldResave(saved, saved, true, 60000, 2.0f, 2000));
+
     if (failures) { printf("%d check(s) failed\n", failures); return 1; }
     printf("all checks passed\n");
     return 0;

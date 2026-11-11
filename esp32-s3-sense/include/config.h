@@ -416,13 +416,10 @@
 //         160/250/340/70 read 165.1/261.1/356.7/82.5, i.e. a constant error of
 //         +11.4 deg, residuals -6.3/-0.2/+5.3/+1.1. So 7.96 - 11.4 = -3.44,
 //         stored as 356.6 (= 4.594 declination + about -8.0 mounting).
-//    ACCURACY: UNPROVEN. A control bearing the same day was ~30 deg off
-//    (SPEC-006 Open); the +-5 below is what the four points suggested. The owl was aligned BY EYE against an
-//    iPhone compass (TRUE north) held next to it; the owner rates the
-//    alignment itself as good to "a few degrees". The four bearings are spread
-//    around the circle so that such errors average out of the constant term;
-//    the residuals are of exactly that size. Do not read the decimal as
-//    precision - it is the mean of four hand-aligned readings.
+//    ACCURACY: about +-20 deg per calibration run. 2026-11-11, battery,
+//    table-edge reference (edge read with the owl away), two runs: constants
+//    +11 and -11 (left alone - they average out) plus 10 deg once-per-turn
+//    each; SPEC-006 Verified facts. Do not read the decimal as precision.
 //
 // The BNO055's 75.4 (70.8 mounting + 4.594) belonged to a different chip in a
 // different position and does NOT carry over.
@@ -464,6 +461,13 @@
 // ~98 uT per axis (2 x 49 uT earth field); a level turn gives the horizontal
 // axes ~40 uT and the vertical one almost nothing. See lib/OwlImu/MagCalRule.h.
 #define MAG_CAL_REPLACE_SPAN_UT 60.0f
+
+// While a calibration run keeps growing, re-save it: whenever an axis span has
+// grown by MAG_CAL_RESAVE_GROWTH_UT since the last save, at most every
+// MAG_CAL_RESAVE_MS. Saving only at the threshold stored a half-done state
+// (2026-11-11: no usable heading at all after a reboot). See MagCalRule.h.
+#define MAG_CAL_RESAVE_GROWTH_UT 2.0f
+#define MAG_CAL_RESAVE_MS 2000
 
 // Consecutive implausible reads before the IMU is declared dead, and how long
 // to wait before probing WHO_AM_I again.

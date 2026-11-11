@@ -1,5 +1,6 @@
 #include "Sensors.h"
 #include "imu_config.h"
+#include <MagCalRule.h>
 #include <Adafruit_GPS.h>
 #include "i2c_lock.h"
 #include <GpsDiag.h>
@@ -66,7 +67,9 @@ static void i2cBusRecover() {
 bool Sensors::begin() {
     _imuReady = false;
     _gpsReady = false;
-    _calSavedAxes = 0;
+    _calSaved = false;
+    _calSavedSpan[0] = _calSavedSpan[1] = _calSavedSpan[2] = 0.0f;
+    _calSavedAt = 0;
 
     // Initialize I2C bus (LSM303AGR + PA1010D GPS + PCA9685 share D0/D1)
     Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
@@ -198,13 +201,22 @@ void Sensors::updateImu() {
     // die gute Kalibrierung im Flash (gemessen 2026-11-10, 39 Grad daneben).
     float x, y, z;
     if (!owlImu.getHardIron(x, y, z)) return;
-    const uint8_t axes = owlImu.read().magAxes;
-    if (axes <= _calSavedAxes) return;   // Wachposten: nur bei echtem Fortschritt ins Flash
+    // Wachposten: nur bei echtem Fortschritt ins Flash, und nicht oefter als
+    // MAG_CAL_RESAVE_MS. GEAENDERT 2026-11-11: vorher "nur wenn die Achsenzahl
+    // steigt" - das speicherte den halbfertigen Stand an der Schwelle und nie
+    // den vom Ende des Drehens (MagCalRule.h, magShouldResave).
+    float span[3];
+    owlImu.magSpan(span[0], span[1], span[2]);
+    const uint32_t now = millis();
+    if (!magShouldResave(span, _calSavedSpan, _calSaved, now - _calSavedAt,
+                         MAG_CAL_RESAVE_GROWTH_UT, MAG_CAL_RESAVE_MS)) return;
 
     float off[3] = {x, y, z};
     if (imuPrefs.begin(IMU_NVS_NS, /*readOnly=*/false)) {
         if (imuPrefs.putBytes(IMU_NVS_KEY, off, sizeof(off)) == sizeof(off)) {
-            _calSavedAxes = axes;
+            _calSaved = true;
+            _calSavedAt = now;
+            for (int i = 0; i < 3; i++) _calSavedSpan[i] = span[i];
             Serial.print(F("IMU: Kalibrierung gespeichert: "));
             Serial.print(x, 1); Serial.print(' ');
             Serial.print(y, 1); Serial.print(' ');

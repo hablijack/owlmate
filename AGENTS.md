@@ -451,8 +451,9 @@ Copying P7 across would have passed the obvious level check with a perfect 0/0 w
 tilt on the wrong axis.
 
 **`IMU_HEADING_OFFSET_DEG` is 356.6 — declination (+4.594°) plus a mounting term of about −8°,
-derived 2026-11-10 from four hand-aligned iPhone bearings, and NOT yet proven:** a later control
-bearing was off by ~30° (`specs/006` Open). Do not read the decimal as precision, and do not trust a
+derived 2026-11-10 from four hand-aligned iPhone bearings.** Two table-edge rounds on 2026-11-11
+left constants of +11° and −11° — it averages out, but each calibration run carries ~±20° of its
+own (`specs/006` Open). Do not read the decimal as precision, and do not trust a
 phone compass held beside the owl as the reference — the servos carry magnets. The declination is
 required, not cosmetic — the magnetometer measures a *magnetic* heading while `geo.bearing_deg()`
 computes a *true geographic* bearing, so both sides must share one north reference
@@ -464,7 +465,8 @@ re-measure the whole constant if the board moves.
 is wrong when the owl tilts.** A yaw rotation sweeps only the two horizontal magnetometer axes, so
 the z offset it leaves is the midpoint of interference *plus* the ~45 µT vertical earth field:
 measured 2026-11-10, a 40° heading jump at 48° roll. The firmware therefore re-saves the offsets
-whenever more axes are covered (2, then 3), not just once per boot. For a usable compass on a
+while a run keeps growing its spans (`magShouldResave()`), not just once per boot — saving at the
+moment a threshold was crossed stored a mid-tumble state that gave no heading at all after a reboot. For a usable compass on a
 shoulder, calibrate by **tumbling** the owl in free air, away from metal, the laptop **and the
 phone in your hand**. With offsets already in flash, a run only replaces them once all three axes
 have reached `MAG_CAL_REPLACE_SPAN_UT` (`lib/OwlImu/MagCalRule.h`) — before that rule, merely

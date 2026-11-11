@@ -28,6 +28,8 @@ class TestMagCalRule(unittest.TestCase):
         source = (FIRMWARE / 'lib/OwlImu/OwlImu.cpp').read_text()
         self.assertIn('magLiveOffsetsWin(', source)
         self.assertNotIn('if (axes >= 2) off = liveOff', source)
+        sensors = (FIRMWARE / 'src/Sensors.cpp').read_text()
+        self.assertIn('magShouldResave(', sensors)
 
 
 if __name__ == '__main__':

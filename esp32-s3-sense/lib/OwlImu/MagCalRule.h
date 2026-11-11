@@ -31,3 +31,25 @@ static inline bool magLiveOffsetsWin(const float span[3], bool haveStored,
     if (!haveStored) return enough >= 2;
     return full == 3;
 }
+
+// Soll der aktuelle (gewinnende) Stand ERNEUT ins Flash? Ja, sobald eine Achse
+// seit dem letzten Speichern um mindestens minGrowth gewachsen ist - aber
+// hoechstens alle minIntervalMs, damit das Drehen das Flash nicht mit jeder
+// Probe beschreibt.
+//
+// Warum: bis 2026-11-11 wurde nur gespeichert, wenn die ACHSENZAHL stieg.
+// Damit landete der Stand im Moment der Schwelle im Flash, mitten im Drehen.
+// Gemessen 2026-11-11: mit den Live-Offsets am Drehende lagen vier Stellungen
+// auf +-16 Grad, nach einem Neustart mit den gespeicherten meldete die Eule
+// gar keinen Kurs mehr (waagerechtes Feld < 5 uT) - die Mittelpunkte bei
+// 60 uT Spanne liegen bis zu (98-60)/2 = 19 uT neben denen am Ende.
+// Wachstum unter minGrowth geht verloren; das ist gewollt.
+static inline bool magShouldResave(const float span[3], const float savedSpan[3],
+                                   bool savedThisRun, uint32_t msSinceSave,
+                                   float minGrowth, uint32_t minIntervalMs) {
+    if (!savedThisRun) return true;
+    if (msSinceSave < minIntervalMs) return false;
+    for (int i = 0; i < 3; i++)
+        if (span[i] >= savedSpan[i] + minGrowth) return true;
+    return false;
+}
