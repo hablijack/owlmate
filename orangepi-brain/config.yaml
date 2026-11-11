@@ -173,6 +173,34 @@ power_button:
   poll_s: 0.05
   command: ["shutdown", "-h", "now"]
 
+# Fallback hotspot: when no known WLAN is reachable (at home: "Olymp"), the Orange Pi
+# opens its own access point so a phone can still open the control page at
+# http://<address>:8080 (web.enabled must be true). Runs as its own root service
+# (deploy/robot-owl-hotspot.service, brain/hotspot.py), like the power button.
+# The AP lives on a second, virtual interface (ap_interface); wlan0 is never touched, so
+# the Orange Pi keeps looking for the known WLAN and rejoins it on its own.
+#
+#   passphrase_file - WPA2 passphrase, root-only (0600), 8..63 characters. Deliberately NOT
+#                     in this file, which is public. No valid passphrase = no hotspot: the
+#                     control page has no login, an open AP would hand the owl to anyone.
+#   wait_s          - how long wlan0 may be without a link (association + IPv4) before the
+#                     AP opens. It closes again once wlan0 is back AND no phone is on it.
+#   channel         - only used while wlan0 is not associated; otherwise the AP must share
+#                     the client's channel (one radio).
+hotspot:
+  enabled: false
+  interface: wlan0
+  ap_interface: uap0
+  ssid: Hubert
+  passphrase_file: /etc/robot-owl/hotspot.psk
+  address: 10.42.0.1
+  dhcp_first: 10.42.0.10
+  dhcp_last: 10.42.0.50
+  channel: 6
+  country: DE
+  wait_s: 90
+  poll_s: 5
+
 # Speech recognition: the owl hears the user and reacts with one of its moods (eyes, body,
 # sound) or a navigation command. ASR runs on the OrangePi (the ICS43434 I2S mic), so the
 # ESP32 firmware is unchanged. Disabled by default: flip 'enabled: true' once the mic and

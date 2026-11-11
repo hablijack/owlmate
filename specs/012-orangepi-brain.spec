@@ -195,6 +195,22 @@ handling. (5) `main.py` turns SIGTERM into the normal shutdown path; before, `sy
 (and so any shutdown) killed the brain without its `finally`, and `BRAIN OFF` never reached
 the OLED.
 
+**Fallback hotspot (2026-11-11).** With no known WLAN (at home "Olymp") for `wait_s` (90 s),
+`brain/hotspot.py` opens a WPA2 access point "Hubert" so a phone reaches the control page at
+`http://10.42.0.1:8080`. (1) **Own root service**, `robot-owl-hotspot.service`, for the same
+reasons as the power button: creating an AP needs root, and it is the way back in exactly
+when something is wrong. (2) **The AP runs on a second, virtual interface `uap0`; `wlan0`
+is never touched.** The AIC8800 allows one managed plus one AP interface at once, so
+wpa_supplicant keeps searching for the known WLAN and the owl rejoins it on its own; the
+AP closes once `wlan0` has a link again **and** no phone is associated (counted via
+`hostapd_cli list_sta` — `iw station dump` reported 0 with an iPhone on it). While `wlan0`
+is associated the AP must use its channel (one radio). (3) **The passphrase is never in
+the repo**: `/etc/robot-owl/hotspot.psk`, root-only. The control page has no login, so an
+open AP would hand the owl, servos included, to anyone in range; with no valid passphrase
+the AP does not start. (4) DHCP only (`dnsmasq-base`, `port=0`, no gateway): the phone
+keeps its mobile data and reaches the owl on the local subnet. (5) `--test SECONDS` opens
+the AP immediately and closes it again, for a bench test without leaving the home WLAN.
+
 ## Verified facts
 
 * On 2026-10-18 a native full-process smoke test used real Flask, pyserial and
@@ -232,6 +248,12 @@ the OLED.
   the halt was clean. The journal is RAM-only on this image, so the shutdown itself cannot be
   read back afterwards; the clean mount is the evidence. Mute switch confirmed by ear by the
   owner, polarity `muted_when: open`.
+
+* **Fallback hotspot on hardware, 2026-11-11:** on `uap0` next to a live Olymp
+  connection, an iPhone saw "Hubert", associated with WPA2, got `10.42.0.40` by DHCP and
+  loaded the control page; the module counted 1 station; on close `uap0` was removed;
+  Olymp never dropped. Not yet exercised: the automatic path with Olymp genuinely
+  missing (state machine unit-tested in `tests/test_hotspot.py`, incl. mutation checks).
 
 ## Falsified
 
@@ -273,6 +295,13 @@ the OLED.
   `expressions:` block was dead configuration — and being dead did not make it
   inert, because it was also one of two copies of the expression vocabulary that
   had drifted from the firmware. Dead weight participates in duplication.
+
+* **"The hotspot can take over wlan0 itself (ifdown, AP, ifup back)."** First version,
+  2026-11-11. On the bench test the AP never appeared and wlan0 never came back: the
+  Orange Pi was unreachable until power-cycled, and the reason was lost with the
+  non-persistent journal. Replaced by the `uap0` design, which cannot lock the owl out
+  of its home WLAN. *Bench-test anything that touches the only network link with a
+  path back that does not depend on that link.*
 
 ## Acceptance
 

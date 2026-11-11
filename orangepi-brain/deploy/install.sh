@@ -13,7 +13,8 @@
 #   2. Refreshes the virtualenv + installs requirements.txt.
 #   3. Ensures the 'robotowl' user (in dialout/audio/i2c/gpio groups) exists.
 #   4. Installs the udev rules for the ESP32 USB CDC port and the GPIO chips.
-#   5. Installs + enables the systemd units (brain, power button) and restarts them.
+#   5. Installs + enables the systemd units (brain, power button, fallback hotspot)
+#      and restarts them.
 #
 # Run as root (or with sudo). Re-running is safe. For a FIRST-TIME install
 # (audio stack + config wizard + model download + reboot), run ./setup.sh.
@@ -28,6 +29,8 @@ UDEV_DEST="/etc/udev/rules.d/99-robot-owl-serial.rules"
 UNIT_DEST="/etc/systemd/system/robot-owl-brain.service"
 POWER_UNIT_SRC="${SRC_DIR}/deploy/robot-owl-power.service"
 POWER_UNIT_DEST="/etc/systemd/system/robot-owl-power.service"
+HOTSPOT_UNIT_SRC="${SRC_DIR}/deploy/robot-owl-hotspot.service"
+HOTSPOT_UNIT_DEST="/etc/systemd/system/robot-owl-hotspot.service"
 GPIO_RULE_SRC="${SRC_DIR}/deploy/99-robot-owl-gpio.rules"
 GPIO_RULE_DEST="/etc/udev/rules.d/99-robot-owl-gpio.rules"
 SERVICE_USER="robotowl"
@@ -75,12 +78,15 @@ systemctl daemon-reload
 udevadm control --reload-rules || true
 udevadm trigger --subsystem-match=gpio || true
 
-log "5/5 Installing + enabling systemd units (brain + power button)"
+log "5/5 Installing + enabling systemd units (brain + power button + hotspot)"
 install -m 0644 "${UNIT_SRC}" "${UNIT_DEST}"
 install -m 0644 "${POWER_UNIT_SRC}" "${POWER_UNIT_DEST}"
+install -m 0644 "${HOTSPOT_UNIT_SRC}" "${HOTSPOT_UNIT_DEST}"
 systemctl daemon-reload
-systemctl enable robot-owl-brain.service robot-owl-power.service
+systemctl enable robot-owl-brain.service robot-owl-power.service robot-owl-hotspot.service
 systemctl restart robot-owl-power.service || warn "power button restart failed — check 'journalctl -u robot-owl-power -f'"
+# The hotspot never touches wlan0 (it adds uap0 next to it), so restarting it over SSH is safe.
+systemctl restart robot-owl-hotspot.service || warn "hotspot restart failed — check 'journalctl -u robot-owl-hotspot -f'"
 systemctl restart robot-owl-brain.service || warn "service restart failed — check 'journalctl -u robot-owl-brain -f'"
 
 log "Done."

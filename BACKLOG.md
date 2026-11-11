@@ -293,6 +293,13 @@ Tool note: opening the owl's port (reset) sometimes leaves it silent; a read-onl
   `muted_when: open` (contact open = mute). Power button verified end to end: 2 s hold
   halts the board, OLED shows `OFF`, next boot mounts ext4 without recovery (SPEC-012
   Verified facts). Switch off: hold 2 s, wait for the LED, then the power bank.
+- **Fallback hotspot "Hubert"** deployed 2026-11-11 (`brain/hotspot.py`,
+  `robot-owl-hotspot.service` enabled, `hotspot.enabled: true` in the installed config,
+  `hostapd` masked, `dnsmasq-base`; passphrase only in `/etc/robot-owl/hotspot.psk`).
+  Bench-tested with `--test` next to Olymp: iPhone joined, got DHCP, control page at
+  `http://10.42.0.1:8080` loaded (SPEC-012). **`[ ]` Still to see once for real:** the
+  automatic path away from home — owl on, no Olymp in range, "Hubert" appears after
+  ~90 s, and back home it closes on its own once no phone is on it.
 - Speech runs on **Vosk** (`models/vosk/vosk-model-small-de-0.15`) with the name gate
   ("Hubert") and the **mood classifier** (`models/mood/`, built by `tools/train_mood.py`),
   deployed and accepted live by the owner 2026-11-04. Whisper models remain on the board
@@ -1172,7 +1179,7 @@ wrong; run the lot only after mechanical work.
 | face | hold a face in front | `face.total` climbing, state → `interacting`, eyes `happy` |
 | eye designs | `esp32-s3-sense/tools/preview_eyes.py` | all 26 expressions render, no flashing needed |
 | detection health | `tools/trefferquote.py` — **owner IN FRONT of the camera** | ~100 % hit rate at a normal seat, gaze target every ~190 ms, face >= 40 px |
-| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 303 tests pass |
+| Orange Pi brain | `cd orangepi-brain && python3 tests/run_tests.py` | 317 tests pass |
 | firmware/Orange Pi drift | `cd orangepi-brain && python3 tools/gen_expressions.py --check` | "up to date" |
 
 **Reminder for every flash**: never `firmware.factory.bin` at 0x0 — it wipes NVS

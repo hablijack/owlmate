@@ -320,7 +320,7 @@ orangepi-brain/                    # Orange Pi Zero 3W (A733) brain (Python)
 │   └── 99-robot-owl-gpio.rules    # /dev/gpiochip* to group gpio (mute switch)
 ├── tools/
 │   └── gen_expressions.py         # GENERATES brain/expressions.py from the firmware's NAMES[]
-├── tests/                         # 303 tests; run on a plain Mac, no Orange Pi or audio stack needed
+├── tests/                         # 317 tests; run on a plain Mac, no Orange Pi or audio stack needed
 │   ├── run_tests.py               # unittest discovery
 │   ├── stubs.py                   # fakes third-party modules ONLY when not importable
 │   ├── test_protocol.py           # the ESP32<->Orange Pi wire contract (51 of them)
@@ -341,6 +341,7 @@ orangepi-brain/                    # Orange Pi Zero 3W (A733) brain (Python)
     ├── gpio.py                    # Header-pin inputs via /dev/gpiochip ioctls (no package); `-m brain.gpio` is the bench check
     ├── mute_switch.py             # Slide switch PB1 -> no sound at all while in the mute position
     ├── power_button.py            # Hold PB0 2 s -> shutdown; its OWN root service, not part of the brain
+    ├── hotspot.py                 # No known WLAN for 90 s -> WPA2 AP "Hubert" on uap0; its OWN root service
     ├── web_ui.py                  # Flask control page (LAN only, no auth, disabled by default)
     ├── templates/index.html       # The web UI page (HTML/CSS/JS; not a Python string)
     ├── expressions.py             # GENERATED from NAMES[] -- do not edit by hand
@@ -593,7 +594,7 @@ python main.py [config.yaml]   # Default config path
 | **Web UI (Orange Pi)** | ✅ Complete | Flask on :8080, **disabled by default, no authentication — LAN only**. Blink/expression/servo/sound controls, live telemetry incl. IMU heading, GPS fix and magnetometer calibration state, and a map place-picker for navigation. Page lives in `brain/templates/index.html`; the `/api/telemetry` payload is derived from the parsed telemetry dataclass, so it cannot fall behind the firmware (the SoftAP password is the one field deliberately withheld) |
 | **I2S Audio (Orange Pi)** | ✅ Hardware verified | `owl` card registers on boot; audible WAV and real mic verified. Opt-in `audio.keep_playback_clock` prevents capture becoming silent after playback stops; continuity check passes. See `specs/015-orangepi-audio.spec` for measurements and permissions. |
 | **Speech (Orange Pi)** | ✅ Accepted live 2026-11-04 (on the shoulder) | German. The owl is called **Hubert** and listens only after its name. Mic → Vosk streaming ASR (~0.2 s after speech, offline) → name gate → navigation triggers → sentence-to-mood classifier (fine-tuned MiniLM, int8 ONNX, ~10 ms) → eyes + body pose + sound. whisper.cpp remains as `speech.engine: whisper`; real playback/tail blocks microphone processing and invalidates stale audio/ASR results. Ambient/TV rejection still needs acceptance. Disabled by default. See `specs/014-speech.spec` |
-| **Orange Pi test suite** | ✅ 303 tests | Runs on a plain dev machine with no Orange Pi, mic, PortAudio, Vosk, whisper.cpp, onnxruntime, Flask or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔Orange Pi wire contract (51, `test_protocol.py`) and firmware-vs-Orange Pi drift guards (11, `test_expressions.py`) |
+| **Orange Pi test suite** | ✅ 317 tests | Runs on a plain dev machine with no Orange Pi, mic, PortAudio, Vosk, whisper.cpp, onnxruntime, Flask or PyYAML — `tests/stubs.py` substitutes a module only when the real one is missing. numpy is the one hard dependency. Includes the ESP32↔Orange Pi wire contract (51, `test_protocol.py`) and firmware-vs-Orange Pi drift guards (11, `test_expressions.py`) |
 | **Hardware Assembly** | 🚧 Wiring done/ongoing | Solder links documented in `WIRING.md`; mechanical build (ears/head/wings, enclosure) pending |
 
 ---

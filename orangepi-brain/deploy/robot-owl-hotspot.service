@@ -1,0 +1,16 @@
+[Unit]
+Description=Robot Owl fallback hotspot (opens AP "Hubert" when no known WLAN is reachable)
+# Independent of robot-owl-brain.service, like the power button: switching wlan0
+# needs root, and the hotspot must work when the brain has crashed.
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/robot-owl/orangepi-brain
+ExecStart=/opt/robot-owl/orangepi-brain/.venv/bin/python -m brain.hotspot /opt/robot-owl/orangepi-brain/config.yaml
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

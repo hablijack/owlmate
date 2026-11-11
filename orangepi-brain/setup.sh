@@ -46,6 +46,9 @@ UDEV_DEST="/etc/udev/rules.d/99-robot-owl-serial.rules"
 UNIT_DEST="/etc/systemd/system/robot-owl-brain.service"
 POWER_UNIT_SRC="${SRC_DIR}/deploy/robot-owl-power.service"
 POWER_UNIT_DEST="/etc/systemd/system/robot-owl-power.service"
+HOTSPOT_UNIT_SRC="${SRC_DIR}/deploy/robot-owl-hotspot.service"
+HOTSPOT_UNIT_DEST="/etc/systemd/system/robot-owl-hotspot.service"
+HOTSPOT_PSK="/etc/robot-owl/hotspot.psk"
 GPIO_RULE_SRC="${SRC_DIR}/deploy/99-robot-owl-gpio.rules"
 GPIO_RULE_DEST="/etc/udev/rules.d/99-robot-owl-gpio.rules"
 MODULE_LOAD_CONF="/etc/modules-load.d/robot-owl-i2s.conf"
@@ -249,7 +252,11 @@ apt-get update -qq
 apt-get install -y --no-install-recommends \
     python3-venv python3-pip alsa-utils rsync portaudio19-dev \
     device-tree-compiler bc make gcc g++ cmake ninja-build pkg-config python3-dev curl \
-    libasound2-plugins
+    libasound2-plugins hostapd dnsmasq-base
+# The fallback hotspot (brain/hotspot.py) starts hostapd and dnsmasq itself, only when
+# no known WLAN is reachable. dnsmasq-base has no service of its own; hostapd's must not
+# grab wlan0 at boot, so it stays masked (Debian ships it masked; make sure).
+systemctl mask hostapd.service >/dev/null 2>&1 || true
 # DietPi's A733 headers are a versioned vendor package, not linux-headers-<uname>.
 # Match the installed image version: never silently upgrade the kernel here.
 if [ ! -d "/lib/modules/$(uname -r)/build" ]; then
@@ -438,7 +445,16 @@ chown -R "${SERVICE_USER}:" "${DEST_DIR}"
 log "Step 9/10 — installing + enabling robot-owl-brain.service"
 install -m 0644 "${UNIT_SRC}" "${UNIT_DEST}"
 install -m 0644 "${POWER_UNIT_SRC}" "${POWER_UNIT_DEST}"
+install -m 0644 "${HOTSPOT_UNIT_SRC}" "${HOTSPOT_UNIT_DEST}"
 systemctl daemon-reload
+# Like the power button, the hotspot touches no USB and no servo: enabled always, it
+# does nothing until hotspot.enabled is true. Its passphrase never goes into the repo.
+systemctl enable robot-owl-hotspot.service
+install -d -m 0700 /etc/robot-owl
+if [ ! -s "${HOTSPOT_PSK}" ]; then
+    warn "No hotspot passphrase yet. To use the fallback hotspot, write one (8..63 chars):"
+    warn "  sudo sh -c 'umask 077; printf %s \"<passphrase>\" > ${HOTSPOT_PSK}'"
+fi
 # The power button touches no USB and no servo, so it is enabled even with
 # --no-enable-service; it does nothing until power_button.enabled is true.
 systemctl enable robot-owl-power.service

@@ -177,7 +177,7 @@ taking the IMU calibration with it. Flash the pieces separately:
 ### Orange Pi brain (`orangepi-brain/`)
 
 ```bash
-python3 tests/run_tests.py             # whole suite (303 tests), unittest discovery
+python3 tests/run_tests.py             # whole suite (317 tests), unittest discovery
 python3 tests/run_tests.py -v
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation_geo          # one module
 PYTHONPATH=.:tests python3 -m unittest tests.test_navigation.ClassName.test_name   # one test
@@ -715,6 +715,10 @@ without it" rather than exiting. The idle callback runs `supervisor.check_stale(
   deliberately NOT in the brain**: `robot-owl-power.service` runs it as root, so it still shuts
   the board down when the brain has crashed — don't fold it into `main.py`. Pick the chip by
   **label** (`2000000.pinctrl`): `gpiochip1` carries the WLAN pins at the same offsets as PB0/PB1.
+- `hotspot.py` — fallback access point "Hubert" (`robot-owl-hotspot.service`, root, like the power
+  button). **It runs on a virtual `uap0` and never touches `wlan0`**: a first version that switched
+  `wlan0` itself locked the Orange Pi out of the home WLAN until a power cycle. The WPA2 passphrase
+  lives only in `/etc/robot-owl/hotspot.psk` on the board — never in `config.yaml` or the repo.
 
 **A733 audio: do not infer capture health from process exit or aggregate RMS.**
 On the installed vendor kernel, TX closing silences ongoing RX even with direct
