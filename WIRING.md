@@ -61,17 +61,11 @@ Both panels also take **VCC (red) → 3.3 V**, **GND (black) → GND** and
 
 ## 📡 Orange Pi Connection — USB via the OTG port (short cable)
 
-> **⚠️ NOT YET BUILT as of 2026-09-01.** Everything else in this file is the
-> harness as physically wired; this section is the *planned* link, documented
-> ahead of time because the pad identification was verified against Seeed's
-> schematic and netlist (see below) and is worth not re-deriving. Delete this
-> notice once the four wires exist.
->
 > **Why this link is needed at all:** the IMU sits in the owl's head, and
 > mounting it means closing the head, which makes the XIAO's USB-C connector
 > inaccessible. Without a soldered USB path there would be no serial telemetry
 > once assembled — and `tools/kalibrieren.py` needs it. (Firmware updates alone
-> would survive via OTA, 4 taps → SoftAP `RobotOwl-Update` → `/update`.)
+> would survive via OTA: the `update_mode` command → SoftAP `RobotOwl-Update` → `/update`.)
 
 The firmware runs **USB CDC** (`ARDUINO_USB_CDC_ON_BOOT=1`, `ARDUINO_USB_MODE=1`), so `Serial` maps to the chip's **native USB**. Instead of a USB-C cable, solder the XIAO's **backside D+/D−/5V/GND pads** to a short custom cable whose other end is a **Micro-USB plug** into the Orange Pi Zero 3W's **OTG port** — compact enough to embed both boards in the owl body, with no soldering on the Orange Pi side.
 
@@ -214,9 +208,11 @@ other servos. Confirm actual V+ rail voltage and connector polarity before calib
 PWM full-off does not disconnect servo power. The shared PCA9685 frequency
 must suit both servo types; pulse limits/start positions remain per-servo values.
 
-This identifies plugs, **not safe movement limits or startup positions**.
-The safety image remains locked; do not center, probe or enable these outputs
-until individual mechanical limits and an arming procedure have been verified.
+This identifies plugs, **not safe movement limits or startup positions**. The
+limits were measured per servo on 2026-10-30/31 and live in
+`include/servo_profiles.h`; the main image moves only inside them, and
+`xiao_esp32s3_locked` blocks every servo write (SPEC-016). A replaced or
+re-seated servo needs re-measuring with `servocal` before it may move.
 
 ## 🔊 Audio — MAX98357A amp + ICS43434 mic on the Orange Pi (A733 I2S0)
 
@@ -357,15 +353,20 @@ The old `gpsSerial.begin(..., 1, 2)` on the I2C pins has been removed, so GPIO 1
 2. **SCL** → D1 (branches to LSM303AGR + GPS + PCA9685)
 3. **3.3V** → all 3.3V devices (common rail)
 4. **GND** → all devices (common rail)
-5. **Vibration signal** → D3
+5. **Vibration signal** → D2
 6. **LCD SCK** → D4 (shared by both LCDs)
 7. **LCD MOSI** → D8 (shared by both LCDs)
-8. **LCD DC Left** → D5
-9. **LCD CS Left** → D9
-10. **LCD DC Right** → D10
-11. **LCD CS Right** → D7
+8. **LCD DC Left** → D10
+9. **LCD CS Left** → D7
+10. **LCD DC Right** → D3
+11. **LCD CS Right** → D9
 12. **LCD RST** → D6 (shared by both LCDs)
 13. **USB data pair** → XIAO D+/D− (backside) to the Orange Pi OTG port (Micro-USB cable)
 14. **Power to Orange Pi link** → 5V (VBUS) + GND to the Orange Pi OTG port (Micro-USB cable)
+
+> This list was a third copy of the pin map and still carried the pre-2026-08-27
+> mistakes (vibration on D3, both CS and DC lines swapped) until 2026-11-13,
+> because `tools/check_docs.py` only parses the `**D<n>**` table rows. The two
+> tables above are the ones to trust.
 
 With common power rails this collapses to ~12 signal wires plus the 4-wire native-USB link to the Orange Pi.

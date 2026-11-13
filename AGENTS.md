@@ -821,7 +821,7 @@ one of them is a bug; fix it rather than updating both.
 |---|---|---|
 | `BACKLOG.md` | **What to do next.** The only place open work lives. Top section is the dependency-ordered Step list; below it, per-subsystem history newest-first | rationale (that is `specs/`) |
 | `specs/*.spec` | **Why.** Every decision, the measurement behind it, and the **Falsified** hypotheses. The decision record | task lists, status prose |
-| `README.md` | **What this is,** for a human meeting the project: hardware tables, protocol reference, project layout, first-run checklist | open work, or duplicated rationale — it links to specs instead |
+| `README.md` | **What this is,** for a human meeting the project. Top half is the public front page (pitch, status, bill of materials with dated price estimates, "things we learned the hard way", license); below `# Developer reference`: hardware tables, protocol reference, project layout, first-run checklist | open work, or duplicated rationale — it links to specs instead |
 | `WIRING.md` | **The harness as physically built**, read at the bench with a soldering iron | anything not about wiring |
 
 `config.h` is authoritative over all four for pins and timing. A doc that contradicts it is the bug.
