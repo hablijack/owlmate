@@ -9,12 +9,12 @@ cloud, no API keys, no app.
 The code is in this repository (`owlmate`). The 3D-printed body is on
 **[Tinkercad](https://www.tinkercad.com/things/ksBVgCSVOY0-huubert-robot-companion-owl)**.
 
-![Hubert's eye expressions, rendered straight from the firmware's shape table](docs/images/eye-expressions.png)
-
-<sub>Every eye above comes from **one** parametric drawing routine, rendered
-here from the same numbers the firmware uses (`esp32-s3-sense/tools/preview_eyes.py`).
-Two colours only, on purpose: details turn to mush on a 160 px panel behind a
-small opening.</sub>
+<p align="center">
+  <img src="docs/images/hubert-alive.gif" width="300" alt="Hubert moving its ears and changing its eye expression">
+  &nbsp;
+  <img src="docs/images/hubert-front.jpg" width="300" alt="Hubert from the front: white 3D-printed owl with two glowing round LCD eyes">
+</p>
+<p align="center"><b>▶ <a href="docs/images/hubert-teaser.mp4">Watch the 40-second teaser</a></b>: from Tinkercad to a head that follows your face.</p>
 
 ---
 
@@ -42,6 +42,26 @@ small opening.</sub>
   "Hubert" so you can still reach its web control page from your phone.
 - 🛠️ **Firmware updates over the air,** a status OLED, a mute switch and a
   power button for a clean shutdown.
+
+![Hubert's eye expressions, rendered straight from the firmware's shape table](docs/images/eye-expressions.png)
+
+<sub>Every eye above comes from **one** parametric drawing routine, rendered
+here from the same numbers the firmware uses (`esp32-s3-sense/tools/preview_eyes.py`).
+Two colours only, on purpose: details turn to mush on a 160 px panel behind a
+small opening.</sub>
+
+## A look around (and inside)
+
+| | |
+|:-:|:-:|
+| ![Side view: ears, wings and the camera between the eyes](docs/images/hubert-side.jpg) | ![Back view: the Orange Pi backpack with antennas, battery level display, status OLED and power/sound switches](docs/images/hubert-backpack.jpg) |
+| **Side view.** The camera sits between the eyes, upside down. | **The backpack:** Orange Pi Zero 3W, battery, status OLED, power and mute switches. |
+| ![The head opened: servos, vibration sensor, compass and wiring](docs/images/inside-head.jpg) | ![The opened owl next to the PCA9685 servo driver](docs/images/inside-overview.jpg) |
+| **Inside the head:** XIAO ESP32-S3 Sense, ear servos, compass, knock sensor. | **Opened up**, next to the PCA9685 servo driver. |
+
+![The 3D model in Tinkercad](docs/images/tinkercad-model.jpg)
+
+<sub>The body in [Tinkercad](https://www.tinkercad.com/things/ksBVgCSVOY0-huubert-robot-companion-owl), CC BY-SA 4.0.</sub>
 
 ## Status
 

@@ -47,3 +47,6 @@ CONVENTIONS.md
 .gemini/
 .aider*
 .github/copilot-instructions.md
+
+# Raw photo/video material for docs (large, and shows people) - kept local only
+docs/images/raw/
